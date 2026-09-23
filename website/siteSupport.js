@@ -5,7 +5,7 @@
   const CONTACT_SUBJECT = '小吉服務詢問';
   // Keep the verified community invite in this one place. Leave blank until an
   // invitation has been created and checked; a blank value never renders a link.
-  const COMMUNITY_INVITE_URL = '';
+  const COMMUNITY_INVITE_URL = 'https://discord.gg/TqkCx9kYmk';
   const POLICY_SECTIONS = Object.freeze([
     {
       id: 'terms',
