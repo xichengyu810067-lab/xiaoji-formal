@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="小吉 Discord 機器人官方網站：認識小吉、查看採用伺服器數、使用概況與目前狀態。"
+    />
+    <meta name="theme-color" content="#100d1b" />
+    <meta name="xiaoji-api-base" content="https://xiaoji-public-status.xichengyu810067.workers.dev" />
+    <title>小吉｜Discord 聊天與社群助手</title>
+    <link rel="icon" href="./assets/xiaoji-hero.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要內容</a>
+
+    <header class="site-header" data-header>
+      <a class="brand" href="#top" aria-label="小吉首頁">
+        <span class="brand-mark" aria-hidden="true">吉</span>
+        <span>
+          <strong>小吉</strong>
+          <small>Discord 小管家</small>
+        </span>
+      </a>
+
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-nav-toggle>
+        <span class="sr-only">開啟選單</span>
+        <span></span><span></span><span></span>
+      </button>
+
+      <nav id="site-nav" class="site-nav" aria-label="主要導覽" data-nav>
+        <a href="#about">關於小吉</a>
+        <a href="#features">功能亮點</a>
+        <a href="#live-overview">即時概況</a>
+        <a class="nav-status" href="./status.html">
+          <span class="status-dot" data-nav-status-dot></span>
+          狀態頁
+        </a>
+        <a href="https://github.com/xichengyu810067-lab/xiaoji-formal/releases" target="_blank" rel="noopener noreferrer">公開版本資訊</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section id="top" class="hero section-shell">
+        <div class="hero-copy reveal">
+          <div class="eyebrow"><span aria-hidden="true">✦</span> 今天也由小吉陪著大家</div>
+          <h1>
+            聊天、互動、遊戲，<br />
+            <span>都交給小吉吧！</span>
+          </h1>
+          <p class="hero-lead">
+            小吉是住在 Discord 裡的聊天與社群助手。從溫柔聊天、每日活動到互動遊戲，
+            小吉陪大家把社群時光過得更自在、更可愛。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#about">認識小吉 <span aria-hidden="true">→</span></a>
+            <a class="button button-secondary" href="./status.html">查看即時狀態</a>
+          </div>
+          <p class="hero-note"><span aria-hidden="true">♡</span> 隱私優先・跨伺服器偏好・台北時間每日活動</p>
+        </div>
+
+        <div class="hero-art reveal" aria-label="小吉角色插畫">
+          <div class="sparkle sparkle-one" aria-hidden="true">✦</div>
+          <div class="sparkle sparkle-two" aria-hidden="true">♡</div>
+          <div class="portrait-frame">
+            <img
+              src="./assets/xiaoji-hero.png"
+              alt="粉紫色系的小吉少女角色插畫"
+              width="1024"
+              height="1024"
+            />
+          </div>
+          <div class="speech-card">
+            <span aria-hidden="true">૮ ˶ᵔ ᵕ ᵔ˶ ა</span>
+            <strong>小吉在線中～</strong>
+            <small>隨時準備陪大家聊天</small>
+          </div>
+        </div>
+      </section>
+
+      <section id="live-overview" class="live-strip" aria-labelledby="overview-title">
+        <div class="section-shell">
+          <div class="section-heading compact reveal">
+            <div>
+              <p class="kicker">LIVE OVERVIEW</p>
+              <h2 id="overview-title">小吉現在過得怎麼樣？</h2>
+            </div>
+            <p class="freshness" data-freshness aria-live="polite">正在取得最新資料…</p>
+          </div>
+
+          <div class="metrics-grid" data-metrics aria-live="polite">
+            <article class="metric-card reveal">
+              <span class="metric-icon lavender" aria-hidden="true">♧</span>
+              <div>
+                <p>採用伺服器</p>
+                <strong data-metric="guilds">—</strong>
+                <small>目前有小吉陪伴的社群</small>
+              </div>
+            </article>
+            <article class="metric-card reveal">
+              <span class="metric-icon pink" aria-hidden="true">↗</span>
+              <div>
+                <p>今日互動</p>
+                <strong data-metric="interactions">—</strong>
+                <small>已完成處理的公開功能互動</small>
+              </div>
+            </article>
+            <article class="metric-card reveal">
+              <span class="metric-icon mint" aria-hidden="true">✓</span>
+              <div>
+                <p>目前狀態</p>
+                <strong class="status-label" data-metric="status">讀取中</strong>
+                <small data-metric="status-detail">正在確認各項服務</small>
+              </div>
+            </article>
+          </div>
+
+          <div class="data-notice" data-data-notice hidden>
+            <span aria-hidden="true">☁</span>
+            <p><strong>即時資料暫時無法取得</strong><br />小吉不會用猜測的數字代替真實狀態，稍後再回來看看吧。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="about" class="about section-shell">
+        <div class="section-heading reveal">
+          <div>
+            <p class="kicker">MEET XIAOJI</p>
+            <h2>嗨嗨，小吉就是小吉！</h2>
+          </div>
+          <p>
+            不是冷冰冰的工具，而是一位懂得把事情做好、也願意好好陪伴大家的數位小管家。
+          </p>
+        </div>
+
+        <div class="profile-layout">
+          <article class="profile-card reveal">
+            <div class="profile-badge" aria-hidden="true">小吉</div>
+            <dl>
+              <div><dt>名字</dt><dd>小吉</dd></div>
+              <div><dt>身份</dt><dd>Discord 聊天與社群助手</dd></div>
+              <div><dt>個性</dt><dd>細心、可愛、有原則</dd></div>
+              <div><dt>時區</dt><dd>Asia/Taipei</dd></div>
+              <div><dt>喜歡</dt><dd>聊天、解謎、把社群照顧好</dd></div>
+            </dl>
+          </article>
+
+          <div class="values-grid">
+            <article class="value-card reveal">
+              <span aria-hidden="true">♡</span>
+              <h3>記得你的喜好</h3>
+              <p>對話風格與親暱模式跟著使用者，而不是綁在單一伺服器；你再次更改前，小吉都會記得。</p>
+            </article>
+            <article class="value-card reveal">
+              <span aria-hidden="true">◇</span>
+              <h3>保護你的隱私</h3>
+              <p>公開畫面只顯示彙總數據，不公開使用者 ID、伺服器名稱或私密對話內容。</p>
+            </article>
+            <article class="value-card reveal">
+              <span aria-hidden="true">✦</span>
+              <h3>每天都有新鮮事</h3>
+              <p>固定的每日猜謎與開放議題，替社群創造自然、友善又有獎勵的互動節奏。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="features">
+        <div class="section-shell">
+          <div class="section-heading reveal">
+            <div>
+              <p class="kicker">FEATURES</p>
+          <h2>一位小吉，很多種陪伴</h2>
+            </div>
+          <p>聊天、社群活動、遊戲與實用服務各自有清楚邊界；完整公開功能清冊與整體狀態，都能在狀態頁查看。</p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card feature-wide reveal">
+              <span class="feature-number">01</span>
+              <div class="feature-glyph" aria-hidden="true">☁</div>
+              <h3>有記憶的風格聊天</h3>
+              <p>六種對話風格、跨伺服器偏好，以及可自由開關的親暱模式，全部保留安全與隱私界線。</p>
+              <div class="style-chips" aria-label="可選風格">
+                <span>可愛</span><span>御姐</span><span>霸總</span><span>冰冷</span><span>傲嬌</span><span>病嬌</span>
+              </div>
+            </article>
+            <article class="feature-card reveal">
+              <span class="feature-number">02</span>
+              <div class="feature-glyph" aria-hidden="true">⌁</div>
+              <h3>台灣每日簽到與商店</h3>
+              <p>每日簽到依台灣日期計算；普通與精品商品、背包和限購會跟著你的帳號跨伺服器共用。</p>
+            </article>
+            <article class="feature-card reveal">
+              <span class="feature-number">03</span>
+              <div class="feature-glyph" aria-hidden="true">✓</div>
+              <h3>安心的社群互動</h3>
+              <p>投票、每日活動與新人歡迎各有清楚的使用限制，讓社群互動更有秩序。</p>
+            </article>
+            <article class="feature-card feature-wide reveal">
+              <span class="feature-number">04</span>
+              <div class="feature-glyph" aria-hidden="true">▦</div>
+              <h3>一起下棋與推理</h3>
+              <p>在同一個頻道開一局，和朋友下棋、推理或一起玩海龜湯；輪到誰、怎麼操作與何時結束都清楚可見。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="status-cta section-shell reveal">
+        <div>
+          <p class="kicker">TRANSPARENT BY DESIGN</p>
+          <h2>公開功能與整體狀態，都清楚說明</h2>
+          <p>功能清冊會標示實際使用方式與限制；取不到狀態資料時，小吉也不會假裝一切正常。</p>
+        </div>
+        <a class="button button-primary" href="./status.html">前往即時狀態頁 <span aria-hidden="true">→</span></a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-shell footer-inner">
+        <div class="brand footer-brand">
+          <span class="brand-mark" aria-hidden="true">吉</span>
+          <span><strong>小吉</strong><small>今天也辛苦啦～</small></span>
+        </div>
+        <p>© <span data-current-year></span> 小吉 Discord Bot</p>
+        <p class="footer-note">即時數據僅提供彙總資訊，不包含個人或伺服器識別資料。</p>
+      </div>
+    </footer>
+  </body>
+</html>

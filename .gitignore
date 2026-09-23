@@ -1,0 +1,72 @@
+node_modules/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+logs/*
+!logs/.gitkeep
+data/*
+!data/.gitkeep
+database/*
+!database/.gitkeep
+storage/*
+!storage/.gitkeep
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+*-player-script.js
+src/data/*.json
+!src/data/.gitkeep
+**/data/*
+!data/.gitkeep
+!src/data/.gitkeep
+.release-upload/
+/.release-upload.zip
+cookies.txt
+*.cookies.txt
+youtube-cookies*.txt
+.cookies/
+
+# Local browser automation state and debug output (may contain sessions).
+/.playwright/
+/.playwright-cli/
+/.tmp.driveupload/
+/playwright-debug.html
+/playwright-debug.png
+/files-tab.png
+/coverage/
+
+# Xiaoji website build caches and generated output.
+/website/dist/
+/website/.vite/
+/website/.wrangler/
+/website/.output/
+
+# Cloudflare Worker local secrets. The deployment binding values stay outside Git.
+/cloudflare/status-worker/.dev.vars
+/cloudflare/status-worker/.env
+/cloudflare/status-worker/.wrangler/
+
+# Local append-only Codex issue and authorization log.
+/question.md
+
+# Host-specific emergency maintenance helpers; keep local only.
+/scripts/auto-nyanko.js
+/scripts/auto-nyanko-debug.js
+/scripts/fix-nyanko-files.js
+/scripts/recover-nyanko.js
+
+# Lavalink independent-host runtime files.
+/deploy/lavalink/lavalink.env
+/deploy/lavalink/plugins/*
+!/deploy/lavalink/plugins/.gitkeep
+
+# Verified runtime tools downloaded on demand (never commit executables).
+/.runtime/

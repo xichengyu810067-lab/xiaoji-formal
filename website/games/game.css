@@ -1,0 +1,46 @@
+:root { --ink:#312944; --muted:#786d86; --pink:#ff78a9; --pink-deep:#df4f89; --lavender:#bda1ff; --cream:#fffaf0; --line:rgba(82,55,105,.13); --panel:rgba(255,255,255,.88); }
+* { box-sizing: border-box; }
+body { min-height:100vh; margin:0; color:var(--ink); font-family:"Noto Sans TC",sans-serif; background:radial-gradient(circle at 12% 12%,rgba(255,180,210,.5),transparent 27rem),radial-gradient(circle at 88% 20%,rgba(189,161,255,.35),transparent 25rem),#fff8fb; }
+button,input { font:inherit; } button { touch-action:manipulation; }
+.game-shell { width:min(1060px,calc(100% - 32px)); margin:0 auto; }
+.game-header { display:flex; align-items:center; justify-content:space-between; padding:18px 0; }
+.game-brand { display:inline-flex; align-items:center; gap:10px; color:inherit; text-decoration:none; }
+.brand-mark { display:grid; place-items:center; width:42px; aspect-ratio:1; border-radius:16px; color:white; font-weight:900; background:linear-gradient(135deg,var(--pink),var(--lavender)); box-shadow:0 9px 24px rgba(220,83,139,.22); }
+.game-brand span:last-child { display:grid; } .game-brand small { color:var(--muted); font-size:.72rem; }
+.back-link { color:var(--pink-deep); font-weight:700; text-decoration:none; }
+.game-layout { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:22px; align-items:start; padding:22px 0 48px; }
+.play-card,.game-sidebar { border:1px solid var(--line); border-radius:28px; background:var(--panel); box-shadow:0 22px 60px rgba(105,68,117,.12); backdrop-filter:blur(12px); }
+.play-card { min-height:660px; padding:24px; } .game-sidebar { position:sticky; top:20px; padding:22px; }
+.eyebrow { margin:0 0 8px; color:var(--pink-deep); font-size:.76rem; font-weight:900; letter-spacing:.14em; }
+h1 { margin:0; font-size:clamp(1.8rem,5vw,3.2rem); line-height:1.12; }
+.game-message { min-height:52px; margin:18px 0; padding:13px 16px; border-radius:16px; color:var(--muted); background:#f8f2fb; }
+.game-message[data-tone="success"] { color:#247456; background:#e9fff5; } .game-message[data-tone="error"] { color:#a53d65; background:#fff0f5; }
+.game-stats { display:grid; gap:12px; margin:18px 0; } .game-stat { display:flex; justify-content:space-between; gap:16px; padding-bottom:11px; border-bottom:1px solid var(--line); } .game-stat span { color:var(--muted); }
+.rules { margin-top:22px; } .rules h2 { font-size:1rem; } .rules ul { padding-left:1.2rem; color:var(--muted); line-height:1.75; }
+.privacy-note { margin-top:22px; padding:13px; border-radius:14px; color:var(--muted); font-size:.82rem; background:var(--cream); }
+.is-unavailable [data-play-area] { opacity:.28; pointer-events:none; }
+.tetris-stage { display:grid; grid-template-columns:minmax(220px,300px) minmax(170px,1fr); gap:24px; align-items:start; justify-content:center; }
+.tetris-board { width:min(100%,300px); height:auto; border:5px solid white; border-radius:16px; box-shadow:0 12px 30px rgba(45,39,71,.18); image-rendering:pixelated; }
+.tetris-tools { display:grid; gap:16px; } .preview-card,.score-strip,.control-card { padding:16px; border:1px solid var(--line); border-radius:20px; background:rgba(255,255,255,.78); }
+.preview-card p,.control-card label { display:block; margin:0 0 10px; color:var(--muted); font-weight:700; } .tetris-preview { width:104px; height:104px; border-radius:12px; }
+.score-strip { display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:center; } .score-strip span { color:var(--muted); font-size:.82rem; } .score-strip strong { display:block; margin-top:4px; font-size:1.35rem; }
+.column-control { display:grid; grid-template-columns:42px 1fr 42px; gap:8px; align-items:center; } .column-control input { width:100%; accent-color:var(--pink); }
+.icon-button,.primary-button,.number-key { border:0; border-radius:14px; cursor:pointer; font-weight:800; }
+.icon-button { min-height:42px; color:var(--ink); background:#f3eaff; } .primary-button { min-height:48px; padding:0 16px; color:white; background:linear-gradient(135deg,var(--pink),var(--pink-deep)); box-shadow:0 9px 22px rgba(223,79,137,.22); }
+.primary-button:disabled,.icon-button:disabled,.number-key:disabled { opacity:.45; cursor:wait; } .tetris-actions { display:grid; grid-template-columns:1fr 1.4fr; gap:8px; margin-top:12px; }
+.number-stage { display:grid; place-items:center; min-height:500px; } .number-board { --columns:4; display:grid; grid-template-columns:repeat(var(--columns),minmax(54px,88px)); gap:12px; justify-content:center; }
+.number-tile { aspect-ratio:1; border:2px solid transparent; border-radius:22px; color:var(--ink); font-size:clamp(1.2rem,4vw,2rem); font-weight:900; cursor:pointer; background:linear-gradient(145deg,#fff,#f5e9ff); box-shadow:0 8px 20px rgba(96,65,116,.13); }
+.number-tile.is-selected { border-color:var(--pink); transform:translateY(-3px); box-shadow:0 12px 28px rgba(223,79,137,.25); } .number-tile:disabled:empty { visibility:hidden; }
+.number-board.is-complete { display:grid; grid-template-columns:1fr; place-items:center; width:min(100%,360px); min-height:220px; }
+.completion-badge { padding:24px 34px; border:1px solid rgba(36,116,86,.2); border-radius:24px; color:#247456; font-size:clamp(1.4rem,5vw,2.1rem); font-weight:900; background:#e9fff5; box-shadow:0 16px 36px rgba(36,116,86,.12); }
+.sudoku-stage { display:grid; justify-content:center; gap:20px; padding-top:16px; } .sudoku-board { display:grid; grid-template-columns:repeat(9,1fr); width:min(100%,540px); aspect-ratio:1; border:3px solid var(--ink); background:var(--ink); gap:1px; }
+.sudoku-cell { min-width:0; border:0; color:var(--pink-deep); font-size:clamp(.9rem,3vw,1.4rem); font-weight:800; cursor:pointer; background:white; }
+.sudoku-cell:nth-child(3n) { border-right:2px solid var(--ink); } .sudoku-cell:nth-child(9n) { border-right:0; }
+.sudoku-cell:nth-child(n+19):nth-child(-n+27),.sudoku-cell:nth-child(n+46):nth-child(-n+54) { border-bottom:2px solid var(--ink); }
+.sudoku-cell.is-given { color:var(--ink); background:#fff6fa; } .sudoku-cell.is-selected { outline:4px solid var(--lavender); outline-offset:-4px; background:#f2edff; }
+.sudoku-keys { display:grid; grid-template-columns:repeat(5,minmax(48px,70px)); gap:8px; justify-content:center; } .number-key { min-height:48px; color:var(--ink); background:#f2eaff; } .number-key:last-child { grid-column:span 2; color:var(--pink-deep); }
+button:focus-visible,a:focus-visible,input:focus-visible { outline:3px solid #6f43db; outline-offset:3px; }
+@media (hover:hover) { button:not(:disabled):hover { transform:translateY(-2px); } }
+@media (max-width:760px) { .game-layout { grid-template-columns:1fr; } .game-sidebar { position:static; } .play-card { min-height:0; padding:18px; } .tetris-stage { grid-template-columns:minmax(190px,1fr) 155px; gap:12px; } }
+@media (max-width:520px) { .game-shell { width:min(100% - 20px,1060px); } .back-link { font-size:.82rem; } .tetris-stage { grid-template-columns:1fr; } .tetris-board { justify-self:center; max-height:58vh; width:auto; max-width:100%; } .tetris-tools { grid-template-columns:1fr 1fr; } .control-card { grid-column:1 / -1; } .number-board { gap:8px; grid-template-columns:repeat(var(--columns),minmax(46px,72px)); } .number-tile { border-radius:17px; } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; animation:none!important; } }

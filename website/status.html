@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="小吉 Discord 機器人即時功能狀態：正常、維護中與損壞狀況一目了然。" />
+    <meta name="theme-color" content="#100d1b" />
+    <meta name="xiaoji-api-base" content="https://xiaoji-public-status.xichengyu810067.workers.dev" />
+    <title>即時狀態｜小吉 Discord Bot</title>
+    <link rel="icon" href="./assets/xiaoji-hero.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./status.css" />
+    <script src="./statusData.js" defer></script>
+    <script src="./publicFeatureCatalog.js" defer></script>
+    <script src="./status.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要內容</a>
+
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="返回小吉首頁">
+        <span class="brand-mark" aria-hidden="true">吉</span>
+        <span><strong>小吉</strong><small>即時狀態</small></span>
+      </a>
+      <nav class="site-nav status-nav" aria-label="狀態頁導覽">
+        <a href="./index.html">回到官網</a>
+        <a class="nav-status" href="#main" aria-current="page"><span class="status-dot" data-nav-status-dot></span>狀態頁</a>
+      </nav>
+    </header>
+
+    <main id="main" class="status-main section-shell">
+      <section class="status-hero">
+        <div class="status-hero-copy">
+          <p class="kicker">REAL-TIME STATUS</p>
+          <h1>小吉現在的<br /><span>每一項狀態</span></h1>
+          <p>這裡只顯示去識別化的整體服務資訊。下方公開功能清冊不依賴即時資料；展開系統即可查看用途、使用方式與限制。</p>
+        </div>
+
+        <div class="overall-card" data-overall-card aria-live="polite">
+          <div class="overall-orbit" aria-hidden="true"><span></span></div>
+          <p>整體服務</p>
+          <strong data-overall-label>讀取中</strong>
+          <small data-overall-detail>正在向小吉確認最新狀態…</small>
+          <div class="overall-meta">
+            <span data-last-updated>尚未更新</span>
+            <span data-latency>延遲 —</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="status-summary" aria-labelledby="summary-heading">
+        <div class="summary-heading-row">
+          <div>
+            <p class="kicker">AT A GLANCE</p>
+            <h2 id="summary-heading">公開功能概況</h2>
+          </div>
+          <button class="refresh-button" type="button" data-refresh>
+            <span aria-hidden="true">↻</span> 立即更新
+          </button>
+        </div>
+        <div class="summary-grid">
+          <article><span class="summary-dot normal"></span><p>公開系統</p><strong data-summary="systems">—</strong></article>
+          <article><span class="summary-dot maintenance"></span><p>公開子功能</p><strong data-summary="features">—</strong></article>
+          <article><span class="summary-dot unknown"></span><p>逐項即時狀態</p><strong class="summary-word" data-summary="verification">未逐項驗證</strong></article>
+        </div>
+      </section>
+
+      <section class="status-unavailable" data-status-unavailable hidden aria-live="assertive">
+        <span aria-hidden="true">☁</span>
+        <div>
+          <h2>狀態資料暫時無法取得</h2>
+          <p>小吉不會把「沒有資料」當成「正常」。請稍後再更新，或等狀態服務恢復。</p>
+        </div>
+      </section>
+
+      <section class="feature-status-section" aria-labelledby="features-heading">
+        <div class="section-heading status-section-heading">
+          <div>
+            <p class="kicker">ALL SERVICES</p>
+            <h2 id="features-heading">公開功能清冊</h2>
+          </div>
+          <p data-refresh-note>每列代表一個系統，預設收合。展開後可查看子功能的用途、實際使用方式與權限限制；即時更新不會改變已展開的項目。</p>
+        </div>
+        <div class="status-groups" data-status-groups aria-live="polite" aria-busy="true"></div>
+      </section>
+
+      <aside class="status-principle">
+        <span aria-hidden="true">◇</span>
+        <div>
+          <h2>透明，不代表洩漏隱私</h2>
+          <p>狀態介面不提供伺服器名稱、頻道、成員、訊息內容或內部識別碼；使用量只有台北今日彙總。</p>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-shell footer-inner">
+        <div class="brand footer-brand">
+          <span class="brand-mark" aria-hidden="true">吉</span>
+          <span><strong>小吉</strong><small>如實回報每一個狀態</small></span>
+        </div>
+        <p>© <span data-current-year></span> 小吉 Discord Bot</p>
+        <p class="footer-note">狀態無法確認時，頁面會顯示未知而不是正常。</p>
+      </div>
+    </footer>
+  </body>
+</html>
