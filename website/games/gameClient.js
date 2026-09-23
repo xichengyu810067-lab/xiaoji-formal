@@ -208,6 +208,7 @@
     document.querySelector('[data-tetris-rotate]').addEventListener('click', async () => { tetrisRotation = (tetrisRotation + 1) % 4; if (currentSession) await renderTetris(currentSession); });
     document.querySelector('[data-tetris-drop]').addEventListener('click', () => submitAction({ type: 'lock', column: tetrisColumn, rotation: tetrisRotation }));
     document.addEventListener('keydown', (event) => {
+      if (document.body.classList.contains('support-modal-open')) return;
       if (busy || currentSession?.status !== 'active') return;
       if (event.key === 'ArrowLeft') document.querySelector('[data-tetris-left]').click();
       else if (event.key === 'ArrowRight') document.querySelector('[data-tetris-right]').click();
