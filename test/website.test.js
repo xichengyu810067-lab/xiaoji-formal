@@ -36,6 +36,46 @@ test('official website is localized, responsive, and honest when live data is un
   assert.match(html + app, /小吉不會用猜測的數字/);
 });
 
+test('public website provides local text support and no-JavaScript policy pages without exposing private operations', () => {
+  const pages = [
+    'website/index.html',
+    'website/status.html',
+    'website/games/tetris/index.html',
+    'website/games/number-match/index.html',
+    'website/games/sudoku/index.html',
+  ].map((file) => fs.readFileSync(path.join(root, file), 'utf8'));
+  const policies = fs.readFileSync(path.join(root, 'website/policies.html'), 'utf8');
+  const support = fs.readFileSync(path.join(root, 'website/siteSupport.js'), 'utf8');
+  const supportCss = fs.readFileSync(path.join(root, 'website/support.css'), 'utf8');
+  const gameClient = fs.readFileSync(path.join(root, 'website/games/gameClient.js'), 'utf8');
+
+  new vm.Script(support, { filename: 'website/siteSupport.js' });
+  assert.ok(pages.every((page) => page.includes('siteSupport.js') && page.includes('data-support-footer-links')));
+  assert.match(policies, /<link rel="canonical" href="\/policies\.html"/);
+  assert.match(policies, /id="terms"/);
+  assert.match(policies, /id="privacy"/);
+  assert.match(policies, /id="public-data"/);
+  assert.match(policies, /Google Fonts/);
+  assert.match(policies, /非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉/);
+  assert.match(policies, /不宣稱所有記憶都會在 30 天後自動刪除/);
+  assert.match(support, /COMMUNITY_INVITE_URL = ''/);
+  assert.match(support, /非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉/);
+  assert.match(support, /return `\/policies\.html#\$\{id\}`/);
+  assert.match(support, /xichengyu810067@gmail\.com/);
+  assert.match(support, /小吉服務詢問/);
+  assert.match(support, /maxLength = 500/);
+  assert.match(support, /event\.isComposing/);
+  assert.doesNotMatch(support, /innerHTML|outerHTML|insertAdjacentHTML|localStorage|sessionStorage|fetch\(/);
+  assert.match(supportCss, /support-bubble\.agent/);
+  assert.match(supportCss, /support-bubble\.user/);
+  assert.match(gameClient, /support-modal-open/);
+  assert.ok(pages.every((page) => page.includes('href="/policies.html#terms"')
+    && page.includes('href="/policies.html#privacy"')
+    && page.includes('href="/policies.html#public-data"')
+    && page.includes('mailto:xichengyu810067@gmail.com?subject=')));
+  assert.doesNotMatch(pages.join('\n') + policies + support, /菇湯集團 Discord 邀請連結待正式核實/);
+});
+
 test('official website public data contract contains no Discord identity fields', () => {
   const html = fs.readFileSync(path.join(root, 'website/index.html'), 'utf8');
   const app = fs.readFileSync(path.join(root, 'website/app.js'), 'utf8');

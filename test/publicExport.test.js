@@ -13,6 +13,9 @@ test('repository public export plan is allowlisted and excludes protected roots'
   assert.ok(files.includes('deploy/lavalink/Dockerfile'));
   assert.ok(files.includes('deploy/lavalink/compose.yml'));
   assert.ok(files.includes('website/statusData.js'));
+  assert.ok(files.includes('website/policies.html'));
+  assert.ok(files.includes('website/siteSupport.js'));
+  assert.ok(files.includes('website/support.css'));
   assert.equal(files.some((file) => /(^|\/)private\//.test(file)), false);
   assert.equal(files.some((file) => /(^|\/)(?:data|logs)\//.test(file)), false);
   assert.deepEqual(files.filter((file) => file.startsWith('deploy/')), [
