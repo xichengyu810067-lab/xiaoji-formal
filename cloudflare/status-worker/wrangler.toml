@@ -1,0 +1,23 @@
+name = "xiaoji-public-status"
+main = "src/index.mjs"
+compatibility_date = "2026-09-04"
+workers_dev = true
+
+# The D1 database is created separately by an authorized deployment operator.
+# Replace only the ID below after creation; do not put credentials in this file.
+[[d1_databases]]
+binding = "STATUS_DB"
+database_name = "xiaoji-public-status"
+database_id = "f350c91d-bffe-4123-9176-0c6dd242f1ba"
+migrations_dir = "migrations"
+
+[vars]
+# A non-secret identifier used to select the active HMAC key. Choose a new
+# opaque value for each rotation; the corresponding secret is configured in
+# Cloudflare, never in this file.
+STATUS_HMAC_CURRENT_KEY_ID = "status_20260904_cf"
+
+# Wrangler validates this deployment-time secret binding. The previous key is
+# optional during a rotation and is intentionally not listed as required.
+[secrets]
+required = ["STATUS_HMAC_CURRENT_SECRET"]
