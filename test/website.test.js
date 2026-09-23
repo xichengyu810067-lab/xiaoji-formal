@@ -58,7 +58,7 @@ test('public website provides local text support and no-JavaScript policy pages 
   assert.match(policies, /Google Fonts/);
   assert.match(policies, /非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉/);
   assert.match(policies, /不宣稱所有記憶都會在 30 天後自動刪除/);
-  assert.match(support, /COMMUNITY_INVITE_URL = ''/);
+  assert.match(support, /COMMUNITY_INVITE_URL = 'https:\/\/discord\.gg\/TqkCx9kYmk'/);
   assert.match(support, /非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉/);
   assert.match(support, /return `\/policies\.html#\$\{id\}`/);
   assert.match(support, /xichengyu810067@gmail\.com/);
