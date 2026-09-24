@@ -31,7 +31,7 @@ function makeSnapshot({ updatedAt = new Date().toISOString(), brokenKey = null }
     schemaVersion: 1,
     updatedAt,
     timezone: 'Asia/Taipei',
-    bot: { status: brokenKey ? 'degraded' : 'operational', version: '1.1.0', latencyMs: 12 },
+    bot: { status: brokenKey ? 'degraded' : 'operational', version: '1.0.0', latencyMs: 12 },
     guilds: { adoptedCount: 3 },
     usage: { date: '2026-09-04', todayInteractions: 9, available: true },
     summary: {

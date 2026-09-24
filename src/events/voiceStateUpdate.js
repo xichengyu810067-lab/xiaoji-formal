@@ -1,14 +1,15 @@
 const { Events } = require('discord.js');
-const { handleBotVoiceStateUpdate } = require('../services/musicService');
 const logger = require('../utils/logger');
+const { getClientExtensionHost } = require('../extensions/extensionHost');
 
 module.exports = {
   name: Events.VoiceStateUpdate,
   async execute(oldState, newState) {
     try {
-      await handleBotVoiceStateUpdate(oldState, newState);
+      const client = newState?.client || oldState?.client;
+      await getClientExtensionHost(client).runHook('voiceStateUpdate', { oldState, newState });
     } catch (error) {
-      logger.warn(`Music voice-state lifecycle handling failed: ${error?.message || error}`);
+      logger.warn(`Private voice-state hook failed: ${error?.message || error}`);
     }
   },
 };

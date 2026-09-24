@@ -37,6 +37,9 @@ function validateExtension(extension, sourcePath, assembly = null) {
     if (!descriptor || !path.isAbsolute(descriptor.path) || !fs.existsSync(descriptor.path)) {
       throw new Error(`Private extension command directory is invalid: ${extension.id}`);
     }
+    if (descriptor.guildIds !== undefined && !Array.isArray(descriptor.guildIds)) {
+      throw new Error(`Private extension command directory guild scope is invalid: ${extension.id}`);
+    }
     if (assembly) {
       const realDirectory = fs.realpathSync(descriptor.path);
       if (realDirectory !== assembly.extensionRoot && !realDirectory.startsWith(`${assembly.extensionRoot}${path.sep}`)) {
@@ -102,14 +105,23 @@ function createExtensionHost(extensions = []) {
   return Object.freeze({
     extensions: Object.freeze([...loadedExtensions]),
     getCommandDirectories() {
-      return loadedExtensions.flatMap((extension) =>
-        asArray(extension.commandDirectories).map((descriptor) => ({ ...descriptor, extensionId: extension.id }))
-      );
+      return loadedExtensions.flatMap((extension) => {
+        const fallbackGuildIds = uniqueStrings(extension.deployment?.guildIds);
+        return asArray(extension.commandDirectories).map((descriptor, index) => ({
+          ...descriptor,
+          extensionId: extension.id,
+          commandGroupId: String(descriptor.id || `${extension.id}:${index}`),
+          guildIds: uniqueStrings(descriptor.guildIds === undefined ? fallbackGuildIds : descriptor.guildIds),
+        }));
+      });
     },
     getDeploymentTargets() {
       return loadedExtensions.map((extension) => ({
         extensionId: extension.id,
-        guildIds: uniqueStrings(extension.deployment?.guildIds),
+        guildIds: uniqueStrings([
+          ...uniqueStrings(extension.deployment?.guildIds),
+          ...asArray(extension.commandDirectories).flatMap((descriptor) => uniqueStrings(descriptor.guildIds)),
+        ]),
         cleanupGuildIds: uniqueStrings(extension.deployment?.cleanupGuildIds),
       }));
     },

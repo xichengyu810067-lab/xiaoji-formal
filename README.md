@@ -30,7 +30,6 @@ Discord Developer Portal 需開啟 Server Members Intent 與 Message Content Int
 - 社群：`/word-chain`、`/number-chain`、`/daily-riddle`、`/daily-discussion`
 - 吉幣與商店：`/coins`、`/daily`、`/leaderboard`、`/shop`、`/buy`、`/inventory`。每日簽到依台灣日期計算，每人每天一次；普通與精品商品、背包和限購會跟著帳號跨伺服器共用。
 - 遊戲：`/board start/join/leave/status/stop` 可在同一頻道建立棋盤或推理遊戲；`/games play` 仍保留俄羅斯方塊、數字配對與數獨的既有入口。
-- 音樂：`/music` 僅限小吉擁有者使用，不是一般點歌功能。
 - 公開版本資訊：請由 [GitHub 上 `xiaoji-formal` 的 Release 頁](https://github.com/xichengyu810067-lab/xiaoji-formal/releases)閱讀。
 
 完整的玩家功能、玩法與限制會列在官網狀態頁的公開功能清冊。

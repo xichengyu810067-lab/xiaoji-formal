@@ -1,6 +1,6 @@
 {
   "name": "xiaoji-discord-bot",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "小吉 Discord slash command bot built with discord.js.",
   "main": "src/index.js",
   "type": "commonjs",
@@ -20,18 +20,11 @@
     "games:preview": "node scripts/preview-games.js"
   },
   "dependencies": {
-    "@discordjs/voice": "^0.19.2",
-    "@distube/ytdl-core": "^4.16.12",
     "@resvg/resvg-js": "2.6.2",
     "chess.js": "1.4.0",
     "discord.js": "^14.27.0",
     "dotenv": "^17.4.2",
-    "ffmpeg-static": "^5.3.0",
-    "kazagumo": "^3.4.3",
     "openai": "^6.36.0",
-    "shoukaku": "^4.3.0",
-    "sql.js": "^1.14.1",
-    "typescript": "5.9.3",
-    "youtubei.js": "18.0.0"
+    "sql.js": "^1.14.1"
   }
 }

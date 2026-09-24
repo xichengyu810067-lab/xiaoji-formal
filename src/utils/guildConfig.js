@@ -9,9 +9,6 @@ const defaultGuildConfig = {
   memory: {
     sharePublicAcrossChannels: false,
   },
-  music: {
-    stayInVoice: null,
-  },
   extensions: {},
 };
 
@@ -55,7 +52,6 @@ function normalizeGuildConfig(config) {
     ? String(normalized.weatherDefaultCity).trim().slice(0, 100)
     : null;
   normalized.memory.sharePublicAcrossChannels = Boolean(normalized.memory.sharePublicAcrossChannels);
-  normalized.music.stayInVoice = typeof normalized.music.stayInVoice === 'boolean' ? normalized.music.stayInVoice : null;
   normalized.extensions = isPlainObject(normalized.extensions) ? normalized.extensions : {};
 
   return normalized;
@@ -125,13 +121,6 @@ function setGuildWelcomeChannel(guildId, welcomeChannelId) {
   });
 }
 
-function setMusicStayInVoice(guildId, enabled) {
-  return updateGuildConfig(guildId, (config) => {
-    config.music.stayInVoice = Boolean(enabled);
-    return config;
-  });
-}
-
 function setWeatherDefaultCity(guildId, city) {
   return updateGuildConfig(guildId, (config) => {
     const normalizedCity = String(city || '').trim();
@@ -147,7 +136,6 @@ module.exports = {
   readAllGuildConfig,
   setGuildConfig,
   setGuildWelcomeChannel,
-  setMusicStayInVoice,
   setWeatherDefaultCity,
   updateGuildConfig,
   writeAllGuildConfig,

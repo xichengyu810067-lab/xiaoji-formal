@@ -61,22 +61,6 @@
       ],
     },
     {
-      name: '音樂播放',
-      features: [
-        { name: '加入語音頻道', purpose: '測試小吉是否能加入使用者所在的語音頻道。', howTo: '使用 /music join。', limitation: '僅限機器人擁有者使用，且需要 Discord 語音權限。' },
-        { name: '固定測試音', purpose: '檢查語音播放器、音訊轉換與播放環境。', howTo: '使用 /music test。', limitation: '僅限機器人擁有者使用；屬診斷功能。' },
-        { name: '播放歌曲', purpose: '播放 YouTube 影片或搜尋歌曲。', howTo: '使用 /music play。', limitation: '僅限機器人擁有者使用，且需要音樂來源與語音權限。' },
-        { name: '播放佇列', purpose: '查看目前播放佇列。', howTo: '使用 /music queue。', limitation: '僅限機器人擁有者使用。' },
-        { name: '音樂節點狀態', purpose: '查看音樂節點診斷狀態。', howTo: '使用 /music status。', limitation: '僅限機器人擁有者使用；屬診斷功能。' },
-        { name: '閒置留在語音頻道', purpose: '設定小吉閒置時是否留在語音頻道。', howTo: '使用 /music stay。', limitation: '僅限機器人擁有者使用；設定作用於指定伺服器。' },
-        { name: '跳過歌曲', purpose: '跳過目前播放的歌曲。', howTo: '使用 /music skip。', limitation: '僅限機器人擁有者使用。' },
-        { name: '暫停播放', purpose: '暫停目前播放。', howTo: '使用 /music pause。', limitation: '僅限機器人擁有者使用。' },
-        { name: '繼續播放', purpose: '繼續目前暫停的播放。', howTo: '使用 /music resume。', limitation: '僅限機器人擁有者使用。' },
-        { name: '停止播放', purpose: '停止播放並清空佇列。', howTo: '使用 /music stop。', limitation: '僅限機器人擁有者使用。' },
-        { name: '離開語音頻道', purpose: '讓小吉離開目前語音頻道。', howTo: '使用 /music leave。', limitation: '僅限機器人擁有者使用。' },
-      ],
-    },
-    {
       name: '既有網頁遊戲',
       features: [
         { name: '俄羅斯方塊', purpose: '透過一次性安全連結遊玩，並由伺服器驗證行動與獎勵。', howTo: '使用 /games play game:tetris。', limitation: '一般使用者可用；需網站、遊戲設定與健康狀態。' },

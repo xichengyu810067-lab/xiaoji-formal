@@ -43,6 +43,25 @@ function loadCommands(commandsPath, { extensionHost = createExtensionHost() } = 
   return commands;
 }
 
+function loadPrivateCommandGroups(extensionHost = createExtensionHost()) {
+  const commandOwners = new Map();
+  return extensionHost.getCommandDirectories().map((descriptor) => {
+    const commands = serializeCommandDirectory(descriptor.path, descriptor.transformCommandData);
+    for (const command of commands) {
+      if (commandOwners.has(command.name)) {
+        throw new Error(`Duplicate private slash command name: ${command.name}`);
+      }
+      commandOwners.set(command.name, descriptor.commandGroupId);
+    }
+    return Object.freeze({
+      extensionId: descriptor.extensionId,
+      commandGroupId: descriptor.commandGroupId,
+      guildIds: Object.freeze([...(descriptor.guildIds || [])]),
+      commands: Object.freeze(commands),
+    });
+  });
+}
+
 function serializeCommandDirectory(commandsPath, transformCommandData = (value) => value) {
   return getCommandFiles(commandsPath).map((filePath) => {
     const command = loadCommandModule(filePath);
@@ -55,9 +74,7 @@ function loadCommandData(commandsPath, { scope = 'public', extensionHost = creat
     return serializeCommandDirectory(commandsPath || path.join(__dirname, 'commands'));
   }
   if (scope === 'private') {
-    return extensionHost.getCommandDirectories().flatMap((descriptor) =>
-      serializeCommandDirectory(descriptor.path, descriptor.transformCommandData)
-    );
+    return loadPrivateCommandGroups(extensionHost).flatMap((group) => group.commands);
   }
   if (scope === 'all') {
     return [
@@ -73,4 +90,5 @@ module.exports = {
   loadCommandData,
   loadCommandModule,
   loadCommands,
+  loadPrivateCommandGroups,
 };

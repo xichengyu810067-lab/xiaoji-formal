@@ -170,7 +170,6 @@ test('Groq uses the fixed GPT OSS 120B chat completions contract', () => {
     assert.equal(request.temperature, 0.8);
     assert.deepEqual(request.messages.map((message) => message.role), ['system', 'user']);
     assert.match(request.messages[0].content, /明確開啟文字戀愛模式/);
-    assert.doesNotMatch(developerInstructions, /\/music(?:\b|,)/);
   } finally {
     if (previousModel === undefined) delete process.env.GROQ_MODEL;
     else process.env.GROQ_MODEL = previousModel;
