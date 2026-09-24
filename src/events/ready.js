@@ -14,7 +14,6 @@ const { startPublicStatusServer } = require('../services/publicStatusServer');
 const { startStatusSnapshotPublisher } = require('../services/statusSnapshotPublisher');
 const { startGameServer } = require('../services/gameServer');
 const { resumePendingGameRewards } = require('../services/gameService');
-const { initializeLavalink } = require('../services/lavalinkService');
 const {
   clearExpiredConversationHistory,
   startConversationHistoryCleanupScheduler,
@@ -48,7 +47,6 @@ module.exports = {
     logger.info(`小吉已登入：${client.user.tag}`);
     logger.info(`已載入 ${client.commands.size} 個 slash commands。`);
     
-    await runStartupTask('Lavalink 初始化', () => initializeLavalink(client));
     await runStartupTask('AI 對話記憶過期清理', () => clearExpiredConversationHistory());
     await runStartupTask('AI 對話記憶清理排程啟動', () => startConversationHistoryCleanupScheduler());
     await runStartupTask('吉幣系統資料庫載入', () => initializeCoinDatabase());

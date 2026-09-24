@@ -68,6 +68,7 @@ function walkJavaScriptFiles(deploymentRoot, relativeRoot) {
       const absolutePath = path.join(directory, entry.name);
       if (entry.isSymbolicLink()) throw new Error(`Assembly source must not be a symbolic link: ${relativePath}`);
       if (entry.isDirectory()) {
+        if (entry.name === 'node_modules') continue;
         walk(absolutePath, relativePath);
       } else if (entry.isFile() && entry.name.endsWith('.js')) {
         files.push(normalizeRelativePath(relativePath));
@@ -162,7 +163,11 @@ function normalizeFileRecords(records, label) {
     const sha256 = String(record?.sha256 || '').toLowerCase();
     if (!SHA256_PATTERN.test(sha256)) throw new Error(`Assembly ${label} source hash is invalid: ${relativePath}`);
     return { path: relativePath, sha256 };
-  }).sort((left, right) => left.path.localeCompare(right.path));
+  }).sort((left, right) => {
+    if (left.path < right.path) return -1;
+    if (left.path > right.path) return 1;
+    return 0;
+  });
   if (new Set(normalized.map((record) => record.path)).size !== normalized.length) {
     throw new Error(`Assembly ${label} source list contains duplicates.`);
   }

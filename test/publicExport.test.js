@@ -9,22 +9,13 @@ test('repository public export plan is allowlisted and excludes protected roots'
   const files = buildPublicExportPlan();
   assert.ok(files.includes('src/index.js'));
   assert.ok(files.includes('src/games/discord/boardDiscordRuntime.js'));
-  assert.ok(files.includes('deploy/lavalink/application.yml'));
-  assert.ok(files.includes('deploy/lavalink/Dockerfile'));
-  assert.ok(files.includes('deploy/lavalink/compose.yml'));
   assert.ok(files.includes('website/statusData.js'));
   assert.ok(files.includes('website/policies.html'));
   assert.ok(files.includes('website/siteSupport.js'));
   assert.ok(files.includes('website/support.css'));
   assert.equal(files.some((file) => /(^|\/)private\//.test(file)), false);
   assert.equal(files.some((file) => /(^|\/)(?:data|logs)\//.test(file)), false);
-  assert.deepEqual(files.filter((file) => file.startsWith('deploy/')), [
-    'deploy/lavalink/.dockerignore',
-    'deploy/lavalink/Dockerfile',
-    'deploy/lavalink/application.yml',
-    'deploy/lavalink/compose.yml',
-    'deploy/lavalink/lavalink.env.example',
-  ]);
+  assert.deepEqual(files.filter((file) => file.startsWith('deploy/')), []);
   assert.equal(files.some((file) => /(^|\/)\.env(?:\.|$)/.test(file) && file !== '.env.example'), false);
 });
 
@@ -44,6 +35,7 @@ test('actual public export can load board commands and runtime dependencies', ()
     assert.equal(typeof runtimeModule.createBoardDiscordRuntime, 'function');
 
     const packageJson = JSON.parse(fs.readFileSync(path.join(outputPath, 'package.json'), 'utf8'));
+    assert.equal(packageJson.version, '1.0.0');
     for (const scriptName of ['smoke:login', 'prod:check', 'pm2:start', 'pm2:restart', 'pm2:status', 'pm2:logs']) {
       assert.equal(packageJson.scripts[scriptName], undefined);
     }
@@ -80,20 +72,14 @@ test('board storage export exception permits source only and rejects database ar
   }
 });
 
-test('Lavalink public export permits only reviewed template files', () => {
-  for (const relativePath of [
-    'deploy/lavalink/.dockerignore',
-    'deploy/lavalink/application.yml',
-    'deploy/lavalink/compose.yml',
-    'deploy/lavalink/Dockerfile',
-    'deploy/lavalink/lavalink.env.example',
-  ]) {
-    assert.equal(assertAllowedPath(relativePath), relativePath);
-  }
+test('public export rejects deployment and private runtime paths', () => {
   for (const rejected of [
-    'deploy/lavalink/lavalink.env',
-    'deploy/lavalink/plugins/private.jar',
+    'deploy/internal/.dockerignore',
+    'deploy/internal/application.yml',
+    'deploy/internal/runtime.env',
+    'deploy/internal/plugins/private.jar',
     'deploy/production.json',
+    'private/internal/index.js',
   ]) {
     assert.throws(() => assertAllowedPath(rejected), /protected path/);
   }

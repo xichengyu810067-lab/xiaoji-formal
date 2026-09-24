@@ -3,13 +3,6 @@ const path = require('node:path');
 
 const DEFAULT_MANIFEST_PATH = path.join(__dirname, '..', 'public-export', 'manifest.json');
 const FORBIDDEN_SEGMENTS = new Set(['.git', 'data', 'database', 'deploy', 'logs', 'private', 'storage']);
-const SAFE_PUBLIC_DEPLOY_FILES = new Set([
-  'deploy/lavalink/.dockerignore',
-  'deploy/lavalink/application.yml',
-  'deploy/lavalink/compose.yml',
-  'deploy/lavalink/Dockerfile',
-  'deploy/lavalink/lavalink.env.example',
-]);
 const FORBIDDEN_FILE_NAMES = new Set([
   '.env',
   'ecosystem.config.cjs',
@@ -35,10 +28,8 @@ function assertAllowedPath(relativePath) {
   const normalized = normalizeRelativePath(relativePath);
   const parts = normalized.split('/');
   const isBoardStorageSource = normalized.startsWith('src/games/storage/') && normalized.endsWith('.js');
-  const isSafePublicDeployFile = SAFE_PUBLIC_DEPLOY_FILES.has(normalized);
   if (parts.some((part) => FORBIDDEN_SEGMENTS.has(part.toLowerCase()) &&
-      !(isBoardStorageSource && part.toLowerCase() === 'storage') &&
-      !(isSafePublicDeployFile && part.toLowerCase() === 'deploy'))) {
+      !(isBoardStorageSource && part.toLowerCase() === 'storage'))) {
     throw new Error(`Public export refuses protected path: ${normalized}`);
   }
   const baseName = parts.at(-1).toLowerCase();

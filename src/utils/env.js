@@ -22,10 +22,6 @@ function getDiscordClientId() {
   return getFirstEnv(['DISCORD_CLIENT_ID', 'CLIENT_ID']);
 }
 
-function getDiscordGuildId() {
-  return getFirstEnv(['DISCORD_GUILD_ID', 'GUILD_ID']);
-}
-
 function getBotOwnerId() {
   return getFirstEnv(['BOT_OWNER_ID', 'OWNER_ID']);
 }
@@ -42,7 +38,6 @@ function requireEnvValue(label, value, aliases = []) {
 module.exports = {
   getBotOwnerId,
   getDiscordClientId,
-  getDiscordGuildId,
   getDiscordToken,
   getEnv,
   getFirstEnv,

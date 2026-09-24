@@ -3,9 +3,6 @@
 
   const CONTACT_EMAIL = 'xichengyu810067@gmail.com';
   const CONTACT_SUBJECT = '小吉服務詢問';
-  // Keep the verified community invite in this one place. Leave blank until an
-  // invitation has been created and checked; a blank value never renders a link.
-  const COMMUNITY_INVITE_URL = 'https://discord.gg/TqkCx9kYmk';
   const POLICY_SECTIONS = Object.freeze([
     {
       id: 'terms',
@@ -42,20 +39,22 @@
   ]);
 
   const FAQS = Object.freeze([
-    { title: '如何邀請小吉？', keywords: ['邀請', 'bot', '機器人'], answer: '目前沒有可核實的 Bot 邀請連結，因此不提供未驗證的 OAuth 入口。請寄信說明想使用的伺服器與需求，小吉團隊會回覆可用方式。' },
-    { title: '人工使用授權是什麼？', keywords: ['授權', '人工', '使用'], answer: '部分功能的可用性取決於服務設定與 Discord 權限。需要人工協助確認使用資格時，請用「小吉服務詢問」寄信，勿附上聊天內容、網址片段或任何權杖。' },
-    { title: 'AI 為什麼沒有回覆？', keywords: ['ai', '聊天', '429', '額度', '限制'], answer: 'AI 回覆受服務狀態與速率限制影響，並不保證每次都可用。遇到 429 或額度限制時，小吉會回覆「小吉有點累了，請稍後再跟我聊天」。' },
-    { title: '功能無法使用怎麼辦？', keywords: ['無法', '壞', '錯誤', '不能', '狀態'], answer: '先確認你在可使用的 Discord 伺服器、具備該功能需要的權限，並查看狀態頁是否顯示未知或異常。仍無法使用時，可寄信描述時間、功能名稱與不含敏感資料的錯誤摘要。' },
-    { title: '如何詢問或刪除個人資料？', keywords: ['隱私', '刪除', '資料', '記憶'], answer: '個人記憶僅供本人查詢；若要詢問資料或要求刪除，請使用下方 Email 聯繫。請勿直接貼出私人對話、密碼、權杖或其他敏感資訊。' },
-    { title: '如何領取或取消關注？', keywords: ['領取', '取消', '關注', '訂閱'], answer: '官網目前沒有追蹤或訂閱功能，因此沒有需要取消的網站關注。吉幣、每日簽到或定存等功能請在 Discord 依對應指令操作；不確定時可使用 Email 詢問。' },
-    { title: '其他問題', keywords: [], answer: '這個文字客服只提供本機自助說明，不會連線到 AI 或後端，也不會保存你的輸入。若問題尚未解決，請使用下方 Email 聯繫。' },
+    { title: '如何邀請小吉？', keywords: ['邀請', 'bot', '機器人'], answer: '加入菇湯集團社群與邀請 Bot 到其他伺服器是不同流程。目前沒有公開的 Bot OAuth 入口。', needsGmail: true },
+    { title: '人工使用授權是什麼？', keywords: ['授權', '人工', '使用'], answer: '部分功能取決於服務設定與 Discord 權限；需要人工確認使用資格時，請提供最少的必要資訊。', needsGmail: true },
+    { title: 'AI 為什麼沒有回覆？', keywords: ['ai', '聊天', '429', '額度', '限制'], answer: 'AI 回覆可能受服務狀態、速率或額度限制影響。遇到 429 或額度限制時，小吉會回覆「小吉有點累了，請稍後再跟我聊天」。' },
+    { title: '功能無法使用怎麼辦？', keywords: ['無法', '壞', '錯誤', '不能', '狀態'], answer: '請先確認所在伺服器可使用小吉、具備該功能所需權限，並查看狀態頁是否顯示未知或異常。', needsGmail: true },
+    { title: '如何詢問或刪除個人資料？', keywords: ['隱私', '刪除', '資料', '記憶'], answer: '個人記憶僅供本人查詢。若要詢問資料、要求刪除或回報隱私疑慮，請使用 Gmail 聯繫。', needsGmail: true },
+    { title: '如何領取或取消關注？', keywords: ['領取', '取消', '關注', '訂閱'], answer: '官網沒有追蹤或訂閱功能，因此沒有需要取消的網站關注；Discord 功能請依對應指令操作。' },
+    { title: '其他問題', keywords: [], answer: '這個頁面只提供本機自助說明，無法判定你的問題。', needsGmail: true },
   ]);
 
   let modal;
   let modalBody;
   let modalTitle;
   let lastOpener = null;
-  let supportView = 'support';
+  let activeConversation = null;
+  let supportStarted = false;
+  const supportHistory = [];
 
   function make(tag, className, text) {
     const node = document.createElement(tag);
@@ -64,43 +63,60 @@
     return node;
   }
 
-  function policyUrl(id) {
-    return `/policies.html#${id}`;
-  }
-
-  function makeContactLinks(className = '') {
-    const group = make('div', className);
-    const gmail = make('a', 'support-contact-link', '用 Gmail 撰寫');
+  function makeGmailLink() {
+    const gmail = make('a', 'support-inline-gmail', '用 Gmail 聯繫');
     gmail.href = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(CONTACT_EMAIL)}&su=${encodeURIComponent(CONTACT_SUBJECT)}`;
     gmail.target = '_blank';
     gmail.rel = 'noopener noreferrer';
-    const mailto = make('a', 'support-contact-link', '使用預設信箱');
-    mailto.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(CONTACT_SUBJECT)}`;
-    const copy = make('button', 'support-contact-link', '複製 Email');
-    copy.type = 'button';
-    copy.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(CONTACT_EMAIL);
-        copy.textContent = '已複製 Email';
-      } catch {
-        copy.textContent = CONTACT_EMAIL;
-      }
+    return gmail;
+  }
+
+  function makeFooterIcon(href, label, imageSource) {
+    const link = make('a', 'footer-icon-button');
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.setAttribute('aria-label', label);
+    const image = document.createElement('img');
+    image.src = imageSource;
+    image.alt = '';
+    image.width = 24;
+    image.height = 24;
+    link.append(image);
+    return link;
+  }
+
+  function refreshFooterLinks() {
+    document.querySelectorAll('[data-support-footer-links]').forEach((container) => {
+      const terms = make('a', '', '使用者政策');
+      terms.href = '/policies.html#terms';
+      const privacy = make('a', '', '隱私權政策');
+      privacy.href = '/policies.html#privacy';
+      const publicData = make('a', '', '公開資料聲明');
+      publicData.href = '/policies.html#public-data';
+      const discord = makeFooterIcon(
+        'https://discord.gg/TqkCx9kYmk',
+        '加入菇湯集團 Discord',
+        'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/66e3d718355f9c89eb0fd350_Logo.svg',
+      );
+      const gmail = makeFooterIcon(
+        `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(CONTACT_EMAIL)}&su=${encodeURIComponent(CONTACT_SUBJECT)}`,
+        '用 Gmail 撰寫小吉服務詢問',
+        'https://www.gstatic.com/marketing-cms/assets/images/60/db/3a25579a4b0d87c2a1bfa95c609d/gmail.webp=s80-fcrop64=1,00000000ffffffff-rw',
+      );
+      container.replaceChildren(terms, privacy, publicData, discord, gmail);
     });
-    group.append(gmail, mailto, copy);
-    return group;
   }
 
   function buildPolicyContent(section) {
     const fragment = document.createDocumentFragment();
-    const updated = make('p', 'policy-updated', '最後更新：2026 年 9 月 23 日');
-    fragment.append(updated);
+    fragment.append(make('p', 'policy-updated', '最後更新：2026 年 9 月 23 日'));
     section.blocks.forEach(([heading, text]) => {
       const block = make('section', 'policy-block');
       block.append(make('h3', '', heading), make('p', '', text));
       fragment.append(block);
     });
-    const contact = make('p', 'policy-contact', `聯繫方式：${CONTACT_EMAIL}（主旨：${CONTACT_SUBJECT}）`);
-    fragment.append(contact);
+    fragment.append(make('p', 'policy-contact', `聯繫方式：${CONTACT_EMAIL}（主旨：${CONTACT_SUBJECT}）`));
     return fragment;
   }
 
@@ -118,77 +134,90 @@
 
   function renderPolicy(sectionId) {
     const section = POLICY_SECTIONS.find((item) => item.id === sectionId) || POLICY_SECTIONS[0];
-    supportView = 'policy';
     modalTitle.textContent = section.title;
     modalBody.replaceChildren();
-    const lead = make('p', 'support-lead', section.summary);
+    const lead = make('p', 'support-policy-lead', section.summary);
     const policy = make('div', 'policy-modal-content');
     policy.append(buildPolicyContent(section));
-    const back = make('button', 'support-secondary-button', '返回文字客服');
+    const back = make('button', 'support-secondary-button', '返回小吉自助客服');
     back.type = 'button';
     back.addEventListener('click', renderSupport);
     modalBody.append(lead, policy, back);
     focusModal();
   }
 
-  function appendBubble(conversation, side, text) {
-    const bubble = make('p', `support-bubble ${side}`, text);
+  function renderMessage(conversation, entry) {
+    const bubble = make('div', `support-bubble ${entry.side}`);
+    bubble.append(make('p', '', entry.text));
+    if (entry.needsGmail) bubble.append(makeGmailLink());
     conversation.append(bubble);
     conversation.scrollTop = conversation.scrollHeight;
   }
 
-  function matchingFaqs(value) {
+  function appendHistory(side, text, needsGmail = false) {
+    const entry = { side, text, needsGmail };
+    supportHistory.push(entry);
+    if (activeConversation) renderMessage(activeConversation, entry);
+  }
+
+  function beginSupportConversation() {
+    if (supportStarted) return;
+    supportStarted = true;
+    activeConversation?.querySelector('.support-intro')?.remove();
+  }
+
+  function matchingFaq(value) {
     const normalized = value.toLowerCase();
-    const matches = FAQS.filter((faq) => faq.keywords.some((keyword) => normalized.includes(keyword)));
-    return matches.length ? matches.slice(0, 3) : [FAQS.at(-1)];
+    return FAQS.find((faq) => faq.keywords.some((keyword) => normalized.includes(keyword))) || FAQS.at(-1);
+  }
+
+  function answerFaq(faq) {
+    beginSupportConversation();
+    appendHistory('user', faq.title);
+    appendHistory('agent', faq.answer, Boolean(faq.needsGmail));
+  }
+
+  function createIntro() {
+    const intro = make('div', 'support-bubble agent support-intro');
+    intro.append(make('p', '', '你好，我是小吉的自助客服。想先了解哪一件事呢？'));
+    const options = make('div', 'support-faq-options');
+    FAQS.forEach((faq) => {
+      const button = make('button', 'support-faq-button', faq.title);
+      button.type = 'button';
+      button.addEventListener('click', () => answerFaq(faq));
+      options.append(button);
+    });
+    intro.append(options);
+    return intro;
   }
 
   function renderSupport() {
-    supportView = 'support';
-    modalTitle.textContent = '文字客服';
+    modalTitle.textContent = '小吉自助客服';
     modalBody.replaceChildren();
-    const selfService = make('p', 'support-self-service', '自助說明｜不連線到 AI 或後端，也不保存輸入內容');
-    const lead = make('p', 'support-lead', '選擇常見問題，或輸入最多 500 字的文字查詢。未解決的問題可用 Email 聯繫。');
-    const quick = make('div', 'support-quick-questions');
     const conversation = make('div', 'support-conversation');
     conversation.setAttribute('aria-live', 'polite');
-    appendBubble(conversation, 'agent', '你好，我是小吉的自助文字客服。想先了解哪一件事呢？');
-    FAQS.slice(0, -1).forEach((faq) => {
-      const button = make('button', 'support-faq-button', faq.title);
-      button.type = 'button';
-      button.addEventListener('click', () => {
-        appendBubble(conversation, 'user', faq.title);
-        appendBubble(conversation, 'agent', faq.answer);
-      });
-      quick.append(button);
-    });
+    activeConversation = conversation;
+    if (!supportStarted) conversation.append(createIntro());
+    supportHistory.forEach((entry) => renderMessage(conversation, entry));
+
     const form = make('form', 'support-form');
     const input = make('textarea', 'support-input');
     input.name = 'support-query';
     input.maxLength = 500;
     input.rows = 3;
     input.placeholder = '輸入你的問題（最多 500 字）';
-    input.setAttribute('aria-label', '文字客服查詢');
+    input.setAttribute('aria-label', '小吉自助客服查詢');
     const send = make('button', 'support-send-button', '送出');
     send.type = 'submit';
     form.append(input, send);
+
     const submitQuery = () => {
       const value = input.value.trim();
       if (!value) return;
-      appendBubble(conversation, 'user', value);
-      const matches = matchingFaqs(value);
-      appendBubble(conversation, 'agent', matches[0].answer);
-      if (matches.length > 1) {
-        const choices = make('div', 'support-suggestions');
-        choices.append(make('span', '', '你也可能想知道：'));
-        matches.slice(1).forEach((faq) => {
-          const button = make('button', 'support-faq-button', faq.title);
-          button.type = 'button';
-          button.addEventListener('click', () => appendBubble(conversation, 'agent', faq.answer));
-          choices.append(button);
-        });
-        conversation.append(choices);
-      }
+      beginSupportConversation();
+      appendHistory('user', value);
+      const faq = matchingFaq(value);
+      appendHistory('agent', faq.answer, Boolean(faq.needsGmail));
       input.value = '';
     };
     form.addEventListener('submit', (event) => { event.preventDefault(); submitQuery(); });
@@ -197,9 +226,7 @@
       event.preventDefault();
       submitQuery();
     });
-    const contactTitle = make('h3', 'support-contact-title', '仍需要協助？');
-    const contactNote = make('p', 'support-contact-note', `寄信時請使用固定主旨「${CONTACT_SUBJECT}」，不要附上聊天內容、網址片段或權杖。`);
-    modalBody.append(selfService, lead, quick, conversation, form, contactTitle, contactNote, makeContactLinks('support-contact-actions'));
+    modalBody.append(conversation, form);
     focusModal();
   }
 
@@ -211,7 +238,7 @@
     dialog.setAttribute('aria-modal', 'true');
     dialog.setAttribute('aria-labelledby', 'support-modal-title');
     const header = make('header', 'support-dialog-header');
-    modalTitle = make('h2', '', '文字客服');
+    modalTitle = make('h2', '', '小吉自助客服');
     modalTitle.id = 'support-modal-title';
     const close = make('button', 'support-close-button', '關閉');
     close.type = 'button';
@@ -249,39 +276,8 @@
     renderPolicy(sectionId);
   }
 
-  function appendFooterLinks() {
-    document.querySelectorAll('[data-support-footer-links]').forEach((container) => {
-      container.replaceChildren();
-      POLICY_SECTIONS.forEach((section) => {
-        const link = make('a', '', section.title);
-        link.href = policyUrl(section.id);
-        link.addEventListener('click', (event) => {
-          if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
-            event.preventDefault();
-            openPolicy(section.id, link);
-          }
-        });
-        container.append(link);
-      });
-      const supportButton = make('button', 'footer-support-button', '文字客服');
-      supportButton.type = 'button';
-      supportButton.addEventListener('click', () => openSupport(supportButton));
-      const email = make('a', '', CONTACT_EMAIL);
-      email.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(CONTACT_SUBJECT)}`;
-      const isVerifiedInvite = /^https:\/\/(?:discord\.gg|discord\.com\/invite)\/[A-Za-z0-9-]+\/?$/.test(COMMUNITY_INVITE_URL);
-      if (isVerifiedInvite) {
-        const community = make('a', '', '加入菇湯集團 Discord');
-        community.href = COMMUNITY_INVITE_URL;
-        community.target = '_blank';
-        community.rel = 'noopener noreferrer';
-        container.append(community);
-      }
-      container.append(supportButton, email);
-    });
-  }
-
   function addLaunchButton() {
-    const launch = make('button', 'support-launch-button', '文字客服');
+    const launch = make('button', 'support-launch-button', '小吉自助客服');
     launch.type = 'button';
     launch.setAttribute('aria-haspopup', 'dialog');
     launch.addEventListener('click', () => openSupport(launch));
@@ -292,7 +288,7 @@
     if (event.key === 'Escape' && modal && !modal.hidden) closeModal();
   });
   document.querySelectorAll('[data-current-year]').forEach((node) => { node.textContent = String(new Date().getFullYear()); });
-  appendFooterLinks();
+  refreshFooterLinks();
   addLaunchButton();
   window.XiaojiSiteSupport = Object.freeze({ openSupport, openPolicy, POLICY_SECTIONS });
 })();

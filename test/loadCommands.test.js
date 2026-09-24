@@ -6,7 +6,7 @@ const helpCommand = require('../src/commands/help');
 test('public core loads without a private extension', () => {
   const commands = loadCommands();
   for (const commandName of [
-    'weather', 'poll', 'quota', 'music', 'set-welcome', 'status', 'remind', 'exchange',
+    'weather', 'poll', 'quota', 'set-welcome', 'status', 'remind', 'exchange',
     'casino-admin', 'casino-lobby', 'casino-venue', 'duel-tower', 'luxury', 'luxury-admin',
     'pawn', 'number-chain', 'word-chain', 'romance', 'games',
   ]) {
@@ -14,9 +14,8 @@ test('public core loads without a private extension', () => {
   }
 });
 
-test('public deployment data contains no private management commands', () => {
+test('public deployment data contains public commands', () => {
   const names = loadCommandData().map((command) => command.name);
-  assert.ok(names.includes('music'));
   assert.ok(names.includes('set-welcome'));
 });
 

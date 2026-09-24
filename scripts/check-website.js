@@ -93,7 +93,7 @@ assert(statusHtml.indexOf('statusData.js') < statusHtml.indexOf('publicFeatureCa
 assert(statusHtml.indexOf('publicFeatureCatalog.js') < statusHtml.indexOf('status.js'), 'Public catalog must load before status rendering');
 assert(statusData.includes('activeController !== controller'), 'Status loader must ignore stale responses');
 assert(publicFeatureCatalog.includes('PUBLIC_SYSTEM_CATALOG'), 'Status website must define a static public system catalog');
-assert(publicFeatureCatalog.includes('僅限機器人擁有者使用'), 'Public catalog must disclose owner-only music limits');
+assert(!/音樂|\/music/.test(publicFeatureCatalog), 'Public catalog must not expose private music features');
 assert(publicFeatureCatalog.includes('棋盤與推理遊戲'), 'Public catalog must include the approved board and deduction games');
 assert(publicFeatureCatalog.includes('/fortune') && publicFeatureCatalog.includes('/roll'), 'Public catalog must include the public fortune and dice commands');
 assert(publicFeatureCatalog.includes('個人記憶僅供本人查詢'), 'Public catalog must disclose private memory visibility');

@@ -63,10 +63,10 @@ youtube-cookies*.txt
 /scripts/fix-nyanko-files.js
 /scripts/recover-nyanko.js
 
-# Lavalink independent-host runtime files.
-/deploy/lavalink/lavalink.env
-/deploy/lavalink/plugins/*
-!/deploy/lavalink/plugins/.gitkeep
+# Private extension runtime files.
+**/runtime.env
+**/plugins/*.jar
+!**/plugins/.gitkeep
 
 # Verified runtime tools downloaded on demand (never commit executables).
 /.runtime/

@@ -150,12 +150,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-to-vps.ps1 `
 
 ## 更新部署
 
-## 私人音樂實驗維護（不屬於 1.1.0 公開功能）
-
-以下僅保留給 `BOT_OWNER_ID` 在 `DISCORD_GUILD_ID` 維護實驗程式碼。它可能失敗，不保證 YouTube 解析或實際音訊播放，也不是 1.1.0 的部署與驗收要求。NyankoHost 不需 Docker 或常駐 HTTP provider；實驗路徑需要本機備援時，bot 會把 SHA-256 固定的 bgutil `1.3.1` source/plugin 安裝到 repo 的 `.runtime/`，以 `npm ci --ignore-scripts` 建立 script-only runtime，並由 yt-dlp 只透過明確 plugin path 按需啟動 Node。六小時短效快取也只在 `.runtime/`，重啟可重用且不提交 Git。
-
-主機必須提供 Node 20+、npm 9+、可寫入 repo `.runtime/` 與作業系統暫存目錄，並允許連線 GitHub release/codeload 與 YouTube。若要測試一次性帳號匯出的 Netscape `cookies.txt`，只可將 `YOUTUBE_COOKIES_PATH` 設為該普通檔案的絕對路徑，並在 Linux 使用 `chmod 600`；檔案不可放進 Git、不可是 symlink、不可超過 1 MiB。程式從同一個已驗證 handle 讀取來源，並只把短效私有快照交給 yt-dlp；metadata 與 audio 共用該快照，完成、失敗或 timeout 後都會清理。原始路徑不會傳給 yt-dlp。程式不會讀取瀏覽器 Cookie DB，也不使用 `--cookies-from-browser`。不要加入 OAuth、帳號密碼、手動 PO token、visitor data、proxy、IP rotation、listener 或遠端 plugin。若 Cookie 路徑、權限、格式、來源身分、hash、audit-fixed lock、編譯、自我檢查或 timeout 任一失敗，播放會安全失敗。
-
 ```bash
 cd YOUR_REPO
 bash scripts/vps-update.sh

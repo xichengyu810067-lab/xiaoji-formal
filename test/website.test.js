@@ -34,6 +34,8 @@ test('official website is localized, responsive, and honest when live data is un
   assert.match(app, /dataNotice\.hidden = true/);
   assert.match(css, /\.data-notice\[hidden\]\s*\{\s*display:\s*none/);
   assert.match(html + app, /小吉不會用猜測的數字/);
+  assert.doesNotMatch(html, /status-cta/);
+  assert.match(html, /href="#live-overview"[\s\S]*href="#about"[\s\S]*href="#features"[\s\S]*href="\.\/status\.html"[\s\S]*公開版本資訊/);
 });
 
 test('public website provides local text support and no-JavaScript policy pages without exposing private operations', () => {
@@ -50,7 +52,8 @@ test('public website provides local text support and no-JavaScript policy pages 
   const gameClient = fs.readFileSync(path.join(root, 'website/games/gameClient.js'), 'utf8');
 
   new vm.Script(support, { filename: 'website/siteSupport.js' });
-  assert.ok(pages.every((page) => page.includes('siteSupport.js') && page.includes('data-support-footer-links')));
+  assert.ok(pages.every((page) => page.includes('siteSupport.js')));
+  assert.ok(pages.slice(2).every((page) => page.includes('data-support-footer-links')));
   assert.match(policies, /<link rel="canonical" href="\/policies\.html"/);
   assert.match(policies, /id="terms"/);
   assert.match(policies, /id="privacy"/);
@@ -58,21 +61,23 @@ test('public website provides local text support and no-JavaScript policy pages 
   assert.match(policies, /Google Fonts/);
   assert.match(policies, /非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉/);
   assert.match(policies, /不宣稱所有記憶都會在 30 天後自動刪除/);
-  assert.match(support, /COMMUNITY_INVITE_URL = 'https:\/\/discord\.gg\/TqkCx9kYmk'/);
   assert.match(support, /非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉/);
-  assert.match(support, /return `\/policies\.html#\$\{id\}`/);
   assert.match(support, /xichengyu810067@gmail\.com/);
   assert.match(support, /小吉服務詢問/);
+  assert.match(support, /小吉自助客服/);
   assert.match(support, /maxLength = 500/);
   assert.match(support, /event\.isComposing/);
-  assert.doesNotMatch(support, /innerHTML|outerHTML|insertAdjacentHTML|localStorage|sessionStorage|fetch\(/);
+  assert.doesNotMatch(support, /innerHTML|outerHTML|insertAdjacentHTML|localStorage|sessionStorage|fetch\(|navigator\.clipboard|mailto:/);
   assert.match(supportCss, /support-bubble\.agent/);
   assert.match(supportCss, /support-bubble\.user/);
+  assert.match(supportCss, /footer-icon-button/);
+  assert.match(support, /66e3d718355f9c89eb0fd350_Logo\.svg/);
+  assert.match(support, /gmail\.webp=s80-fcrop64/);
   assert.match(gameClient, /support-modal-open/);
   assert.ok(pages.every((page) => page.includes('href="/policies.html#terms"')
     && page.includes('href="/policies.html#privacy"')
-    && page.includes('href="/policies.html#public-data"')
-    && page.includes('mailto:xichengyu810067@gmail.com?subject=')));
+    && page.includes('href="/policies.html#public-data"')));
+  assert.doesNotMatch(pages.join('\n') + policies, /mailto:/);
   assert.doesNotMatch(pages.join('\n') + policies + support, /菇湯集團 Discord 邀請連結待正式核實/);
 });
 
@@ -125,12 +130,12 @@ test('realtime status site keeps the static public feature catalog visible when 
   const css = fs.readFileSync(path.join(root, 'website/status.css'), 'utf8');
   const app = fs.readFileSync(path.join(root, 'website/status.js'), 'utf8');
 
-  assert.equal(PUBLIC_SYSTEM_CATALOG.length, 10);
+  assert.equal(PUBLIC_SYSTEM_CATALOG.length, 9);
   assert.ok(PUBLIC_SYSTEM_CATALOG.every((system) => system.features.length > 0));
-  assert.equal(PUBLIC_SYSTEM_CATALOG.reduce((count, system) => count + system.features.length, 0), 48);
-  assert.equal(PUBLIC_SYSTEM_CATALOG.find((system) => system.name === '音樂播放').features.length, 11);
+  assert.equal(PUBLIC_SYSTEM_CATALOG.reduce((count, system) => count + system.features.length, 0), 37);
+  assert.equal(PUBLIC_SYSTEM_CATALOG.some((system) => system.name === '音樂播放'), false);
   assert.equal(PUBLIC_SYSTEM_CATALOG.find((system) => system.name === '棋盤與推理遊戲').features.length, 7);
-  assert.match(JSON.stringify(PUBLIC_SYSTEM_CATALOG), /僅限機器人擁有者使用/);
+  assert.doesNotMatch(JSON.stringify(PUBLIC_SYSTEM_CATALOG), /僅限機器人擁有者使用/);
   assert.match(JSON.stringify(PUBLIC_SYSTEM_CATALOG), /五次同局面或 75 步自動和棋/);
   assert.match(JSON.stringify(PUBLIC_SYSTEM_CATALOG), /只有本局結束後，曾參與該局的玩家才能查看答案/);
   assert.match(JSON.stringify(PUBLIC_SYSTEM_CATALOG), /xiaoji-formal/);
@@ -151,6 +156,7 @@ test('realtime status site keeps the static public feature catalog visible when 
   assert.match(app, /expandedSystems/);
   assert.match(app, /renderPublicSystems\(/);
   assert.match(app, /window\.XiaojiPublicFeatureCatalog\?\.PUBLIC_SYSTEM_CATALOG/);
+  assert.doesNotMatch(JSON.stringify(PUBLIC_SYSTEM_CATALOG), /音樂|\/music/);
   assert.match(css, /\.service-panel/);
   assert.match(css, /\.accordion-trigger/);
   assert.doesNotMatch(JSON.stringify(PUBLIC_SYSTEM_CATALOG), /guildId|userId|discordId|ownerId/);

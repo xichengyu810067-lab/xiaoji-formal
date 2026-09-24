@@ -1,14 +1,14 @@
 const { Events } = require('discord.js');
-const { handleVoiceChannelDeleted } = require('../services/musicService');
 const logger = require('../utils/logger');
+const { getClientExtensionHost } = require('../extensions/extensionHost');
 
 module.exports = {
   name: Events.ChannelDelete,
   async execute(channel) {
     try {
-      await handleVoiceChannelDeleted(channel);
+      await getClientExtensionHost(channel?.client).runHook('channelDelete', { channel });
     } catch (error) {
-      logger.warn(`Music channel-delete lifecycle handling failed: ${error?.message || error}`);
+      logger.warn(`Private channel-delete hook failed: ${error?.message || error}`);
     }
   },
 };
