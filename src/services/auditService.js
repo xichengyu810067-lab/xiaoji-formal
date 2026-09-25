@@ -1,10 +1,12 @@
 const fs = require('node:fs');
-const path = require('node:path');
-const { getBotOwnerId, getEnv } = require('../utils/env');
+const { getBotOwnerId } = require('../utils/env');
 const logger = require('../utils/logger');
-
-const defaultAuditDataPath = path.join(__dirname, '..', 'data', 'guildAudit.json');
-const defaultWhitelistDataPath = path.join(__dirname, '..', 'data', 'inviterWhitelist.json');
+const {
+  getAdmissionDataConfiguration,
+  initializeDefaultAdmissionDataFilesIfEmpty,
+  readAdmissionDataFile,
+  validateAdmissionData,
+} = require('./admissionDataContract');
 
 const AuditStatus = {
   APPROVED: 'approved',
@@ -13,77 +15,53 @@ const AuditStatus = {
   UNKNOWN: 'unknown',
 };
 
-function ensureDataFiles() {
-  [
-    { filePath: getAuditDataPath(), initialContent: '{}\n' },
-    { filePath: getWhitelistDataPath(), initialContent: '[]\n' },
-  ].forEach(({ filePath, initialContent }) => {
-    const directory = path.dirname(filePath);
-    if (!fs.existsSync(directory)) {
-      fs.mkdirSync(directory, { recursive: true });
-    }
-    if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, initialContent, 'utf8');
-      logger.info(`建立新的資料檔：${filePath}`);
-    }
-  });
-}
-
 function getAuditDataPath() {
-  return path.resolve(getEnv('XIAOJI_AUDIT_DATA_PATH') || defaultAuditDataPath);
+  return getAdmissionDataConfiguration().audit.filePath;
 }
 
 function getWhitelistDataPath() {
-  return path.resolve(getEnv('XIAOJI_INVITER_WHITELIST_PATH') || defaultWhitelistDataPath);
+  return getAdmissionDataConfiguration().whitelist.filePath;
 }
 
 function readAuditData() {
-  const auditDataPath = getAuditDataPath();
-  ensureDataFiles();
   try {
-    const content = fs.readFileSync(auditDataPath, 'utf8');
-    if (!content.trim()) {
-      return {};
-    }
-    return JSON.parse(content);
+    return readAdmissionDataFile(initializeDefaultAdmissionDataFilesIfEmpty().audit);
   } catch (error) {
-    logger.error(`讀取信任驗證資料失敗 (${auditDataPath})：`, error);
-    // DO NOT return empty object silently if file exists but is corrupted
-    if (fs.existsSync(auditDataPath)) {
-      logger.warn('！！！警告：信任驗證資料檔可能損壞，請檢查該檔案。為保安全，目前所有伺服器將被視為未知狀態。');
-    }
-    return {};
+    logger.error(`讀取信任驗證資料失敗 (${error.code || 'unknown'})。`);
+    throw error;
   }
 }
 
 function writeAuditData(data) {
-  const auditDataPath = getAuditDataPath();
+  const descriptor = getAdmissionDataConfiguration().audit;
   try {
-    ensureDataFiles();
-    fs.writeFileSync(auditDataPath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+    validateAdmissionData('audit', data);
+    readAdmissionDataFile(descriptor);
+    fs.writeFileSync(descriptor.filePath, JSON.stringify(data, null, 2) + '\n', 'utf8');
   } catch (error) {
-    logger.error(`寫入信任驗證資料失敗 (${auditDataPath})：`, error);
+    logger.error(`寫入信任驗證資料失敗 (${error.code || 'unknown'})。`);
+    throw error;
   }
 }
 
 function readWhitelistData() {
-  const whitelistDataPath = getWhitelistDataPath();
-  ensureDataFiles();
   try {
-    return JSON.parse(fs.readFileSync(whitelistDataPath, 'utf8'));
+    return readAdmissionDataFile(initializeDefaultAdmissionDataFilesIfEmpty().whitelist);
   } catch (error) {
-    logger.error(`讀取白名單資料失敗 (${whitelistDataPath})：`, error);
-    return [];
+    logger.error(`讀取白名單資料失敗 (${error.code || 'unknown'})。`);
+    throw error;
   }
 }
 
 function writeWhitelistData(data) {
-  const whitelistDataPath = getWhitelistDataPath();
+  const descriptor = getAdmissionDataConfiguration().whitelist;
   try {
-    ensureDataFiles();
-    fs.writeFileSync(whitelistDataPath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+    validateAdmissionData('whitelist', data);
+    readAdmissionDataFile(descriptor);
+    fs.writeFileSync(descriptor.filePath, JSON.stringify(data, null, 2) + '\n', 'utf8');
   } catch (error) {
-    logger.error(`寫入白名單資料失敗 (${whitelistDataPath})：`, error);
+    logger.error(`寫入白名單資料失敗 (${error.code || 'unknown'})。`);
+    throw error;
   }
 }
 

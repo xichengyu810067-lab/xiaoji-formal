@@ -8,6 +8,9 @@ const auditTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-audit-test-')
 process.env.XIAOJI_AUDIT_DATA_PATH = path.join(auditTestDir, 'guildAudit.json');
 process.env.XIAOJI_INVITER_WHITELIST_PATH = path.join(auditTestDir, 'inviterWhitelist.json');
 
+const { initializeAdmissionDataFiles } = require('../src/services/admissionDataContract');
+initializeAdmissionDataFiles();
+
 const { 
   AuditStatus, 
   getAuditDataPath,
@@ -70,4 +73,32 @@ test('whitelist management adds and removes users', () => {
   // Remove non-existent
   const removedAgain = removeFromWhitelist(userId);
   assert.equal(removedAgain, false);
+});
+
+test('missing explicit admission data fails instead of silently initializing', () => {
+  const whitelistPath = process.env.XIAOJI_INVITER_WHITELIST_PATH;
+  const original = fs.readFileSync(whitelistPath, 'utf8');
+  fs.unlinkSync(whitelistPath);
+  try {
+    assert.throws(() => isWhitelisted('test-user-456'), { code: 'ADMISSION_DATA_MISSING' });
+    assert.equal(fs.existsSync(whitelistPath), false);
+  } finally {
+    fs.writeFileSync(whitelistPath, original, 'utf8');
+  }
+});
+
+test('corrupt audit data is preserved and cannot be overwritten by an update', () => {
+  const auditPath = process.env.XIAOJI_AUDIT_DATA_PATH;
+  const original = fs.readFileSync(auditPath, 'utf8');
+  const corrupt = '{not-json';
+  fs.writeFileSync(auditPath, corrupt, 'utf8');
+  try {
+    assert.throws(
+      () => setGuildAudit('test-guild-456', { status: AuditStatus.APPROVED }),
+      { code: 'ADMISSION_DATA_INVALID_JSON' }
+    );
+    assert.equal(fs.readFileSync(auditPath, 'utf8'), corrupt);
+  } finally {
+    fs.writeFileSync(auditPath, original, 'utf8');
+  }
 });

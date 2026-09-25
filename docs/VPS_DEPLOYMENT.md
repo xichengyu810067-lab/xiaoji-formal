@@ -7,6 +7,8 @@
 - 不要把 `.env`、Discord token、API key、伺服器 ID、使用者 ID 貼到聊天室或公開倉庫。
 - `.env` 只在 VPS 上手動建立，權限設為 `600`。
 - `src/data/*.json` 是執行期資料，可能包含伺服器、頻道或使用者 ID，預設不要提交到 Git。
+- `guildAudit.json` 與 `inviterWhitelist.json` 是准入權威資料，正式環境必須透過
+  `XIAOJI_AUDIT_DATA_PATH`、`XIAOJI_INVITER_WHITELIST_PATH` 指向不會被更新取代的兩個不同絕對路徑。
 - 如果 token 曾經被公開，請到 Discord Developer Portal 立即 reset token。
 
 ## 如何取得 SSH 入口
@@ -150,22 +152,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-to-vps.ps1 `
 
 ## 更新部署
 
+正式更新前，兩個准入資料環境變數必須已指向 release 目錄外的既有受保護檔案。既有主機第一次升級時，先停止小吉，由操作者辨識並原樣保全目前權威檔，再更新 VPS 上既有的 `.env`；不要執行初始化、不要從舊快照回填，也不要依畫面上的 `unknown` 推測原狀態。
+
+後續 Git 更新只可執行已驗證候選 release 內的新版本腳本。腳本會先把候選展開到暫存目錄並驗證，停止 PM2 寫入者，使用同一收據做更新前後比對；任何檢查失敗都不會啟動新候選：
+
 ```bash
 cd YOUR_REPO
 bash scripts/vps-update.sh
 ```
 
-如果沒有使用更新腳本，可以手動執行：
+從 Windows 上傳 release 時，`scripts\deploy-to-vps.ps1` 會在切換 `current` 前停止寫入者並建立收據，切換後以同一收據驗證，再執行正式檢查與啟動。失敗時會把 `current` 指回原 release 並保持停止，讓操作者先查明原因。舊主機第一次升級不可先用舊版 `vps-update.sh` 拉取程式；請使用已驗證候選 release 的部署腳本，或依私有維運說明執行受保護的主機流程。
 
-```bash
-git pull --ff-only
-npm ci --omit=dev
-npm run prod:check
-npm run smoke:login
-npm run deploy
-pm2 startOrRestart ecosystem.config.cjs --env production
-pm2 save
-```
+若啟動指令在建立程序後才失敗，更新工具會先再次停止並確認沒有執行中的 PM2 PID，成功後才回復原程式或 release 指標。無法確認停止時會保留候選來源與復原證據，避免執行中程序和磁碟上的舊程式混用；此時必須由操作者先安全停機，不能直接重啟或再次覆蓋。
 
 ## 常用維運指令
 

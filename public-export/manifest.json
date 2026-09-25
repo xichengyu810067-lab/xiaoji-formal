@@ -29,5 +29,12 @@
     "src/loadCommands.js",
     "test",
     "website"
+  ],
+  "excludePaths": [
+    "test/admissionDataDeployment.test.js",
+    "test/admissionDeploymentScripts.test.js",
+    "test/nyankoTrustedBootstrap.test.js",
+    "test/nyankoUpdateContract.test.js",
+    "test/pm2StopGuard.test.js"
   ]
 }
