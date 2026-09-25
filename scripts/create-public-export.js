@@ -67,15 +67,27 @@ function assertSafeContent(sourceRoot, relativePath) {
 
 function buildPublicExportPlan({ sourceRoot = path.join(__dirname, '..'), manifestPath = DEFAULT_MANIFEST_PATH, manifest } = {}) {
   const resolvedManifest = manifest || JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  if (resolvedManifest.version !== 1 || !Array.isArray(resolvedManifest.paths)) {
+  if (
+    resolvedManifest.version !== 1
+    || !Array.isArray(resolvedManifest.paths)
+    || (resolvedManifest.excludePaths !== undefined && !Array.isArray(resolvedManifest.excludePaths))
+  ) {
     throw new Error('Unsupported public export manifest.');
   }
+  const excludedFiles = new Set((resolvedManifest.excludePaths || []).map((entry) => {
+    const relativePath = assertAllowedPath(entry);
+    const absolutePath = path.join(sourceRoot, relativePath);
+    if (fs.existsSync(absolutePath) && !fs.lstatSync(absolutePath).isFile()) {
+      throw new Error(`Public export exclusion may name only a file: ${relativePath}`);
+    }
+    return relativePath;
+  }));
   const files = [...new Set(resolvedManifest.paths.flatMap((entry) => {
     const relativePath = assertAllowedPath(entry);
     const absolutePath = path.join(sourceRoot, relativePath);
     if (!fs.existsSync(absolutePath)) throw new Error(`Allowlisted path is missing: ${relativePath}`);
     return walkFiles(sourceRoot, relativePath);
-  }))].sort();
+  }))].filter((file) => !excludedFiles.has(file)).sort();
   for (const file of files) assertSafeContent(sourceRoot, file);
   return files;
 }
@@ -84,7 +96,17 @@ function sanitizePublicPackage(outputPath) {
   const packagePath = path.join(outputPath, 'package.json');
   if (!fs.existsSync(packagePath)) return;
   const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-  const privateOperationScripts = ['smoke:login', 'prod:check', 'pm2:start', 'pm2:restart', 'pm2:status', 'pm2:logs'];
+  const privateOperationScripts = [
+    'smoke:login',
+    'prod:check',
+    'pm2:start',
+    'pm2:restart',
+    'pm2:status',
+    'pm2:logs',
+    'admission:init',
+    'admission:before-update',
+    'admission:after-update',
+  ];
   for (const scriptName of privateOperationScripts) delete packageJson.scripts?.[scriptName];
   fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, 'utf8');
 }
