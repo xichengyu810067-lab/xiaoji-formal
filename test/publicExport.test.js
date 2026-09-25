@@ -11,6 +11,7 @@ const deploymentOnlyTests = [
   'test/admissionDeploymentScripts.test.js',
   'test/nyankoTrustedBootstrap.test.js',
   'test/nyankoUpdateContract.test.js',
+  'test/pterodactylLifecycleRunner.test.js',
   'test/pm2StopGuard.test.js',
 ];
 const projectRoot = path.join(__dirname, '..');
@@ -49,6 +50,7 @@ test('repository public export plan is allowlisted and excludes protected roots'
   assert.equal(files.includes('scripts/nyanko-trusted-bootstrap.js'), false);
   assert.equal(files.includes('scripts/nyanko-update-contract.js'), false);
   assert.equal(files.includes('scripts/nyanko-update-candidate-manifest.json'), false);
+  assert.equal(files.includes('scripts/pterodactyl-lifecycle-runner.js'), false);
   assert.equal(files.includes('scripts/pm2-stop-guard.sh'), false);
   assert.deepEqual(manifest.excludePaths, deploymentOnlyTests);
   const sourceCount = deploymentOnlySourceCount();
