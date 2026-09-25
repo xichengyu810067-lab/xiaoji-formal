@@ -35,6 +35,7 @@
     "test/admissionDeploymentScripts.test.js",
     "test/nyankoTrustedBootstrap.test.js",
     "test/nyankoUpdateContract.test.js",
+    "test/pterodactylLifecycleRunner.test.js",
     "test/pm2StopGuard.test.js"
   ]
 }
