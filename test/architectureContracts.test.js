@@ -13,10 +13,10 @@ const { createOperationCoordinator } = require('../src/coordinators/operationCoo
 const { createRewardCoordinator, makeRewardKey } = require('../src/coordinators/rewardCoordinator');
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-architecture-contract-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-architecture-contract-')));
   t.after(() => {
     const resolved = path.resolve(root);
-    const temp = path.resolve(os.tmpdir());
+    const temp = fs.realpathSync(os.tmpdir());
     if (path.dirname(resolved) !== temp || !path.basename(resolved).startsWith('xiaoji-architecture-contract-')) {
       throw new Error('Refusing to remove an unexpected test directory.');
     }
@@ -199,6 +199,22 @@ test('a new archive resolves only to a protected root or explicit path', (t) => 
   assert.equal(result.filePath, path.join(protectedRoot, 'archive', 'conversations.sqlite'));
   assert.equal(result.exists, false);
   assert.equal(fs.existsSync(result.filePath), false);
+});
+
+test('a data root redirected through a directory link remains invalid', () => {
+  const linkedRoot = path.resolve('synthetic-linked-data-root');
+  const filesystem = {
+    lstatSync(filePath) {
+      assert.equal(filePath, linkedRoot);
+      return { isDirectory: () => true, isSymbolicLink: () => false };
+    },
+    realpathSync: () => path.resolve('synthetic-actual-data-root'),
+  };
+  assert.throws(() => resolveDataPath({
+    kind: 'archive', explicitEnvName: 'XIAOJI_ARCHIVE_DB_PATH',
+    rootRelativePath: 'archive/conversations.sqlite',
+    env: { XIAOJI_DATA_ROOT: linkedRoot }, filesystem,
+  }), { code: 'DATA_ROOT_INVALID' });
 });
 
 test('approved cutover keeps legacy data and permits later target replacements', (t) => {

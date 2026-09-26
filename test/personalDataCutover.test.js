@@ -14,7 +14,7 @@ function hash(filePath) {
 }
 
 test('explicit personal cutover retains legacy bytes and survives normal writes and restart', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-personal-cutover-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-personal-cutover-')));
   const exportRoot = path.join(root, 'public');
   const protectedRoot = path.join(root, 'protected');
   try {

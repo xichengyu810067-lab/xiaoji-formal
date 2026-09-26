@@ -86,15 +86,25 @@ test('clean public export npm test passes without deployment-only tools', {
   try {
     exportPublicFiles({ sourceRoot: projectRoot, outputPath });
     const program = process.platform === 'win32' ? process.env.ComSpec : 'npm';
-    const args = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd test'] : ['test'];
     const childEnv = { ...process.env };
     delete childEnv.NODE_TEST_CONTEXT;
-    const result = cp.spawnSync(program, args, {
-      cwd: outputPath,
-      encoding: 'utf8',
-      env: childEnv,
-      maxBuffer: 16 * 1024 * 1024,
-    });
+    delete childEnv.NODE_PATH;
+    const runNpm = (args) => {
+      const commandArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args;
+      return cp.spawnSync(program, commandArgs, {
+        cwd: outputPath,
+        encoding: 'utf8',
+        env: childEnv,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+    };
+    const install = runNpm(['ci']);
+    assert.equal(
+      install.status,
+      0,
+      `Public export npm ci failed.\n${install.error?.message || ''}\n${(install.stdout || '').slice(-4000)}\n${(install.stderr || '').slice(-4000)}`
+    );
+    const result = runNpm(['test']);
     assert.equal(
       result.status,
       0,
