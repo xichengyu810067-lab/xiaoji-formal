@@ -47,7 +47,7 @@ async function freshDatabase(name) {
   const dbPath = path.join(directory, 'xiaoji.sqlite');
   if (fs.existsSync(dbPath)) fs.rmSync(dbPath, { force: true });
   process.env.COIN_DB_PATH = dbPath;
-  await coinDatabase.initializeCoinDatabase();
+  await coinDatabase.initializeNewCoinDatabase({ expectedPath: dbPath });
   return { directory, dbPath };
 }
 
@@ -78,6 +78,19 @@ function saveSqlite(dbPath, db) {
 async function downgradeEconomyTargetsToV20(dbPath) {
   await readSqlite(dbPath, (db) => {
     db.exec('PRAGMA foreign_keys = OFF;');
+    for (const table of [
+      'coin_owner_campaign_history_classifications', 'coin_owner_campaign_history_reviews',
+      'coin_owner_campaign_audience_members', 'coin_owner_campaign_recipients',
+      'coin_owner_campaign_audiences', 'coin_owner_campaigns',
+      'discord_game_actions', 'discord_game_rewards', 'discord_game_sessions',
+      'coin_work_legacy_snapshot_items', 'coin_work_legacy_snapshots',
+      'coin_work_legacy_settlements', 'coin_primary_cycle_penalty_appeals',
+      'coin_primary_cycle_penalties', 'coin_primary_cycle_payroll',
+      'coin_primary_job_cycles', 'coin_primary_jobs_global',
+      'coin_operation_receipts', 'reward_grants_v2', 'coin_bank_accounts_global',
+      'coin_bank_rates_global', 'coin_rate_history_global', 'chip_accounts_global',
+      'coin_global_economy_migrations',
+    ]) db.exec(`DROP TABLE IF EXISTS ${table}`);
     db.exec(`
       UPDATE coin_metadata SET value = '20' WHERE key = 'schema_version';
       DROP TABLE coin_daily_state;
@@ -124,7 +137,7 @@ test('v21 migrates legacy daily history into one global streak and rejects cross
   await downgradeEconomyTargetsToV20(dbPath);
 
   const migrated = await coinDatabase.initializeCoinDatabase();
-  assert.equal(migrated.schemaVersion, 21);
+  assert.equal(migrated.schemaVersion, 22);
   const state = await coinDatabase.withCoinDatabase((api) => ({
     rows: api.all('SELECT checkin_date, source_guild_id, streak FROM coin_daily_checkins_global WHERE user_id = ? ORDER BY checkin_date', ['daily-user']),
     state: api.get('SELECT * FROM coin_daily_state WHERE user_id = ?', ['daily-user']),
@@ -341,8 +354,8 @@ test('generic debt offsets only allowlisted income and records gross, offset, an
   assert.deepEqual({ gross: gamePayout.grossAmount, offset: gamePayout.debtOffset, net: gamePayout.netAmount }, {
     gross: 40, offset: 10, net: 30,
   });
-  assert.equal((await getChipBalance('guild-a', 'debtor')).balance, 10);
-  assert.equal((await getChipBalance('guild-b', 'debtor')).balance, 30);
+  assert.equal((await getChipBalance('guild-a', 'debtor')).balance, 40);
+  assert.equal((await getChipBalance('guild-b', 'debtor')).balance, 40);
   player = await getPlayerBalance('guild-a', 'debtor');
   assert.equal(player.debtAmount, 20);
   const transaction = await coinDatabase.withCoinDatabase((api) => api.get(

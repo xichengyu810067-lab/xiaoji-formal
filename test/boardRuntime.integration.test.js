@@ -158,6 +158,17 @@ test('synthetic Discord flow starts, binds, joins, begins, opens a move modal, a
   assert.equal(moveSubmit.output.edits.at(-1).content, '棋盤已更新。');
 });
 
+test('unified menu starts an existing board game after acknowledging the selection', async () => {
+  const { runtime, store } = createHarness();
+  const select = commandInteraction('unused');
+  select.deferReply = async function deferReply() { this.deferred = true; this.output.deferred = true; };
+  const result = await runtime.startGame(select, 'chess');
+  assert.equal(select.output.deferred, true);
+  assert.equal(select.output.edits[0].content, '正在建立棋盤…');
+  assert.equal(result.session.gameKey, 'chess');
+  assert.equal((await store.getActiveSession({ guildId: 'guild', channelId: 'channel' })).messageId, 'board-message');
+});
+
 test('unapproved guilds are denied before public command or component mutation', async () => {
   const harness = createHarness({ isGuildApproved: () => false });
   const start = commandInteraction('start');

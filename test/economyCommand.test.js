@@ -19,6 +19,11 @@ function createInteraction({ guildId = 'guild-1', targetUser }) {
       guild: {
         name: '單元測試伺服器',
         id: guildId,
+        members: {
+          fetch: async (userId) => userId === targetUser?.id
+            ? { id: userId, guild: { id: guildId } }
+            : null,
+        },
       },
       options: {
         getSubcommand: () => 'user',

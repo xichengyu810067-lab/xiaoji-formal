@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
 const { getWalletPlayerWithApi, mutateWalletWithApi } = require('./coinWalletService');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
@@ -155,10 +156,133 @@ function mapGrant(row) {
     sourceId: row.source_id,
     rewardKind: row.reward_kind,
     amount: Number(row.amount),
+    debtOffset: Number(row.debt_offset || 0),
+    netAmount: Number(row.net_amount || 0),
     metadata: parseJson(row.metadata, 'reward_grants.metadata'),
     transactionId: row.transaction_id == null ? null : Number(row.transaction_id),
     createdAt: row.created_at,
   };
+}
+
+function makeRewardKey({ kind, canonicalSourceId, rewardKind, userId }) {
+  const values = [kind, canonicalSourceId, rewardKind, userId];
+  return `reward:v1:${crypto.createHash('sha256').update(JSON.stringify(values)).digest('hex')}`;
+}
+
+function mapRewardReceiptV2(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    rewardKey: row.reward_key,
+    operationId: row.operation_id,
+    kind: row.kind,
+    canonicalSourceId: row.canonical_source_id,
+    rewardKind: row.reward_kind,
+    userId: row.user_id,
+    sourceGuildId: row.source_guild_id,
+    amount: Number(row.amount),
+    transactionId: row.transaction_id == null ? null : Number(row.transaction_id),
+    legacyGrantId: row.legacy_grant_id == null ? null : Number(row.legacy_grant_id),
+    createdAt: row.created_at,
+  };
+}
+
+function grantRewardOnceV2WithApi(api, input) {
+  const kind = requireText(input.kind, 'kind', 80);
+  if (!['game', 'work-settlement', 'owner-campaign', 'feature'].includes(kind)) {
+    throw new FeaturePlatformError('INVALID_REWARD_KIND', 'Unsupported reward kind.');
+  }
+  const canonicalSourceId = requireText(input.canonicalSourceId, 'canonicalSourceId', 200);
+  const rewardKind = requireText(input.rewardKind, 'rewardKind', 80);
+  const userId = requireText(input.userId, 'userId', 80);
+  const sourceGuildId = input.sourceGuildId == null ? null : requireText(input.sourceGuildId, 'sourceGuildId', 80);
+  const amount = Number(input.amount);
+  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > MAX_REWARD_AMOUNT) {
+    throw new FeaturePlatformError('INVALID_REWARD_AMOUNT', `amount must be an integer from 1 to ${MAX_REWARD_AMOUNT}.`);
+  }
+  const rewardKey = makeRewardKey({ kind, canonicalSourceId, rewardKind, userId });
+  const operationId = input.operationId == null ? rewardKey : requireText(input.operationId, 'operationId', 200);
+  const payloadHash = crypto.createHash('sha256')
+    .update(JSON.stringify([kind, canonicalSourceId, rewardKind, userId, amount])).digest('hex');
+  const metadataJson = serializeJson(input.metadata || {}, 'metadata');
+  const byOperation = api.get('SELECT * FROM reward_grants_v2 WHERE operation_id = ?', [operationId]);
+  if (byOperation && byOperation.reward_key !== rewardKey) {
+    throw new FeaturePlatformError('OPERATION_CONFLICT', 'Operation ID belongs to another reward.');
+  }
+  const existing = api.get('SELECT * FROM reward_grants_v2 WHERE reward_key = ?', [rewardKey]);
+  if (existing) {
+    if (existing.payload_hash !== payloadHash) {
+      throw new FeaturePlatformError('REWARD_KEY_CONFLICT', 'Reward key has a different amount or recipient.');
+    }
+    const player = getWalletPlayerWithApi(api, sourceGuildId || existing.source_guild_id || '__global__', userId);
+    return {
+      alreadyGranted: true,
+      receipt: mapRewardReceiptV2(existing),
+      balance: player.balance,
+      totalEarned: player.totalEarned,
+      grossAmount: Number(existing.amount),
+      netAmount: Number(existing.net_amount),
+      debtOffset: Number(existing.debt_offset),
+    };
+  }
+  const transactionGuildId = sourceGuildId || '__global__';
+  if (sourceGuildId && kind !== 'work-settlement') {
+    const timestamp = new Date().toISOString();
+    api.run(`INSERT INTO coin_guild_settings (guild_id, created_at, updated_at)
+      VALUES (?, ?, ?) ON CONFLICT(guild_id) DO NOTHING`, [sourceGuildId, timestamp, timestamp]);
+    const setting = api.get('SELECT enabled FROM coin_guild_settings WHERE guild_id = ?', [sourceGuildId]);
+    if (Number(setting?.enabled) !== 1) {
+      throw new FeaturePlatformError('COIN_DISABLED', 'The source guild coin system is disabled.');
+    }
+  }
+  const current = getWalletPlayerWithApi(api, transactionGuildId, userId);
+  if (!Number.isSafeInteger(current.totalEarned + amount)) {
+    throw new FeaturePlatformError('REWARD_TOTAL_EARNED_LIMIT', 'The reward would exceed the supported total earned limit.');
+  }
+  const timestamp = new Date().toISOString();
+  const mutation = mutateWalletWithApi(api, {
+    guildId: transactionGuildId,
+    userId,
+    type: 'system_reward',
+    balanceDelta: amount,
+    totalEarnedDelta: amount,
+    operatorId: input.actorUserId || null,
+    reason: `${kind}:${rewardKind}`,
+    metadata: { rewardKey, canonicalSourceId, ...input.metadata },
+    createdAt: timestamp,
+  });
+  api.run(
+    `INSERT INTO reward_grants_v2
+      (reward_key, operation_id, kind, canonical_source_id, reward_kind, user_id,
+       source_guild_id, amount, payload_hash, metadata_json, debt_offset, net_amount,
+       transaction_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [rewardKey, operationId, kind, canonicalSourceId, rewardKind, userId,
+      sourceGuildId, amount, payloadHash, metadataJson, mutation.debtOffset,
+      mutation.netAmount, mutation.transactionId, timestamp]
+  );
+  const receipt = mapRewardReceiptV2(api.get('SELECT * FROM reward_grants_v2 WHERE reward_key = ?', [rewardKey]));
+  return {
+    alreadyGranted: false,
+    receipt,
+    balance: mutation.after.balance,
+    totalEarned: mutation.after.totalEarned,
+    grossAmount: amount,
+    netAmount: mutation.netAmount,
+    debtOffset: mutation.debtOffset,
+  };
+}
+
+async function grantRewardOnceV2(input) {
+  return withCoinTransaction((api) => grantRewardOnceV2WithApi(api, input));
+}
+
+async function getRewardReceiptV2({ rewardKey = null, operationId = null } = {}) {
+  if (!rewardKey && !operationId) throw new FeaturePlatformError('INVALID_ARGUMENT', 'rewardKey or operationId is required.');
+  return withCoinDatabase((api) => mapRewardReceiptV2(api.get(
+    rewardKey ? 'SELECT * FROM reward_grants_v2 WHERE reward_key = ?' : 'SELECT * FROM reward_grants_v2 WHERE operation_id = ?',
+    [rewardKey || operationId]
+  )));
 }
 
 async function getGuildFeatureSetting(guildId, featureKey) {
@@ -663,6 +787,10 @@ module.exports = {
   enqueueFeatureOutbox,
   getGuildFeatureSetting,
   grantRewardOnce,
+  grantRewardOnceV2,
+  grantRewardOnceV2WithApi,
+  getRewardReceiptV2,
+  makeRewardKey,
   listFeatureHealth,
   listFeatureUsageForDate,
   listGuildFeatureSettings,

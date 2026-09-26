@@ -128,6 +128,12 @@ function createExtensionHost(extensions = []) {
     ownsCommand(commandName) {
       return commandOwners.has(commandName);
     },
+    async preflight(context = {}) {
+      for (const extension of loadedExtensions) {
+        const check = getNestedFunction(extension, 'preflight');
+        if (check) await check(context);
+      }
+    },
     async guardInteraction(context) {
       for (const extension of loadedExtensions) {
         const guard = getNestedFunction(extension, 'guards.interaction');

@@ -3,6 +3,8 @@
 
   const CONTACT_EMAIL = 'xichengyu810067@gmail.com';
   const CONTACT_SUBJECT = '小吉服務詢問';
+  const policyPublication = window.XiaojiPolicyPublication;
+  if (!policyPublication) throw new Error('policy_publication_missing');
   const POLICY_SECTIONS = Object.freeze([
     {
       id: 'terms',
@@ -20,9 +22,10 @@
       title: '隱私權政策',
       summary: '小吉只在提供功能、維持安全與回應使用者需求所需的範圍內處理資料。',
       blocks: [
-        ['可能處理的資料', '依你使用的功能，小吉可能處理 Discord 提供的帳號識別、顯示名稱、訊息或互動內容、偏好設定、伺服器與頻道脈絡，以及遊戲或功能操作所需資料。請勿在公開頻道或客服欄位輸入密碼、權杖、付款資訊或其他敏感資料。'],
-        ['記憶與可見性', '在已通過審核的伺服器中，非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉；跨頻道查找仍須伺服器明確開啟分享設定。個人記憶僅供本人查詢。不同資料類型依功能需要採用不同保存與清理規則；小吉不宣稱所有記憶都會在 30 天後自動刪除。'],
-        ['第三方連線', 'Discord 與依功能啟用的服務供應商可能各自處理必要資料。網站也會載入 Google Fonts 等第三方資源；這些服務的資料處理適用其自身政策。'],
+        ['可能處理的資料', '依你使用的功能，小吉可能處理 Discord 提供的帳號識別、顯示名稱、訊息或互動內容、偏好設定、伺服器與頻道脈絡，以及遊戲或功能操作所需資料。與小吉 AI 的互動包含私訊；請勿在公開頻道、私訊或客服欄位輸入密碼、權杖、付款資訊或其他敏感資料。'],
+        ['記憶與保存', '在已通過審核的伺服器中，非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉；跨頻道查找仍須伺服器明確開啟分享設定。資料沒有固定保存期限，會依服務目的、資料類型與本政策的刪除流程處理及刪除；小吉不宣稱所有記憶都會在 30 天後自動刪除，也不宣稱提供無限儲存容量。'],
+        ['對話可見性', '為改善對話品質、維護服務及處理必要問題，小吉擁有者（原作者）可在職責範圍內查看與小吉的對話內容，包括符合前述條件的公開頻道記憶與私訊互動。這不表示對話會被用來訓練模型。'],
+        ['第三方連線', 'Discord 與依功能啟用的服務供應商可能為提供、維護或保護服務而處理必要的對話與相關資料。網站也會載入 Google Fonts 等第三方資源；這些服務的資料處理適用其自身政策。'],
         ['查詢與刪除', '若要詢問個人資料、要求刪除或回報隱私疑慮，請寄信至 xichengyu810067@gmail.com，主旨使用「小吉服務詢問」，並只提供處理案件所需的最少資訊。'],
       ],
     },
@@ -33,7 +36,7 @@
       blocks: [
         ['公開範圍', '狀態頁與公開功能清冊用於說明整體服務情況、公開功能與使用限制，不公開個別 Discord 使用者、伺服器名稱、頻道內容或私人對話。'],
         ['資料不足時', '當公開狀態資料不足或無法取得時，頁面會顯示未知或暫時無法確認，不會以猜測數字或狀態替代。'],
-        ['更新方式', '公開內容可能隨功能調整而更新；本頁與政策彈窗會顯示相同政策文字與更新日期。'],
+        ['更新方式', `公開內容可能隨功能調整而更新；本頁與政策彈窗會顯示相同政策文字與更新日期。${policyPublication.displayText}`],
       ],
     },
   ]);
@@ -42,7 +45,7 @@
     { title: '如何邀請小吉？', keywords: ['邀請', 'bot', '機器人'], answer: '加入菇湯集團社群與邀請 Bot 到其他伺服器是不同流程。目前沒有公開的 Bot OAuth 入口。', needsGmail: true },
     { title: '人工使用授權是什麼？', keywords: ['授權', '人工', '使用'], answer: '部分功能取決於服務設定與 Discord 權限；需要人工確認使用資格時，請提供最少的必要資訊。', needsGmail: true },
     { title: 'AI 為什麼沒有回覆？', keywords: ['ai', '聊天', '429', '額度', '限制'], answer: 'AI 回覆可能受服務狀態、速率或額度限制影響。遇到 429 或額度限制時，小吉會回覆「小吉有點累了，請稍後再跟我聊天」。' },
-    { title: '功能無法使用怎麼辦？', keywords: ['無法', '壞', '錯誤', '不能', '狀態'], answer: '請先確認所在伺服器可使用小吉、具備該功能所需權限，並查看狀態頁是否顯示未知或異常。', needsGmail: true },
+    { title: '功能或遊戲無法使用怎麼辦？', keywords: ['無法', '壞', '錯誤', '不能', '狀態', '遊戲'], answer: '請先確認所在伺服器可使用小吉、具備該功能所需權限，並查看狀態頁是否顯示未知或異常。個人遊戲請在 Discord 使用 /games menu 或 /games play，面板遺失可在同一頻道使用 /games resume；棋盤與推理遊戲使用 /board。新局不從官網建立，舊網頁局只保留給既有過渡流程。', needsGmail: true },
     { title: '如何詢問或刪除個人資料？', keywords: ['隱私', '刪除', '資料', '記憶'], answer: '個人記憶僅供本人查詢。若要詢問資料、要求刪除或回報隱私疑慮，請使用 Gmail 聯繫。', needsGmail: true },
     { title: '如何領取或取消關注？', keywords: ['領取', '取消', '關注', '訂閱'], answer: '官網沒有追蹤或訂閱功能，因此沒有需要取消的網站關注；Discord 功能請依對應指令操作。' },
     { title: '其他問題', keywords: [], answer: '這個頁面只提供本機自助說明，無法判定你的問題。', needsGmail: true },
@@ -110,7 +113,7 @@
 
   function buildPolicyContent(section) {
     const fragment = document.createDocumentFragment();
-    fragment.append(make('p', 'policy-updated', '最後更新：2026 年 9 月 23 日'));
+    fragment.append(make('p', 'policy-updated', policyPublication.displayText));
     section.blocks.forEach(([heading, text]) => {
       const block = make('section', 'policy-block');
       block.append(make('h3', '', heading), make('p', '', text));

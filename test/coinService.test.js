@@ -5,6 +5,23 @@ const os = require('node:os');
 const path = require('node:path');
 const initSqlJs = require('sql.js');
 
+function stripV22TablesForLegacyFixture(db) {
+  db.exec('PRAGMA foreign_keys = OFF');
+  for (const table of [
+    'coin_owner_campaign_history_classifications', 'coin_owner_campaign_history_reviews',
+    'coin_owner_campaign_audience_members', 'coin_owner_campaign_recipients',
+    'coin_owner_campaign_audiences', 'coin_owner_campaigns',
+    'discord_game_actions', 'discord_game_rewards', 'discord_game_sessions',
+    'coin_work_legacy_snapshot_items', 'coin_work_legacy_snapshots',
+    'coin_work_legacy_settlements', 'coin_primary_cycle_penalty_appeals',
+    'coin_primary_cycle_penalties', 'coin_primary_cycle_payroll',
+    'coin_primary_job_cycles', 'coin_primary_jobs_global',
+    'coin_operation_receipts', 'reward_grants_v2', 'coin_bank_accounts_global',
+    'coin_bank_rates_global', 'coin_rate_history_global', 'chip_accounts_global',
+    'coin_global_economy_migrations',
+  ]) db.exec(`DROP TABLE IF EXISTS ${table}`);
+}
+
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-coin-'));
 const dbPath = path.join(tempDirectory, 'xiaoji.sqlite');
 
@@ -127,6 +144,7 @@ const {
 const {
   buyChips,
   cashoutChips,
+  creditChipsWithApi,
   getChipBalance,
 } = require('../src/services/chipService');
 const {
@@ -150,18 +168,23 @@ const {
   deleteWorkSubmission,
   editWorkSubmission,
   getPayrollHistory,
+  getPrimaryPayrollHistory,
   listWorkPenalties,
   listJobs,
   listWorkTasks,
   processDueJobs,
+  processDuePrimaryCycles,
   processExpiredWorkTasks,
+  createPrimaryPenaltyAppeal,
   reportWork,
+  reviewPrimaryPenaltyAppeal,
   reviewWorkPenaltyAppeal,
   reviewWorkSubmission,
   createWorkPenaltyAppeal,
   startJob,
   startVenueJobs,
 } = require('../src/services/workService');
+const { verifyVenueMembers } = require('../src/platform/venueMembership');
 const {
   VenueItemType,
   addVenueMenuItem,
@@ -490,7 +513,7 @@ function createManualV19WalletDatabase(SQL, playerRows) {
 
 test.beforeEach(() => {
   stopDailyRiddleScheduler();
-  resetCoinDatabaseForTests();
+  resetCoinDatabaseForTests({ allowCreateOnNextOpen: true });
 
   if (fs.existsSync(dbPath)) {
     fs.rmSync(dbPath, { force: true });
@@ -501,6 +524,45 @@ test.after(() => {
   resetCoinDatabaseForTests();
   fs.rmSync(tempDirectory, { recursive: true, force: true });
 });
+
+async function activatePrimaryForFixture(guildId, userId, jobName, dailySalary) {
+  const selected = await startJob(guildId, userId, jobName, 1);
+  const startsAt = new Date(Date.now() - 60_000).toISOString();
+  const endsAt = new Date(Date.now() + 3_600_000).toISOString();
+  await withCoinTransaction((api) => {
+    api.run(
+      "UPDATE coin_primary_jobs_global SET state = 'active', effective_from = ?, effective_until = ?, updated_at = ? WHERE user_id = ?",
+      [startsAt, endsAt, startsAt, userId]
+    );
+    api.run(
+      "INSERT INTO coin_primary_job_cycles (cycle_id,user_id,job_name,work_days,source_guild_id,starts_at,ends_at,salary_rule_version,salary_snapshot_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'active',?,?)",
+      [selected.nextCycleId, userId, jobName, 1, guildId, startsAt, endsAt, 'primary-v1',
+        JSON.stringify({ version: 'primary-v1', dailySalary, basicRatio: 0.75, translatorBonus: jobName === '翻譯官' ? 200 : 0 }),
+        startsAt, startsAt]
+    );
+  });
+  return selected.nextCycleId;
+}
+
+async function duePrimaryForFixture(cycleId) {
+  await withCoinTransaction((api) => api.run(
+    'UPDATE coin_primary_job_cycles SET ends_at = ? WHERE cycle_id = ?',
+    [new Date(Date.now() - 1000).toISOString(), cycleId]
+  ));
+  return processDuePrimaryCycles();
+}
+
+async function verifiedVenueFixture(guildId, userIds, { completeRoster = false } = {}) {
+  const members = new Map(userIds.map((id) => [id, { id, guild: { id: guildId }, user: { bot: false } }]));
+  return verifyVenueMembers({
+    id: guildId, memberCount: members.size,
+    members: { async fetch(id) { return id ? members.get(id) : members; } },
+  }, { userIds, completeRoster });
+}
+
+async function fundVenueFixture(guildId, userId, chips) {
+  return withCoinTransaction((api) => creditChipsWithApi(api, guildId, userId, chips));
+}
 
 test('coin database auto-creates SQLite file and schema', async () => {
   const info = await initializeCoinDatabase();
@@ -520,7 +582,7 @@ test('coin database auto-creates SQLite file and schema', async () => {
   assert.ok(info.createdTables.includes('casino_duel_tower_runs'));
   assert.ok(info.createdTables.includes('coin_work_penalties'));
   assert.ok(info.createdTables.includes('coin_work_penalty_appeals'));
-  assert.equal(info.schemaVersion, 21);
+  assert.equal(info.schemaVersion, 22);
   assert.ok(info.createdTables.includes('feature_guild_settings'));
   assert.ok(info.createdTables.includes('feature_outbox'));
   assert.ok(info.createdTables.includes('feature_outbox_dead_letters'));
@@ -549,7 +611,7 @@ test('coin database auto-creates SQLite file and schema', async () => {
     deliveryColumns: api.all('PRAGMA table_info(release_announcement_deliveries)').map((column) => column.name),
   }));
 
-  assert.equal(schema.version, '21');
+  assert.equal(schema.version, '22');
   assert.deepEqual(schema.usageColumns, ['usage_date', 'feature_key', 'metric_key', 'usage_count', 'updated_at']);
   assert.deepEqual(schema.releaseColumns, [
     'release_id', 'repository', 'tag_name', 'version_major', 'version_minor', 'version_patch',
@@ -584,8 +646,8 @@ test('coin database migrates a v10 sentinel database to v21 without changing sen
   }));
 
   assert.equal(info.existed, true);
-  assert.equal(info.schemaVersion, 21);
-  assert.equal(migrated.version, '21');
+  assert.equal(info.schemaVersion, 22);
+  assert.equal(migrated.version, '22');
   assert.equal(migrated.sentinel, 'keep-me');
   assert.deepEqual(migrated.featureTables, [
     'feature_guild_settings',
@@ -599,16 +661,20 @@ test('coin database migrates a v10 sentinel database to v21 without changing sen
 test('schema v20 sums legacy per-guild wallets once, preserves guild state, and blocks archive writes', async () => {
   const distPath = path.dirname(require.resolve('sql.js'));
   const SQL = await initSqlJs({ locateFile: (fileName) => path.join(distPath, fileName) });
+  const taipeiToday = getTaipeiDateKey(new Date());
+  const taipeiHour = getTaipeiMinuteOfDay(new Date()) / 60;
+  const settlementDate = taipeiHour >= 23 ? taipeiToday :
+    new Date(Date.parse(`${taipeiToday}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
   const fixture = createManualV19WalletDatabase(SQL, [
-    ['guild-a', 'shared-user', 100, 7, 0.25, '2026-07-31', 140, 40, '2026-08-01', 3, '2026-07-01T00:00:00.000Z', '2026-08-01T01:00:00.000Z'],
-    ['guild-b', 'shared-user', 50, 9, 0.5, null, 80, 30, null, 0, '2026-07-02T00:00:00.000Z', '2026-08-02T01:00:00.000Z'],
-    ['guild-a', 'guild-a-only', 25, 4, 0, null, 25, 0, null, 0, '2026-07-03T00:00:00.000Z', '2026-08-03T01:00:00.000Z'],
+    ['guild-a', 'shared-user', 100, 7, 0.25, settlementDate, 140, 40, '2026-08-01', 3, '2026-07-01T00:00:00.000Z', '2026-08-01T01:00:00.000Z'],
+    ['guild-b', 'shared-user', 50, 9, 0.5, settlementDate, 80, 30, null, 0, '2026-07-02T00:00:00.000Z', '2026-08-02T01:00:00.000Z'],
+    ['guild-a', 'guild-a-only', 25, 4, 0, settlementDate, 25, 0, null, 0, '2026-07-03T00:00:00.000Z', '2026-08-03T01:00:00.000Z'],
   ]);
   fs.writeFileSync(dbPath, Buffer.from(fixture.export()));
   fixture.close();
 
   const info = await initializeCoinDatabase();
-  assert.equal(info.schemaVersion, 21);
+  assert.equal(info.schemaVersion, 22);
   const migrated = await withCoinDatabase((api) => ({
     wallet: api.get("SELECT * FROM coin_wallets WHERE user_id = 'shared-user'"),
     guildPlayers: api.all("SELECT * FROM coin_guild_players WHERE user_id = 'shared-user' ORDER BY guild_id"),
@@ -706,7 +772,7 @@ test('coin-admin global wallet mutations reject a non-owner even when invoked fr
   const originalOwnerId = process.env.BOT_OWNER_ID;
   process.env.BOT_OWNER_ID = 'wallet-owner';
   try {
-    for (const subcommand of ['add', 'remove', 'set', 'reset-user']) {
+    for (const subcommand of ['add', 'remove', 'set', 'reset-user', 'campaign-preview', 'campaign-apply']) {
       let reply;
       await coinAdminCommand.execute({
         commandName: 'coin-admin',
@@ -724,7 +790,7 @@ test('coin-admin global wallet mutations reject a non-owner even when invoked fr
   }
 });
 
-test('wallet, shops, and inventory are global while participation and bank balances stay guild-local', async () => {
+test('wallet, bank, chips, shops, and inventory are global while participation keeps source guild context', async () => {
   await adjustPlayerBalance('guild-a', 'shared-user', {
     action: 'set', amount: 2500, operatorId: 'owner', reason: 'cross-guild setup',
   });
@@ -761,7 +827,7 @@ test('wallet, shops, and inventory are global while participation and bank balan
   assert.equal(bankA.walletBalance, 880);
   assert.equal(bankB.walletBalance, 880);
   assert.equal(bankA.bankBalance, 1500);
-  assert.equal(bankB.bankBalance, 0);
+  assert.equal(bankB.bankBalance, 1500);
 
   await buyChips('guild-a', 'shared-user', 40);
   await borrowCasinoLoan('guild-a', 'shared-user', {
@@ -775,13 +841,13 @@ test('wallet, shops, and inventory are global while participation and bank balan
     getCasinoLoanStatus('guild-b', 'shared-user', { date: new Date('2026-08-04T00:00:00.000Z') }),
   ]);
   assert.equal(chipsA.balance, 1040);
-  assert.equal(chipsB.balance, 0);
+  assert.equal(chipsB.balance, 1040);
   assert.equal(loanA.loan.currentDebtAmount, 1000);
-  assert.equal(loanB.loan, null);
+  assert.equal(loanB.loan.currentDebtAmount, 1000);
 
   await createFixedDeposit('guild-a', 'shared-user', { amount: 1000, termDays: 7, source: 'bank' });
   assert.equal((await listFixedDeposits('guild-a', { userId: 'shared-user' })).length, 1);
-  assert.equal((await listFixedDeposits('guild-b', { userId: 'shared-user' })).length, 0);
+  assert.equal((await listFixedDeposits('guild-b', { userId: 'shared-user' })).length, 1);
 
   const luxury = await createLuxuryItem('guild-a', {
     name: 'Global luxury', description: 'global luxury', price: 20, stock: 1,
@@ -893,7 +959,7 @@ test('coin database rejects corrupt input without overwriting it', async () => {
   const corruptBytes = Buffer.from('not-a-sqlite-database');
   fs.writeFileSync(dbPath, corruptBytes);
 
-  await assert.rejects(() => initializeCoinDatabase(), /完整性檢查失敗/);
+  await assert.rejects(() => initializeCoinDatabase(), /讀取失敗|完整性檢查失敗/);
   assert.deepEqual(fs.readFileSync(dbPath), corruptBytes);
 });
 
@@ -987,6 +1053,7 @@ test('v11 to v15 migration adds community tables and fails closed for an unsafe 
   await initializeCoinDatabase();
   resetCoinDatabaseForTests();
   const priorV12 = new SQL.Database(fs.readFileSync(dbPath));
+  stripV22TablesForLegacyFixture(priorV12);
   priorV12.exec(`
     DROP TABLE text_chain_entries;
     DROP TABLE text_chain_sessions;
@@ -1002,7 +1069,7 @@ test('v11 to v15 migration adds community tables and fails closed for an unsafe 
   priorV12.close();
 
   const migrated = await initializeCoinDatabase();
-  assert.equal(migrated.schemaVersion, 21);
+  assert.equal(migrated.schemaVersion, 22);
   assert.deepEqual(
     await withCoinDatabase((api) =>
       api.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'text_chain_%' ORDER BY name").map((row) => row.name)
@@ -1127,6 +1194,7 @@ test('daily-riddle v15 bootstrap preserves v13 data, is idempotent, and fails cl
   await initializeCoinDatabase();
   resetCoinDatabaseForTests();
   const priorV13 = new SQL.Database(fs.readFileSync(dbPath));
+  stripV22TablesForLegacyFixture(priorV13);
   priorV13.exec(`
     DROP TABLE daily_event_messages;
     DROP TABLE daily_event_participants;
@@ -1145,7 +1213,7 @@ test('daily-riddle v15 bootstrap preserves v13 data, is idempotent, and fails cl
   priorV13.close();
 
   const migrated = await initializeCoinDatabase();
-  assert.equal(migrated.schemaVersion, 21);
+  assert.equal(migrated.schemaVersion, 22);
   const migratedState = await withCoinDatabase((api) => ({
       version: api.get("SELECT value FROM coin_metadata WHERE key = 'schema_version'").value,
       sentinel: api.get('SELECT value FROM riddle_migration_sentinel WHERE id = 1').value,
@@ -1158,7 +1226,7 @@ test('daily-riddle v15 bootstrap preserves v13 data, is idempotent, and fails cl
   assert.deepEqual(
     { version: migratedState.version, sentinel: migratedState.sentinel, tables: migratedState.tables },
     {
-      version: '21',
+      version: '22',
       sentinel: 'preserve-v13',
       tables: ['daily_event_messages', 'daily_event_participants', 'daily_events'],
     }
@@ -1196,7 +1264,7 @@ test('daily-riddle v15 rebuild migrates a manual legacy v14 database without los
   fixture.close();
 
   const info = await initializeCoinDatabase();
-  assert.equal(info.schemaVersion, 21);
+  assert.equal(info.schemaVersion, 22);
   const migrated = await withCoinDatabase((api) => ({
     version: api.get("SELECT value FROM coin_metadata WHERE key = 'schema_version'").value,
     event: api.get(`SELECT id, guild_id, status, attempt_count, last_error,
@@ -1212,7 +1280,7 @@ test('daily-riddle v15 rebuild migrates a manual legacy v14 database without los
       LEFT JOIN daily_events AS event ON event.id = participant.event_id WHERE event.id IS NULL`).count,
     integrity: api.get('PRAGMA integrity_check').integrity_check,
   }));
-  assert.equal(migrated.version, '21');
+  assert.equal(migrated.version, '22');
   assert.deepEqual(migrated.event, {
     id: 41,
     guild_id: 'legacy-riddle-guild',
@@ -1247,7 +1315,7 @@ test('daily-riddle v15 rebuild migrates a manual legacy v14 database without los
       messageCount: api.get('SELECT COUNT(*) AS count FROM daily_event_messages').count,
       participantCount: api.get('SELECT COUNT(*) AS count FROM daily_event_participants').count,
     })),
-    { version: '21', eventCount: 1, messageCount: 1, participantCount: 1 }
+    { version: '22', eventCount: 1, messageCount: 1, participantCount: 1 }
   );
 });
 
@@ -1277,6 +1345,7 @@ test('chat-style v16 migration is additive, restart-idempotent, and preserves fa
   await initializeCoinDatabase();
   resetCoinDatabaseForTests();
   const priorV15 = new SQL.Database(fs.readFileSync(dbPath));
+  stripV22TablesForLegacyFixture(priorV15);
   priorV15.exec(`
     DROP TABLE user_chat_preferences;
     DROP TRIGGER coin_players_v19_archive_no_insert;
@@ -1299,9 +1368,9 @@ test('chat-style v16 migration is additive, restart-idempotent, and preserves fa
     columns: api.all('PRAGMA table_info(user_chat_preferences)').map((column) => column.name),
     definition: api.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_chat_preferences'").sql,
   }));
-  assert.equal(info.schemaVersion, 21);
+  assert.equal(info.schemaVersion, 22);
   assert.deepEqual(migrated.columns, ['user_id', 'style', 'updated_at']);
-  assert.equal(migrated.version, '21');
+  assert.equal(migrated.version, '22');
   assert.equal(migrated.sentinel, 'preserve-v15');
   assert.match(migrated.definition, /CHECK \(style IN \('cute', 'mature_sister', 'ceo', 'cold', 'tsundere', 'yandere'\)\)/);
 
@@ -1317,7 +1386,7 @@ test('chat-style v16 migration is additive, restart-idempotent, and preserves fa
       extra: 'CREATE TABLE user_chat_preferences (user_id TEXT PRIMARY KEY, style TEXT NOT NULL, updated_at TEXT NOT NULL);',
       message: /v20 結構驗證失敗/,
     },
-    { version: '21', extra: '', message: /不支援/ },
+    { version: '23', extra: '', message: /不支援/ },
   ]) {
     resetCoinDatabaseForTests();
     fs.rmSync(dbPath, { force: true });
@@ -1425,6 +1494,7 @@ test('romance v17 migration is additive, restart-idempotent, and preserves failu
   await initializeCoinDatabase();
   resetCoinDatabaseForTests();
   const priorV16 = new SQL.Database(fs.readFileSync(dbPath));
+  stripV22TablesForLegacyFixture(priorV16);
   priorV16.exec(`
     DROP TABLE user_romance_preferences;
     DROP TRIGGER coin_players_v19_archive_no_insert;
@@ -1447,8 +1517,8 @@ test('romance v17 migration is additive, restart-idempotent, and preserves failu
     columns: api.all('PRAGMA table_info(user_romance_preferences)').map((column) => column.name),
     definition: api.get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_romance_preferences'").sql,
   }));
-  assert.equal(info.schemaVersion, 21);
-  assert.equal(migrated.version, '21');
+  assert.equal(info.schemaVersion, 22);
+  assert.equal(migrated.version, '22');
   assert.equal(migrated.sentinel, 'preserve-v16');
   assert.deepEqual(migrated.columns, ['user_id', 'enabled', 'started_at', 'updated_at']);
   assert.match(migrated.definition, /CHECK \(enabled IN \(0, 1\)\)/);
@@ -1465,7 +1535,7 @@ test('romance v17 migration is additive, restart-idempotent, and preserves failu
       extra: 'CREATE TABLE user_romance_preferences (user_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL, updated_at TEXT NOT NULL);',
       message: /v20 結構驗證失敗/,
     },
-    { version: '21', extra: '', message: /不支援/ },
+    { version: '23', extra: '', message: /不支援/ },
   ]) {
     resetCoinDatabaseForTests();
     fs.rmSync(dbPath, { force: true });
@@ -2758,7 +2828,7 @@ test('daily-riddle revalidates cutoff after parent send and after thread creatio
   assert.equal(discord.threadStarts, 0);
   assert.equal((await getDailyRiddleEvent('riddle-guild', '2026-09-04')).status, 'missed');
 
-  resetCoinDatabaseForTests();
+  resetCoinDatabaseForTests({ allowCreateOnNextOpen: true });
   fs.rmSync(dbPath, { force: true });
   discord = createFakeRiddleDiscord();
   await setGuildFeatureSetting('riddle-guild', 'daily_riddle', { enabled: true, channelId: 'riddle-parent' });
@@ -2801,7 +2871,7 @@ test('daily-riddle blocks publish and answer recovery when marker history exceed
   assert.equal([...discord.parentMessages.values()].filter((message) => message.author.bot).length, 1);
   assert.equal(discord.threadStarts, 0);
 
-  resetCoinDatabaseForTests();
+  resetCoinDatabaseForTests({ allowCreateOnNextOpen: true });
   fs.rmSync(dbPath, { force: true });
   discord = createFakeRiddleDiscord();
   await setGuildFeatureSetting('riddle-guild', 'daily_riddle', { enabled: true, channelId: 'riddle-parent' });
@@ -2946,7 +3016,7 @@ test('daily-riddle marks late and missed occurrences and crosses the Taipei midn
   await processDailyRiddleTick(discord.client, { now: new Date('2026-09-04T03:00:00.000Z') });
   assert.equal((await getDailyRiddleEvent('riddle-guild', '2026-09-04')).status, 'published_late');
 
-  resetCoinDatabaseForTests();
+  resetCoinDatabaseForTests({ allowCreateOnNextOpen: true });
   fs.rmSync(dbPath, { force: true });
   discord = createFakeRiddleDiscord();
   await setGuildFeatureSetting('riddle-guild', 'daily_riddle', { enabled: true, channelId: 'riddle-parent' });
@@ -3050,7 +3120,7 @@ test('daily-riddle message routing isolates guild/thread, records before mention
   assert.equal(clearedTimeout, timers.boundaryTimer);
   assert.equal(clearedInterval, timers.watchdogTimer);
 
-  resetCoinDatabaseForTests();
+  resetCoinDatabaseForTests({ allowCreateOnNextOpen: true });
   fs.rmSync(dbPath, { force: true });
   const defaultsOff = createFakeRiddleDiscord();
   await processDailyRiddleTick(defaultsOff.client, { now: new Date('2026-09-04T02:00:00.000Z') });
@@ -3452,167 +3522,138 @@ test('casino venue menu seeds defaults and accepts user-added items', async () =
   assert.ok(drinks.some((item) => item.id === created.id && item.name === '測試蜂蜜茶'));
 });
 
-test('venue job bundle starts multiple jobs on one shared cycle and prevents waiter conflicts', async () => {
-  const result = await startVenueJobs('guild-1', 'staff-1', {
-    days: 10,
-    chef: true,
-    bartender: true,
-    waiter: '制服服務生',
-  });
-
-  assert.equal(result.jobs.length, 3);
-  assert.equal(new Set(result.jobs.map((job) => job.payAt)).size, 1);
-  assert.equal(result.jobs.every((job) => job.workDays === 10), true);
-
-  await assert.rejects(
-    () => startJob('guild-1', 'staff-1', '服務生', 10),
-    (error) => error instanceof CoinServiceError && error.code === 'WAITER_JOB_CONFLICT'
-  );
-  await assert.rejects(
-    () => startJob('guild-1', 'staff-1', '廚師', 5),
-    (error) => error instanceof CoinServiceError && error.code === 'HAS_ACTIVE_JOB'
-  );
+test('venue staff can select exactly one global primary job', async () => {
+  await assert.rejects(() => startVenueJobs('2001', '1001', {
+    days: 10, chef: true, bartender: true, waiter: '制服服務生',
+  }), { code: 'ONE_PRIMARY_JOB_REQUIRED' });
+  const selected = await startVenueJobs('2001', '1001', { days: 10, waiter: '制服服務生' });
+  assert.equal(selected.jobName, '制服服務生');
+  assert.equal(selected.state, 'pending_legacy');
+  await assert.rejects(() => startJob('2002', '1001', '廚師', 5), { code: 'PRIMARY_JOB_EXISTS' });
 });
 
 test('casino venue orders assign active staff and require assigned makers to complete items', async () => {
-  await startJob('guild-1', 'chef-1', '廚師', 1);
-  await startJob('guild-1', 'bartender-1', '調酒師', 1);
-  await startJob('guild-1', 'waiter-1', '服務生', 1);
-  await adjustPlayerBalance('guild-1', 'customer-1', {
-    action: 'add',
-    amount: 100,
-    operatorId: 'admin-1',
-    reason: 'tip funds',
-  });
-  const meal = (await listVenueMenu('guild-1', { itemType: VenueItemType.MEAL }))[0];
-  const drink = (await listVenueMenu('guild-1', { itemType: VenueItemType.DRINK }))[0];
+  await activatePrimaryForFixture('2001', '1001', '廚師', 70);
+  await activatePrimaryForFixture('2002', '1002', '調酒師', 60);
+  await activatePrimaryForFixture('2003', '1003', '服務生', 0);
+  await fundVenueFixture('2001', '3001', 100);
+  const membership = await verifiedVenueFixture('2001', ['1001', '1002', '1003']);
+  const meal = (await listVenueMenu('2001', { itemType: VenueItemType.MEAL }))[0];
+  const drink = (await listVenueMenu('2001', { itemType: VenueItemType.DRINK }))[0];
 
-  const result = await createVenueOrder('guild-1', 'customer-1', {
+  const result = await createVenueOrder('2001', '3001', {
     mealId: meal.id,
     drinkId: drink.id,
-    chefId: 'chef-1',
-    bartenderId: 'bartender-1',
-    waiterId: 'waiter-1',
+    chefId: '1001',
+    bartenderId: '1002',
+    waiterId: '1003',
     tipAmount: 50,
-    date: new Date('2026-05-20T04:00:00.000Z'),
+    membership,
   });
   const mealItem = result.items.find((item) => item.itemType === VenueItemType.MEAL);
   const drinkItem = result.items.find((item) => item.itemType === VenueItemType.DRINK);
 
   assert.equal(result.items.length, 2);
-  assert.equal(mealItem.makerUserId, 'chef-1');
-  assert.equal(drinkItem.makerUserId, 'bartender-1');
-  assert.equal(result.order.waiterUserId, 'waiter-1');
+  assert.equal(mealItem.makerUserId, '1001');
+  assert.equal(drinkItem.makerUserId, '1002');
+  assert.equal(result.order.waiterUserId, '1003');
+  assert.equal(result.order.waiterGlobalCycleId !== null, true);
   assert.equal(result.order.tipAmount, 50);
   assert.equal(mealItem.status, 'pending');
 
-  const recipe = await getVenueRecipe('guild-1', 'chef-1', mealItem.id);
+  const recipe = await getVenueRecipe('2001', '1001', mealItem.id);
   assert.equal(recipe.id, mealItem.id);
   await assert.rejects(
-    () => getVenueRecipe('guild-1', 'customer-1', mealItem.id),
+    () => getVenueRecipe('2001', '3001', mealItem.id),
     (error) => error instanceof CoinServiceError && error.code === 'VENUE_RECIPE_OWNER_ONLY'
   );
 
-  const completedMeal = await completeVenueOrderItem('guild-1', 'chef-1', mealItem.id, {
+  const completedMeal = await completeVenueOrderItem('2001', '1001', mealItem.id, {
     steps: '熱鍋\n下飯\n調味\n盛盤',
-    date: new Date('2026-05-20T04:05:00.000Z'),
   });
-  await completeVenueOrderItem('guild-1', 'bartender-1', drinkItem.id, {
+  await completeVenueOrderItem('2001', '1002', drinkItem.id, {
     steps: '加冰\n倒入飲料\n攪拌\n裝飾',
-    date: new Date('2026-05-20T04:06:00.000Z'),
   });
-  const served = await serveVenueOrder('guild-1', 'waiter-1', result.order.id, {
-    date: new Date('2026-05-20T04:08:00.000Z'),
-  });
-  const chefTasks = await listWorkTasks('guild-1', { userId: 'chef-1', limit: 10 });
-  const waiterChips = await getChipBalance('guild-1', 'waiter-1');
-  const customerBalance = await getPlayerBalance('guild-1', 'customer-1');
+  const served = await serveVenueOrder('2001', '1003', result.order.id);
+  const chefTasks = await listWorkTasks('2001', { userId: '1001', limit: 10 });
+  const waiterChips = await getChipBalance('2001', '1003');
+  const customerChips = await getChipBalance('2001', '3001');
 
   assert.equal(completedMeal.item.status, 'completed');
   assert.equal(completedMeal.item.actualSteps, '熱鍋\n下飯\n調味\n盛盤');
   assert.equal(served.order.tipStatus, 'paid');
   assert.equal(waiterChips.balance, 50);
-  assert.equal(customerBalance.balance, 50);
+  assert.equal(customerChips.balance, 50);
   assert.ok(chefTasks.some((task) => task.taskType === 'casino_venue_meal' && task.status === 'completed'));
 });
 
 test('casino venue chef bonus is paid through regular payroll after the tenth completed meal', async () => {
-  const job = await startJob('guild-1', 'chef-1', '廚師', 1);
-  await startJob('guild-1', 'waiter-1', '服務生', 1);
-  const meal = (await listVenueMenu('guild-1', { itemType: VenueItemType.MEAL }))[0];
-  const baseDate = new Date('2026-05-20T04:00:00.000Z');
+  const chefCycle = await activatePrimaryForFixture('2001', '1001', '廚師', 70);
+  await activatePrimaryForFixture('2001', '1002', '服務生', 0);
+  const membership = await verifiedVenueFixture('2001', ['1001', '1002']);
+  const meal = (await listVenueMenu('2001', { itemType: VenueItemType.MEAL }))[0];
+  const baseDate = new Date();
 
   for (let index = 0; index < 11; index += 1) {
     const date = new Date(baseDate.getTime() + index * 1000);
-    await adjustPlayerBalance('guild-1', `customer-${index}`, {
-      action: 'add',
-      amount: 50,
-      operatorId: 'admin-1',
-      reason: 'tip funds',
-    });
-    const order = await createVenueOrder('guild-1', `customer-${index}`, {
+    const customerId = String(3000 + index);
+    await fundVenueFixture('2001', customerId, 50);
+    const order = await createVenueOrder('2001', customerId, {
       mealId: meal.id,
-      chefId: 'chef-1',
-      waiterId: 'waiter-1',
+      chefId: '1001',
+      waiterId: '1002',
       tipAmount: 50,
       date,
+      membership,
     });
-    await completeVenueOrderItem('guild-1', 'chef-1', order.items[0].id, {
+    await completeVenueOrderItem('2001', '1001', order.items[0].id, {
       steps: `備料 ${index}\n加熱\n調味\n出餐`,
       date: new Date(date.getTime() + 500),
     });
   }
 
-  await withCoinTransaction((api) => {
-    api.run("UPDATE coin_jobs SET pay_at = ? WHERE id = ?", ['2000-01-01T00:00:00.000Z', job.id]);
-  });
-
-  const result = await processDueJobs();
-  const payroll = await getPayrollHistory('guild-1', { userId: 'chef-1' });
-  const player = await getPlayerBalance('guild-1', 'chef-1');
+  const result = await duePrimaryForFixture(chefCycle);
+  const payroll = await getPrimaryPayrollHistory('1001');
+  const player = await getPlayerBalance('2001', '1001');
   const bonusRows = await withCoinTransaction((api) =>
     api.all('SELECT bonus_amount, bonus_paid FROM casino_venue_order_items WHERE guild_id = ? ORDER BY id ASC', [
-      'guild-1',
+      '2001',
     ])
   );
 
-  assert.equal(result.success, 1);
-  assert.equal(payroll[0].baseSalary, 70);
-  assert.equal(payroll[0].totalTasks, 11);
+  assert.equal(result.settled, 1);
+  assert.equal(payroll[0].grossAmount, 90);
   assert.equal(payroll[0].paidAmount, 90);
-  assert.match(payroll[0].reason, /場館訂單獎金 1 筆/);
   assert.equal(player.balance, 90);
   assert.equal(bonusRows.filter((row) => Number(row.bonus_amount) === 20).length, 1);
   assert.equal(bonusRows.filter((row) => Number(row.bonus_paid) === 1).length, 1);
 });
 
 test('casino venue enforces per-user order rate limit', async () => {
-  await startJob('guild-1', 'waiter-1', '服務生', 1);
-  await adjustPlayerBalance('guild-1', 'customer-1', {
-    action: 'add',
-    amount: 600,
-    operatorId: 'admin-1',
-    reason: 'tip funds',
-  });
-  const meal = (await listVenueMenu('guild-1', { itemType: VenueItemType.MEAL }))[0];
-  const baseDate = new Date('2026-05-20T04:00:00.000Z');
+  await activatePrimaryForFixture('2001', '1001', '服務生', 0);
+  await fundVenueFixture('2001', '3001', 600);
+  const membership = await verifiedVenueFixture('2001', ['1001'], { completeRoster: true });
+  const meal = (await listVenueMenu('2001', { itemType: VenueItemType.MEAL }))[0];
+  const baseDate = new Date();
 
   for (let index = 0; index < 10; index += 1) {
-    await createVenueOrder('guild-1', 'customer-1', {
+    await createVenueOrder('2001', '3001', {
       mealId: meal.id,
-      waiterId: 'waiter-1',
+      waiterId: '1001',
       tipAmount: 50,
       date: new Date(baseDate.getTime() + index * 1000),
+      membership,
     });
   }
 
   await assert.rejects(
     () =>
-      createVenueOrder('guild-1', 'customer-1', {
+      createVenueOrder('2001', '3001', {
         mealId: meal.id,
-        waiterId: 'waiter-1',
+        waiterId: '1001',
         tipAmount: 50,
         date: new Date(baseDate.getTime() + 10 * 1000),
+        membership,
       }),
     (error) => error instanceof CoinServiceError && error.code === 'VENUE_ORDER_RATE_LIMIT'
   );
@@ -3707,205 +3748,179 @@ test('casino lodging and duel tower use chips and shop battle items', async () =
 });
 
 test('casino venue expired pending items are completed by npc, penalized, and waiter tips refund', async () => {
-  await startJob('guild-1', 'chef-1', '廚師', 1);
-  await startJob('guild-1', 'waiter-1', '服務生', 1);
-  await adjustPlayerBalance('guild-1', 'customer-1', {
-    action: 'add',
-    amount: 50,
-    operatorId: 'admin-1',
-    reason: 'tip funds',
-  });
-  const meal = (await listVenueMenu('guild-1', { itemType: VenueItemType.MEAL }))[0];
-  const order = await createVenueOrder('guild-1', 'customer-1', {
+  await activatePrimaryForFixture('2001', '1001', '廚師', 70);
+  await activatePrimaryForFixture('2001', '1002', '服務生', 0);
+  await fundVenueFixture('2001', '3001', 50);
+  const membership = await verifiedVenueFixture('2001', ['1001', '1002']);
+  const meal = (await listVenueMenu('2001', { itemType: VenueItemType.MEAL }))[0];
+  const order = await createVenueOrder('2001', '3001', {
     mealId: meal.id,
-    chefId: 'chef-1',
-    waiterId: 'waiter-1',
+    chefId: '1001',
+    waiterId: '1002',
     tipAmount: 50,
-    date: new Date('2026-05-20T00:00:00.000Z'),
+    membership,
   });
 
   assert.equal(order.items[0].status, 'pending');
 
-  const expired = await processExpiredVenueOrderItems({
-    date: new Date('2026-05-21T01:00:00.000Z'),
-  });
-  const history = await listVenueHistory('guild-1', { limit: 1 });
-  const tasks = await listWorkTasks('guild-1', { userId: 'chef-1', limit: 10 });
-  const penalties = await listWorkPenalties('guild-1', { userId: 'chef-1' });
-  const customerChips = await getChipBalance('guild-1', 'customer-1');
+  const future = new Date(Date.now() + 25 * 60 * 60 * 1000);
+  const expired = await processExpiredVenueOrderItems({ date: future });
+  await processExpiredWorkTasks(null, { date: future });
+  const history = await listVenueHistory('2001', { limit: 1 });
+  const tasks = await listWorkTasks('2001', { userId: '1001', limit: 10 });
+  const penalties = await withCoinDatabase((api) => api.all(
+    "SELECT amount FROM coin_primary_cycle_penalties WHERE user_id = '1001'"
+  ));
+  const customerChips = await getChipBalance('2001', '3001');
 
   assert.equal(expired.completedByNpc, 1);
   assert.equal(expired.waiterRefunded, 1);
   assert.equal(history[0].status, 'completed');
   assert.equal(history[0].makerIsNpc, true);
   assert.ok(tasks.some((task) => task.status === 'system_completed'));
-  assert.equal(penalties[0].penaltyAmount, 70);
+  assert.equal(penalties[0].amount, 70);
   assert.equal(customerChips.balance, 50);
 });
 
 test('work payroll requires a valid submission and pays the full updated salary', async () => {
-  const job = await startJob('guild-1', 'user-1', '會計師', 1);
-  await addPendingTask('guild-1', 'user-1', {
-    taskType: 'test_task',
-    description: '待完成測試任務',
-    dueHours: 1,
-  });
-  await reportWork('guild-1', 'user-1', {
+  const cycleId = await activatePrimaryForFixture('2001', '1001', '會計師', 500);
+  const report = await reportWork('2001', '1001', {
     taskType: 'test_report',
     description: '完成一筆測試工作',
+    channelName: '會計師',
   });
-  await withCoinTransaction((api) => {
-    api.run("UPDATE coin_jobs SET pay_at = ? WHERE id = ?", ['2000-01-01T00:00:00.000Z', job.id]);
-  });
+  const result = await duePrimaryForFixture(cycleId);
+  const payroll = await getPrimaryPayrollHistory('1001');
+  const player = await getPlayerBalance('2001', '1001');
+  const tasks = await listWorkTasks('2001', { userId: '1001', limit: 10 });
 
-  const result = await processDueJobs();
-  const payroll = await getPayrollHistory('guild-1', { userId: 'user-1' });
-  const player = await getPlayerBalance('guild-1', 'user-1');
-  const tasks = await listWorkTasks('guild-1', { userId: 'user-1', limit: 10 });
-
-  assert.equal(result.success, 1);
+  assert.equal(result.settled, 1);
   assert.equal(payroll.length, 1);
-  assert.equal(payroll[0].baseSalary, 500);
-  assert.equal(payroll[0].totalTasks, 1);
-  assert.equal(payroll[0].completedTasks, 1);
+  assert.equal(payroll[0].grossAmount, 500);
   assert.equal(payroll[0].paidAmount, 500);
   assert.equal(player.balance, 500);
-  assert.ok(tasks.some((task) => task.status === 'paid'));
-  assert.ok(tasks.some((task) => task.status === 'expired'));
+  assert.ok(tasks.some((task) => task.id === report.task.id && task.status === 'paid'));
 });
 
 test('work payroll skips payment when no valid submission exists', async () => {
-  const job = await startJob('guild-1', 'user-1', '迎賓員', 1);
-  await withCoinTransaction((api) => {
-    api.run("UPDATE coin_jobs SET pay_at = ? WHERE id = ?", ['2000-01-01T00:00:00.000Z', job.id]);
-  });
+  const cycleId = await activatePrimaryForFixture('2001', '1001', '迎賓員', 50);
+  const result = await duePrimaryForFixture(cycleId);
+  const payroll = await getPrimaryPayrollHistory('1001');
+  const player = await getPlayerBalance('2001', '1001');
 
-  const result = await processDueJobs();
-  const payroll = await getPayrollHistory('guild-1', { userId: 'user-1' });
-  const player = await getPlayerBalance('guild-1', 'user-1');
-
-  assert.equal(result.success, 1);
-  assert.equal(payroll[0].totalTasks, 0);
+  assert.equal(result.settled, 1);
   assert.equal(payroll[0].payRatio, 0);
   assert.equal(payroll[0].paidAmount, 0);
   assert.equal(player.balance, 0);
 });
 
 test('work payroll pays 75 percent basic salary when no work is available', async () => {
-  const job = await startJob('guild-1', 'user-1', '迎賓員', 1);
-  const report = await reportWork('guild-1', 'user-1', {
+  const cycleId = await activatePrimaryForFixture('2001', '1001', '迎賓員', 50);
+  const report = await reportWork('2001', '1001', {
     noWorkAvailable: true,
     channelName: '迎賓員',
   });
-  await withCoinTransaction((api) => {
-    api.run("UPDATE coin_jobs SET pay_at = ? WHERE id = ?", ['2000-01-01T00:00:00.000Z', job.id]);
-  });
-
-  const result = await processDueJobs();
-  const payroll = await getPayrollHistory('guild-1', { userId: 'user-1' });
-  const player = await getPlayerBalance('guild-1', 'user-1');
-  const tasks = await listWorkTasks('guild-1', { userId: 'user-1', limit: 10 });
+  const result = await duePrimaryForFixture(cycleId);
+  const payroll = await getPrimaryPayrollHistory('1001');
+  const player = await getPlayerBalance('2001', '1001');
+  const tasks = await listWorkTasks('2001', { userId: '1001', limit: 10 });
   const paidTask = tasks.find((task) => task.id === report.task.id);
 
-  assert.equal(result.success, 1);
-  assert.equal(payroll[0].baseSalary, 50);
+  assert.equal(result.settled, 1);
   assert.equal(payroll[0].payRatio, 0.75);
   assert.equal(payroll[0].paidAmount, 38);
-  assert.match(payroll[0].reason, /75% 基本薪資/);
   assert.equal(player.balance, 38);
   assert.equal(paidTask.status, 'paid');
 });
 
-test('expired assigned work is system-completed, penalized once per day, and appeal can refund', async () => {
-  const job = await startJob('guild-1', 'user-1', '老師', 1);
-  await addPendingTask('guild-1', 'user-1', {
+test('expired primary tasks are penalized per task and an approved appeal refunds actual withheld pay', async () => {
+  const cycleId = await activatePrimaryForFixture('2001', '1001', '老師', 400);
+  await addPendingTask('2001', '1001', {
     taskType: 'lesson-plan',
     description: '準備課程',
     dueHours: 1,
   });
-  await addPendingTask('guild-1', 'user-1', {
+  await addPendingTask('2001', '1001', {
     taskType: 'lesson-review',
     description: '整理課後重點',
     dueHours: 1,
+  });
+  await reportWork('2001', '1001', {
+    taskType: 'lesson', description: '仍有完成一筆有效工作', channelName: '老師',
   });
 
   const expired = await processExpiredWorkTasks(null, {
     date: new Date(Date.now() + 25 * 60 * 60 * 1000),
   });
-  const penalties = await listWorkPenalties('guild-1', { userId: 'user-1' });
-  const tasks = await listWorkTasks('guild-1', { userId: 'user-1', limit: 10 });
+  const penalties = await withCoinDatabase((api) => api.all(
+    'SELECT * FROM coin_primary_cycle_penalties WHERE cycle_id = ? ORDER BY id', [cycleId]
+  ));
+  const tasks = await listWorkTasks('2001', { userId: '1001', limit: 10 });
 
-  assert.equal(expired.completedBySystem, 2);
-  assert.equal(penalties.length, 1);
-  assert.equal(penalties[0].penaltyAmount, 400);
+  assert.equal(expired.primary.completed, 2);
+  assert.equal(penalties.length, 2);
+  assert.equal(penalties[0].amount, 400);
   assert.equal(tasks.filter((task) => task.status === 'system_completed').length, 2);
 
-  await withCoinTransaction((api) => {
-    api.run("UPDATE coin_jobs SET pay_at = ? WHERE id = ?", ['2000-01-01T00:00:00.000Z', job.id]);
-  });
-  await reportWork('guild-1', 'user-1', {
-    taskType: 'lesson',
-    description: '仍有完成一筆有效工作',
-    channelName: '老師',
-  });
-  await processDueJobs();
-  const payroll = await getPayrollHistory('guild-1', { userId: 'user-1' });
-  const afterPenalty = await getPlayerBalance('guild-1', 'user-1');
+  await duePrimaryForFixture(cycleId);
+  const payroll = await getPrimaryPayrollHistory('1001');
+  const afterPenalty = await getPlayerBalance('2001', '1001');
 
   assert.equal(payroll[0].paidAmount, 0);
-  assert.match(payroll[0].reason, /逾期扣薪 1 筆/);
   assert.equal(afterPenalty.balance, 0);
 
-  const appeal = await createWorkPenaltyAppeal('guild-1', 'user-1', penalties[0].id, {
+  const appeal = await createPrimaryPenaltyAppeal('1001', penalties[0].id, {
     reason: '當日已補交證明，請審核。',
   });
-  const reviewed = await reviewWorkPenaltyAppeal('guild-1', 'owner-1', appeal.appeal.id, {
-    action: 'approved',
-    reason: '申訴通過',
-  });
-  const afterRefund = await getPlayerBalance('guild-1', 'user-1');
+  const priorOwnerId = process.env.BOT_OWNER_ID;
+  process.env.BOT_OWNER_ID = '9001';
+  let reviewed;
+  try {
+    reviewed = await reviewPrimaryPenaltyAppeal('9001', appeal.appealId, {
+      action: 'approved', reason: '申訴通過',
+    });
+  } finally {
+    if (priorOwnerId === undefined) delete process.env.BOT_OWNER_ID;
+    else process.env.BOT_OWNER_ID = priorOwnerId;
+  }
+  const afterRefund = await getPlayerBalance('2001', '1001');
 
-  assert.equal(reviewed.appeal.status, 'approved');
+  assert.equal(reviewed.status, 'approved');
   assert.equal(reviewed.refund.amount, 400);
   assert.equal(afterRefund.balance, 400);
 });
 
 test('translator payroll adds external server bonus and de-duplicates server ids per Taiwan date', async () => {
-  const job = await startJob('guild-1', 'user-1', '翻譯官', 1);
-  await reportWork('guild-1', 'user-1', {
+  const cycleId = await activatePrimaryForFixture('2001', '1001', '翻譯官', 300);
+  await reportWork('2001', '1001', {
     taskType: 'translation',
     description: '完成外交翻譯與宣傳',
-    externalServerIds: 'server-a, server-b, server-a',
+    channelName: '翻譯官',
+    externalServerIds: ['4001', '4002', '4001'],
   });
-  await withCoinTransaction((api) => {
-    api.run("UPDATE coin_jobs SET pay_at = ? WHERE id = ?", ['2000-01-01T00:00:00.000Z', job.id]);
-  });
+  await duePrimaryForFixture(cycleId);
+  const payroll = await getPrimaryPayrollHistory('1001');
+  const player = await getPlayerBalance('2001', '1001');
 
-  await processDueJobs();
-  const payroll = await getPayrollHistory('guild-1', { userId: 'user-1' });
-  const player = await getPlayerBalance('guild-1', 'user-1');
-
-  assert.equal(payroll[0].baseSalary, 300);
   assert.equal(payroll[0].paidAmount, 700);
-  assert.match(payroll[0].reason, /外部伺服器任務 2 個/);
   assert.equal(player.balance, 700);
 });
 
 test('work submissions can be edited, reviewed back to pending, and soft-deleted', async () => {
-  await startJob('guild-1', 'user-1', '老師', 1);
-  const submitted = await reportWork('guild-1', 'user-1', {
+  await activatePrimaryForFixture('2001', '1001', '老師', 400);
+  const submitted = await reportWork('2001', '1001', {
     taskType: 'teaching',
     description: '三個知識點初稿',
     channelName: '老師',
   });
-  const approved = await reviewWorkSubmission('guild-1', 'admin-1', submitted.task.id, {
+  const approved = await reviewWorkSubmission('2001', '9001', submitted.task.id, {
     action: 'approved',
     reason: '內容完整',
   });
-  const edited = await editWorkSubmission('guild-1', 'user-1', submitted.task.id, {
+  const edited = await editWorkSubmission('2001', '1001', submitted.task.id, {
     description: '修正後的三個知識點',
   });
-  const deleted = await deleteWorkSubmission('guild-1', 'user-1', submitted.task.id);
+  const deleted = await deleteWorkSubmission('2001', '1001', submitted.task.id);
 
   assert.equal(submitted.task.status, 'pending');
   assert.equal(approved.status, 'approved');
@@ -3916,55 +3931,50 @@ test('work submissions can be edited, reviewed back to pending, and soft-deleted
 });
 
 test('users cannot edit or delete other users submissions', async () => {
-  await startJob('guild-1', 'user-1', '清潔工', 1);
-  const submitted = await reportWork('guild-1', 'user-1', {
+  await activatePrimaryForFixture('2001', '1001', '清潔工', 100);
+  const submitted = await reportWork('2001', '1001', {
     description: '回報錯頻整理',
     channelName: '清潔工',
   });
 
   await assert.rejects(
     () =>
-      editWorkSubmission('guild-1', 'user-2', submitted.task.id, {
+      editWorkSubmission('2001', '1002', submitted.task.id, {
         description: '不是本人的修改',
       }),
     (error) => error instanceof CoinServiceError && error.code === 'NOT_OWN_SUBMISSION'
   );
   await assert.rejects(
-    () => deleteWorkSubmission('guild-1', 'user-2', submitted.task.id),
+    () => deleteWorkSubmission('2001', '1002', submitted.task.id),
     (error) => error instanceof CoinServiceError && error.code === 'NOT_OWN_SUBMISSION'
   );
 });
 
 test('deleted submissions are excluded from payroll and paid submissions are locked', async () => {
-  const job = await startJob('guild-1', 'user-1', '小幫手', 1);
-  const deleted = await reportWork('guild-1', 'user-1', {
+  const cycleId = await activatePrimaryForFixture('2001', '1001', '小幫手', 200);
+  const deleted = await reportWork('2001', '1001', {
     description: '錯誤提交',
     channelName: '小幫手',
   });
-  await deleteWorkSubmission('guild-1', 'user-1', deleted.task.id);
-  const valid = await reportWork('guild-1', 'user-1', {
+  await deleteWorkSubmission('2001', '1001', deleted.task.id);
+  const valid = await reportWork('2001', '1001', {
     description: '完成三件以內雜務',
     channelName: '小幫手',
   });
-  await withCoinTransaction((api) => {
-    api.run("UPDATE coin_jobs SET pay_at = ? WHERE id = ?", ['2000-01-01T00:00:00.000Z', job.id]);
-  });
-
-  await processDueJobs();
-  const payroll = await getPayrollHistory('guild-1', { userId: 'user-1' });
-  const tasks = await listWorkTasks('guild-1', { userId: 'user-1', limit: 10 });
+  await duePrimaryForFixture(cycleId);
+  const payroll = await getPrimaryPayrollHistory('1001');
+  const tasks = await listWorkTasks('2001', { userId: '1001', limit: 10 });
   const paidTask = tasks.find((task) => task.id === valid.task.id);
 
-  assert.equal(payroll[0].totalTasks, 1);
   assert.equal(payroll[0].paidAmount, 200);
   assert.equal(paidTask.status, 'paid');
 
   await assert.rejects(
-    () => editWorkSubmission('guild-1', 'user-1', valid.task.id, { description: '發薪後修改' }),
+    () => editWorkSubmission('2001', '1001', valid.task.id, { description: '發薪後修改' }),
     (error) => error instanceof CoinServiceError && error.code === 'SUBMISSION_ALREADY_PAID'
   );
   await assert.rejects(
-    () => deleteWorkSubmission('guild-1', 'user-1', valid.task.id),
+    () => deleteWorkSubmission('2001', '1001', valid.task.id),
     (error) => error instanceof CoinServiceError && error.code === 'SUBMISSION_ALREADY_PAID'
   );
 });

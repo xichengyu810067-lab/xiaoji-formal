@@ -3,6 +3,12 @@ const path = require('node:path');
 
 const DEFAULT_MANIFEST_PATH = path.join(__dirname, '..', 'public-export', 'manifest.json');
 const FORBIDDEN_SEGMENTS = new Set(['.git', 'data', 'database', 'deploy', 'logs', 'private', 'storage']);
+const BOARD_STORAGE_SOURCES = new Set([
+  'src/games/storage/boardSchema.js',
+  'src/games/storage/sqliteBoardStore.js',
+  'src/systems/games/board/storage/boardSchema.js',
+  'src/systems/games/board/storage/sqliteBoardStore.js',
+]);
 const FORBIDDEN_FILE_NAMES = new Set([
   '.env',
   'ecosystem.config.cjs',
@@ -27,7 +33,7 @@ function normalizeRelativePath(value) {
 function assertAllowedPath(relativePath) {
   const normalized = normalizeRelativePath(relativePath);
   const parts = normalized.split('/');
-  const isBoardStorageSource = normalized.startsWith('src/games/storage/') && normalized.endsWith('.js');
+  const isBoardStorageSource = BOARD_STORAGE_SOURCES.has(normalized);
   if (parts.some((part) => FORBIDDEN_SEGMENTS.has(part.toLowerCase()) &&
       !(isBoardStorageSource && part.toLowerCase() === 'storage'))) {
     throw new Error(`Public export refuses protected path: ${normalized}`);
