@@ -385,7 +385,8 @@ function getPrivateRecords(userId) {
   }
 
   const memory = readMemory();
-  return sortNewestFirst(memory.private_user_memory[userId] || []);
+  // 記憶依序加入；時間戳相同時，後加入的紀錄應排在前面。
+  return sortNewestFirst((memory.private_user_memory[userId] || []).slice().reverse());
 }
 
 function getAllPrivateRecords() {

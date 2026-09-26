@@ -8,10 +8,10 @@ const test = require('node:test');
 const { exportPublicFiles } = require('../scripts/create-public-export');
 
 test('public initial install creates only the explicitly selected coin database once', () => {
-  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-public-init-'));
+  const temporaryDirectory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-public-init-')));
   const exportRoot = path.join(temporaryDirectory, 'public');
   const coinPath = path.join(temporaryDirectory, 'runtime', 'coins.sqlite');
-  assert.equal(path.dirname(temporaryDirectory), os.tmpdir());
+  assert.equal(path.dirname(temporaryDirectory), fs.realpathSync(os.tmpdir()));
   try {
     const files = exportPublicFiles({ outputPath: exportRoot }).files;
     assert.equal(files.includes('scripts/init-coin-db.js'), true);
@@ -40,7 +40,7 @@ test('public initial install creates only the explicitly selected coin database 
 });
 
 test('public initial install creates four JSON authorities once and preserves partial data', () => {
-  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-public-json-init-'));
+  const temporaryDirectory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-public-json-init-')));
   const exportRoot = path.join(temporaryDirectory, 'public');
   const auditPath = path.join(temporaryDirectory, 'protected', 'audit.json');
   const whitelistPath = path.join(temporaryDirectory, 'protected', 'whitelist.json');

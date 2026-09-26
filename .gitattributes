@@ -12,6 +12,9 @@
 *.yaml text eol=lf
 *.sh text eol=lf
 *.ps1 text eol=crlf
+src/data/.gitkeep text eol=lf
+src/games/assets/fonts/Cubic_11-OFL.txt text eol=lf
+src/games/assets/fonts/NotoSansSymbols-OFL.txt text eol=lf
 
 *.png binary
 *.jpg binary
