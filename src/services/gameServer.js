@@ -3,7 +3,7 @@ const { createHash } = require('node:crypto');
 const { getEnv } = require('../utils/env');
 const logger = require('../utils/logger');
 const { setFeatureHealth } = require('./featurePlatformService');
-const { exchangeLaunchToken, submitGameAction } = require('./gameService');
+const { exchangeLaunchToken, submitGameAction, getLegacyGameDrainState, resumePendingGameRewards } = require('./gameService');
 
 const DEFAULT_GAME_HOST = '127.0.0.1';
 const DEFAULT_GAME_PORT = 8790;
@@ -11,6 +11,7 @@ const MAX_BODY_BYTES = 8192;
 const MAX_URL_LENGTH = 512;
 const RATE_LIMIT = 60;
 let activeServer = null;
+let drainTimer = null;
 
 function parseEnabled(value) { return String(value || '').trim().toLowerCase() === 'true'; }
 function parsePort(value) { const port = Number.parseInt(String(value || ''), 10); return Number.isInteger(port) && port > 0 && port <= 65535 ? port : DEFAULT_GAME_PORT; }
@@ -99,8 +100,10 @@ async function startGameServer(options = {}) {
   const enabled = options.enabled ?? parseEnabled(getEnv('GAME_SERVER_ENABLED'));
   const loggerImpl = options.loggerImpl || logger;
   const healthReporter = options.healthReporter || setFeatureHealth;
+  const drainState = options.drainState || getLegacyGameDrainState;
   if (!enabled) {
-    await reportGameHealth('maintenance', 'game_server_disabled', healthReporter, loggerImpl);
+    const remaining = await drainState();
+    if (!remaining.drained) throw new Error('Legacy web game sessions or rewards remain; the game API must stay available for the drain.');
     return { started: false, reason: 'disabled' };
   }
   const host = parseHost(options.host ?? getEnv('GAME_SERVER_HOST'));
@@ -112,6 +115,10 @@ async function startGameServer(options = {}) {
     await reportGameHealth('broken', 'game_server_configuration_invalid', healthReporter, loggerImpl);
     throw new Error('GAME_SESSION_SECRET must contain at least 32 bytes when game server is enabled.');
   }
+  const remaining = await drainState();
+  if (remaining.drained) {
+    return { started: false, reason: 'drained' };
+  }
   const server = http.createServer(createGameRequestHandler({ allowedOrigins, secret, loggerImpl }));
   server.requestTimeout = 5000; server.headersTimeout = 6000; server.keepAliveTimeout = 3000;
   try {
@@ -121,10 +128,25 @@ async function startGameServer(options = {}) {
     throw error;
   }
   activeServer = server; const actualPort = server.address()?.port || port;
+  drainTimer = setInterval(() => {
+    void (async () => {
+      await (options.resumeRewards || resumePendingGameRewards)();
+      const state = await drainState();
+      if (state.drained) await stopGameServer();
+    })().catch(() => loggerImpl.warn('[GAME_SERVER] Legacy game drain check failed.'));
+  }, options.drainIntervalMs || 30_000);
+  drainTimer.unref?.();
   await reportGameHealth('normal', 'game_server_ready', healthReporter, loggerImpl);
   loggerImpl.info(`[GAME_SERVER] Listening on ${host}:${actualPort}.`);
   return { started: true, reused: false, host, port: actualPort };
 }
-async function stopGameServer() { const server = activeServer; activeServer = null; if (!server) return false; await new Promise((resolve) => server.close(resolve)); return true; }
+async function stopGameServer() {
+  if (drainTimer) clearInterval(drainTimer);
+  drainTimer = null;
+  const server = activeServer; activeServer = null;
+  if (!server) return false;
+  await new Promise((resolve) => server.close(resolve));
+  return true;
+}
 
 module.exports = { DEFAULT_GAME_HOST, DEFAULT_GAME_PORT, MAX_BODY_BYTES, MAX_URL_LENGTH, RATE_LIMIT, createGameRequestHandler, parseAllowedOrigins, parseEnabled, parseHost, parsePort, startGameServer, stopGameServer };

@@ -197,11 +197,13 @@ test('gateway paths record aggregate interactions while the public API remains r
   const root = path.resolve(__dirname, '..');
   const interactionEvent = fs.readFileSync(path.join(root, 'src/events/interactionCreate.js'), 'utf8');
   const messageEvent = fs.readFileSync(path.join(root, 'src/events/messageCreate.js'), 'utf8');
-  const mentionService = fs.readFileSync(path.join(root, 'src/services/mentionService.js'), 'utf8');
+  const chatFlow = fs.readFileSync(path.join(root, 'src/systems/conversation/chatFlow.js'), 'utf8');
+  const conversationCoordinator = fs.readFileSync(path.join(root, 'src/coordinators/conversationCoordinator.js'), 'utf8');
   const publicServer = fs.readFileSync(path.join(root, 'src/services/publicStatusServer.js'), 'utf8');
 
   assert.match(interactionEvent, /await recordPublicInteraction\(\)/);
   assert.match(messageEvent, /featureResult\.handled[\s\S]+await recordPublicInteraction\(\)/);
-  assert.match(mentionService, /await recordPublicInteraction\(\)/);
+  assert.match(chatFlow, /await recordConversationInteraction\(\)/);
+  assert.match(conversationCoordinator, /return recordPublicInteraction\(\)/);
   assert.doesNotMatch(publicServer, /recordFeatureUsage|recordPublicInteraction|INSERT|UPDATE|DELETE/i);
 });

@@ -24,13 +24,31 @@ const {
   countSudokuSolutions,
   createGameSession,
   exchangeLaunchToken,
+  getLegacyGameDrainState,
   resumePendingGameRewards,
   scoreTetrisLock,
   submitGameAction,
 } = require('../src/services/gameService');
 const { buildGameUrl, parseWebsitePublicUrl } = require('../src/commands/games');
 
-test.beforeEach(() => { resetCoinDatabaseForTests(); fs.rmSync(dbPath, { force: true }); });
+function stripV22Targets(db) {
+  db.exec('PRAGMA foreign_keys = OFF');
+  for (const table of [
+    'coin_owner_campaign_history_classifications', 'coin_owner_campaign_history_reviews',
+    'coin_owner_campaign_audience_members', 'coin_owner_campaign_recipients',
+    'coin_owner_campaign_audiences', 'coin_owner_campaigns',
+    'discord_game_actions', 'discord_game_rewards', 'discord_game_sessions',
+    'coin_work_legacy_snapshot_items', 'coin_work_legacy_snapshots',
+    'coin_work_legacy_settlements', 'coin_primary_cycle_penalty_appeals',
+    'coin_primary_cycle_penalties', 'coin_primary_cycle_payroll',
+    'coin_primary_job_cycles', 'coin_primary_jobs_global',
+    'coin_operation_receipts', 'reward_grants_v2', 'coin_bank_accounts_global',
+    'coin_bank_rates_global', 'coin_rate_history_global', 'chip_accounts_global',
+    'coin_global_economy_migrations',
+  ]) db.exec(`DROP TABLE IF EXISTS ${table}`);
+}
+
+test.beforeEach(() => { resetCoinDatabaseForTests({ allowCreateOnNextOpen: true }); fs.rmSync(dbPath, { force: true }); });
 test.after(() => {
   resetCoinDatabaseForTests();
   if (ownsDatabasePath) fs.rmSync(directory, { recursive: true, force: true });
@@ -90,6 +108,18 @@ test('launch token is single-use, expires, and action replay rejects tampering',
 
   const expiring = await createGameSession({ userId: 'user-b', guildId: 'guild-a', channelId: 'channel-a', gameType: 'sudoku', difficulty: 'hard', secret, now });
   await assert.rejects(() => exchangeLaunchToken(expiring.launchToken, { secret, now: new Date(now.getTime() + 31 * 60 * 1000) }), /expired/);
+});
+
+test('legacy web game drain keeps active sessions until their original 30 minute expiry', async () => {
+  await initializeCoinDatabase();
+  const now = new Date('2026-09-03T00:00:00.000Z');
+  await createGameSession({ userId: 'drain-user', guildId: 'drain-guild', channelId: 'drain-channel',
+    gameType: 'sudoku', difficulty: 'easy', secret, now });
+  assert.deepEqual(await getLegacyGameDrainState({ now }), { active: 1, pendingRewards: 0, drained: false });
+  assert.deepEqual(await getLegacyGameDrainState({ now: new Date(now.getTime() + 29 * 60 * 1000) }),
+    { active: 1, pendingRewards: 0, drained: false });
+  assert.deepEqual(await getLegacyGameDrainState({ now: new Date(now.getTime() + 31 * 60 * 1000) }),
+    { active: 0, pendingRewards: 0, drained: true });
 });
 
 test('expired action commits the expired state before rejecting and creates no reward', async () => {
@@ -169,11 +199,12 @@ test('completed game does not pay or remain pending when guild coins are disable
   assert.deepEqual(result, { grants: 0, rewardStatus: 'no_reward' });
 });
 
-test('schema v17 migrates through game v18 to current v21 idempotently and preserves incompatible bytes', async () => {
+test('schema v17 migrates through game v18 to current v22 idempotently and preserves incompatible bytes', async () => {
   const distPath = path.dirname(require.resolve('sql.js'));
   const SQL = await initSqlJs({ locateFile: (name) => path.join(distPath, name) });
   await initializeCoinDatabase(); resetCoinDatabaseForTests();
   const prior = new SQL.Database(fs.readFileSync(dbPath));
+  stripV22Targets(prior);
   prior.exec(`
     DROP TABLE game_rewards;
     DROP TABLE game_actions;
@@ -189,10 +220,10 @@ test('schema v17 migrates through game v18 to current v21 idempotently and prese
     UPDATE coin_metadata SET value='17' WHERE key='schema_version';
   `);
   fs.writeFileSync(dbPath, Buffer.from(prior.export())); prior.close();
-  const info = await initializeCoinDatabase(); assert.equal(info.schemaVersion, 21);
+  const info = await initializeCoinDatabase(); assert.equal(info.schemaVersion, 22);
   assert.equal(await withCoinDatabase((api) => api.get('SELECT value FROM game_sentinel').value), 'keep');
   resetCoinDatabaseForTests(); await initializeCoinDatabase();
-  assert.equal(await withCoinDatabase((api) => api.get("SELECT value FROM coin_metadata WHERE key='schema_version'").value), '21');
+  assert.equal(await withCoinDatabase((api) => api.get("SELECT value FROM coin_metadata WHERE key='schema_version'").value), '22');
 
   resetCoinDatabaseForTests(); fs.rmSync(dbPath, { force: true });
   const bad = new SQL.Database(); bad.exec("CREATE TABLE coin_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL); INSERT INTO coin_metadata VALUES ('schema_version','17','x'); CREATE TABLE game_sessions (id TEXT PRIMARY KEY)");

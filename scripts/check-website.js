@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { publication } = require('../website/policyPublication.js');
 
 const root = path.resolve(__dirname, '..');
 const publicStatusWorkerBase = 'https://xiaoji-public-status.xichengyu810067.workers.dev';
@@ -14,6 +15,7 @@ const requiredFiles = [
   'website/status.css',
   'website/statusData.js',
   'website/publicFeatureCatalog.js',
+  'website/policyPublication.js',
   'website/status.js',
   'website/games/game.css',
   'website/games/gameClientCore.js',
@@ -48,6 +50,8 @@ const statusHtml = read('website/status.html');
 const statusCss = read('website/status.css');
 const statusData = read('website/statusData.js');
 const publicFeatureCatalog = read('website/publicFeatureCatalog.js');
+const policyPublication = read('website/policyPublication.js');
+const policyPage = read('website/policies.html');
 const statusApp = read('website/status.js');
 const gameCore = read('website/games/gameClientCore.js');
 const gameApp = read('website/games/gameClient.js');
@@ -62,6 +66,7 @@ new vm.Script(app, { filename: 'website/app.js' });
 new vm.Script(statusApp, { filename: 'website/status.js' });
 new vm.Script(statusData, { filename: 'website/statusData.js' });
 new vm.Script(publicFeatureCatalog, { filename: 'website/publicFeatureCatalog.js' });
+new vm.Script(policyPublication, { filename: 'website/policyPublication.js' });
 new vm.Script(gameCore, { filename: 'website/games/gameClientCore.js' });
 new vm.Script(gameApp, { filename: 'website/games/gameClient.js' });
 assert(html.includes('lang="zh-Hant"'), 'Official website must declare Traditional Chinese');
@@ -71,6 +76,10 @@ assert(html.includes('今日互動'), 'Official website must label calendar-day 
 assert(html.includes('data-metric="status"'), 'Official website must show current status');
 assert(html.includes('./status.html'), 'Official website must link to the realtime status page');
 assert(html.includes('小吉'), 'Official website must consistently identify Xiaoji');
+assert(html.indexOf('policyPublication.js') < html.indexOf('siteSupport.js'), 'Official website must load the shared policy publication contract before support UI');
+assert(!/候選政策版本|本候選文本/.test(policyPage + policyPublication), 'Official website must not expose candidate-policy labels');
+const escapedPublicationText = publication.displayText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+assert((policyPage.match(new RegExp(`data-policy-publication><noscript>${escapedPublicationText}`, 'g')) || []).length === 2, 'No-JavaScript policy fallbacks must match the shared publication contract');
 assert(css.includes('@media (max-width: 620px)'), 'Official website must include a mobile layout');
 assert(css.includes('prefers-reduced-motion'), 'Official website must respect reduced-motion preferences');
 assert(app.includes('/overview'), 'Official website must load the public overview endpoint');

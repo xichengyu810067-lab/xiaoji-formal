@@ -25,8 +25,8 @@
       name: '實用工具',
       features: [
         { name: '天氣查詢', purpose: '查詢指定地點或自然語言的天氣問題。', howTo: '使用 /weather，或向小吉詢問天氣。', limitation: '一般使用者可用；即時查詢需要已設定天氣服務。' },
-        { name: '提醒', purpose: '新增、列出與刪除個人提醒，並在重啟後恢復排程。', howTo: '使用 /remind add、/remind list 或 /remind delete。', limitation: '一般使用者可用；提醒依使用者保存。' },
-        { name: '行事曆', purpose: '新增、列出與刪除活動事件。', howTo: '使用 /calendar add、/calendar list 或 /calendar delete。', limitation: '一般使用者可用；輸入時間與長度會先驗證。' },
+        { name: '跨伺服器個人提醒', purpose: '新增、列出與刪除自己的提醒，並在重啟後恢復排程。', howTo: '使用 /remind add、/remind list 或 /remind delete。', limitation: '提醒會發送到建立時的伺服器文字頻道；本人可跨伺服器管理自己的提醒，不能管理他人的提醒。' },
+        { name: '伺服器與個人行事曆', purpose: '管理伺服器活動，或建立只有自己可查詢的個人事件。', howTo: '伺服器活動使用 /calendar add、/calendar list、/calendar delete；個人事件使用 /calendar personal-add、personal-list、personal-delete。', limitation: '伺服器活動依所在伺服器隔離，新增與刪除需要 Manage Server；個人事件依帳號隔離，可跨伺服器列出與刪除，且只有本人可查詢。所有操作都要在伺服器文字頻道內進行。' },
         { name: '抽籤與擲骰', purpose: '抽取一則小吉籤，或擲出骰子與總和。', howTo: '使用 /fortune 或 /roll。', limitation: '骰子面數可設為 2–1000 面，數量可設為 1–20 顆。' },
       ],
     },
@@ -43,11 +43,11 @@
     {
       name: '吉幣、工作與銀行',
       features: [
-        { name: '吉幣與台灣每日簽到', purpose: '查看餘額、簽到、排行榜與經濟摘要。', howTo: '使用 /coins、/daily、/leaderboard 或 /economy leaderboard。', limitation: '每日簽到依台灣日期計算；每位玩家一天一次，於可使用小吉的伺服器間共用。全域吉幣增減、重置與 /coin-db status 僅限小吉擁有者；/coin-admin history、enable、disable 與 /economy overview、user、audit 僅限小吉擁有者或 Administrator；/economy leaderboard 可公開查看。' },
+        { name: '吉幣與台灣每日簽到', purpose: '查看跨伺服器帳號餘額、簽到、排行榜與經濟摘要。', howTo: '使用 /coins、/daily、/leaderboard 或 /economy leaderboard。', limitation: '每日簽到依台灣日期計算；每位玩家一天一次，於可使用小吉的伺服器間共用。全域吉幣增減、重置與 /coin-db status 僅限小吉擁有者；/coin-admin history、enable、disable 與 /economy overview、user、audit 僅限小吉擁有者或 Administrator；/economy leaderboard 可公開查看。' },
         { name: '全域商店與背包', purpose: '瀏覽普通或精品商品、購買商品，並查看自己的背包與購買紀錄。', howTo: '使用 /shop list、/shop buy、/buy、/shop purchases、/inventory，或 /luxury list、/luxury buy、/luxury inventory、/luxury history。', limitation: '普通與精品商品、庫存、限購與背包在可使用小吉的伺服器間共用；購買紀錄會保留來源伺服器。新商品不能附 Discord 身分組；商品上架與調整僅限小吉擁有者。' },
-        { name: '銀行與定存', purpose: '查看錢包、活存、定存與利率，並進行存提款及到期處理。', howTo: '使用 /bank balance、/bank deposit、/bank withdraw、/bank interest、/bank rate-list 或各項 fixed 子命令。', limitation: '一般使用者可查看自己的帳務與目前利率；查看他人或全體帳務、設定利率或查閱利率調整紀錄，僅限小吉擁有者或 Administrator。' },
-        { name: '工作系統', purpose: '查看職業、開始工作、提交產出、查看薪資與提出扣薪申訴。', howTo: '使用 /work list、/work start、/work status、/work submit、/work payroll 或 /work appeal。', limitation: '一般使用者可用；部分任務流程受伺服器權限與工作條件限制。' },
-        { name: '籌碼兌換', purpose: '查看吉幣與籌碼餘額，並進行兌換與查閱流水。', howTo: '使用 /exchange balance、/exchange buy-chips、/exchange cashout 或 /exchange history。', limitation: '一般使用者可用；交易需符合帳務資料條件。' },
+        { name: '銀行與定存', purpose: '查看跨伺服器帳號的錢包、活存、定存與利率，並進行存提款及到期處理。', howTo: '使用 /bank balance、/bank deposit、/bank withdraw、/bank interest、/bank rate-list 或各項 fixed 子命令。', limitation: '帳務與利率依帳號全域共用，但操作仍受目前伺服器的吉幣功能狀態限制；一般使用者可查看自己的帳務與目前利率。查看他人或全體帳務、設定利率或查閱利率調整紀錄，僅限小吉擁有者或 Administrator。' },
+        { name: '工作系統', purpose: '查看職業、選擇下一期唯一全域主職、提交產出、查看薪資與提出扣薪申訴。', howTo: '使用 /work list、/work start、/work status、/work submit、/work payroll 或 /work appeal。', limitation: '每個帳號同一時間只有一個全域主職；部分任務流程受伺服器權限與工作條件限制。' },
+        { name: '籌碼兌換', purpose: '查看帳號的吉幣與籌碼餘額，並進行兌換與查閱流水。', howTo: '使用 /exchange balance、/exchange buy-chips、/exchange cashout 或 /exchange history。', limitation: '帳號資料在可使用小吉的伺服器間共用；交易仍需符合帳務與場館條件。' },
       ],
     },
     {
@@ -61,11 +61,11 @@
       ],
     },
     {
-      name: '既有網頁遊戲',
+      name: 'Discord 遊戲（舊網頁 token 局僅過渡保留）',
       features: [
-        { name: '俄羅斯方塊', purpose: '透過一次性安全連結遊玩，並由伺服器驗證行動與獎勵。', howTo: '使用 /games play game:tetris。', limitation: '一般使用者可用；需網站、遊戲設定與健康狀態。' },
-        { name: '數字配對', purpose: '透過一次性安全連結遊玩數字配對，並由伺服器驗證行動與獎勵。', howTo: '使用 /games play game:number-match。', limitation: '一般使用者可用；需網站、遊戲設定與健康狀態。' },
-        { name: '數獨', purpose: '透過一次性安全連結遊玩數獨，並由伺服器驗證行動與獎勵。', howTo: '使用 /games play game:sudoku。', limitation: '一般使用者可用；需網站、遊戲設定與健康狀態。' },
+        { name: '俄羅斯方塊', purpose: '在 Discord 面板操作個人俄羅斯方塊；行動與獎勵由伺服器驗證。', howTo: '先使用 /games menu，或使用 /games play game:tetris 選擇難度。', limitation: '個人遊戲只由建立者在原伺服器文字頻道操作；面板遺失時使用 /games resume。新局不使用網頁入口。' },
+        { name: '數字配對', purpose: '在 Discord 面板操作個人數字配對；行動與獎勵由伺服器驗證。', howTo: '先使用 /games menu，或使用 /games play game:number-match 選擇難度。', limitation: '個人遊戲只由建立者在原伺服器文字頻道操作；面板遺失時使用 /games resume。新局不使用網頁入口。' },
+        { name: '數獨', purpose: '在 Discord 面板操作個人數獨；行動與獎勵由伺服器驗證。', howTo: '先使用 /games menu，或使用 /games play game:sudoku 選擇難度。', limitation: '個人遊戲只由建立者在原伺服器文字頻道操作；面板遺失時使用 /games resume。新局不使用網頁入口。' },
       ],
     },
     {

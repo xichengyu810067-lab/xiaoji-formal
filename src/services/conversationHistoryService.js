@@ -211,6 +211,26 @@ function clearConversationHistory(identity) {
   });
 }
 
+function deleteConversationProjection({ userId, guildId = null, scope = guildId ? 'guild' : 'all',
+  channelId = null, from = null, to = null }) {
+  if (!userId) throw new Error('userId is required.');
+  if (!fs.existsSync(getHistoryPath())) return Promise.resolve({ persisted: true, absent: true });
+  return enqueueMutation((state) => {
+    for (const [key, conversation] of Object.entries(state.conversations)) {
+      if (conversation.userId !== userId ||
+        (scope === 'dm' && conversation.guildId !== 'dm') ||
+        (scope === 'guild' && conversation.guildId !== guildId) ||
+        (channelId !== null && conversation.channelId !== channelId)) continue;
+      conversation.turns = conversation.turns.filter((turn) =>
+        (from && Date.parse(turn.createdAt) < Date.parse(from)) ||
+        (to && Date.parse(turn.createdAt) > Date.parse(to)));
+      if (conversation.turns.length === 0) delete state.conversations[key];
+      else conversation.updatedAt = conversation.turns.at(-1).createdAt;
+    }
+    return state;
+  });
+}
+
 function clearExpiredConversationHistory(now = Date.now()) {
   return enqueueMutation((state) => pruneState(state, now));
 }
@@ -276,6 +296,7 @@ async function resetConversationHistoryForTests() {
 module.exports = {
   DEFAULT_RETENTION_CLEANUP_INTERVAL_MS,
   clearConversationHistory,
+  deleteConversationProjection,
   clearExpiredConversationHistory,
   getConversationHistoryStatus,
   getConversationKey,

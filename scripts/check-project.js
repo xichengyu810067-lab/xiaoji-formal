@@ -27,7 +27,7 @@ function checkProject() {
   if (!commands.has('help') || !commands.has('set-welcome')) failures.push('Required public commands are missing.');
 
   const coinDatabase = fs.readFileSync(path.join(projectRoot, 'src/services/coinDatabase.js'), 'utf8');
-  if (!coinDatabase.includes('const schemaVersion = 21;')) failures.push('Global economy requires coin schema v21.');
+  if (!coinDatabase.includes('const schemaVersion = 22;')) failures.push('Global economy requires coin schema v22.');
 
   const exportFiles = buildPublicExportPlan({ sourceRoot: projectRoot });
   if (!exportFiles.includes('src/index.js')) failures.push('Public export manifest omits the core entrypoint.');

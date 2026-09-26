@@ -106,6 +106,7 @@ function readAssemblyContract(deploymentRoot, contractPath) {
     publicRuntimeFiles: normalizeStringArray(contract.publicRuntimeFiles, 'publicRuntimeFiles'),
     extensionJavaScriptRoots: normalizeStringArray(contract.extensionJavaScriptRoots, 'extensionJavaScriptRoots'),
     extensionRuntimeFiles: normalizeStringArray(contract.extensionRuntimeFiles, 'extensionRuntimeFiles'),
+    privateRuntimeFiles: normalizeStringArray(contract.privateRuntimeFiles || [], 'privateRuntimeFiles'),
     requiredSharedFiles: normalizeStringArray(contract.requiredSharedFiles, 'requiredSharedFiles'),
     contractPath: normalizedContractPath,
   });
@@ -114,7 +115,7 @@ function readAssemblyContract(deploymentRoot, contractPath) {
 function buildAssemblyFilePlan(deploymentRoot, contractPath) {
   const contract = readAssemblyContract(deploymentRoot, contractPath);
   const publicFiles = new Set([...contract.publicRuntimeFiles, ...contract.requiredSharedFiles]);
-  const extensionFiles = new Set([...contract.extensionRuntimeFiles, contract.contractPath]);
+  const extensionFiles = new Set([...contract.extensionRuntimeFiles, ...contract.privateRuntimeFiles, contract.contractPath]);
 
   for (const root of contract.publicJavaScriptRoots) {
     for (const file of walkJavaScriptFiles(deploymentRoot, root)) publicFiles.add(file);
@@ -133,7 +134,8 @@ function buildAssemblyFilePlan(deploymentRoot, contractPath) {
     resolveInsideRoot(deploymentRoot, file);
   }
   for (const file of extensionFiles) {
-    if (!file.startsWith(`${contract.extensionRelativePath}/`)) {
+    if (!file.startsWith(`${contract.extensionRelativePath}/`) &&
+      !(contract.privateRuntimeFiles.includes(file) && file.startsWith('private/'))) {
       throw new Error(`Extension assembly source is outside the extension: ${file}`);
     }
     resolveInsideRoot(deploymentRoot, file);
