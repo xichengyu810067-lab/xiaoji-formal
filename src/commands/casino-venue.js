@@ -17,6 +17,7 @@ const {
 } = require('../services/venueService');
 const { formatChips, replyCoinError } = require('../utils/coinPresentation');
 const { ensureModerationAccess } = require('../utils/moderation');
+const { verifyVenueMembers } = require('../platform/venueMembership');
 
 const itemTypeChoices = [
   { name: '餐點', value: VenueItemType.MEAL },
@@ -234,14 +235,24 @@ module.exports = {
       }
 
       if (subcommand === 'order') {
+        const mealId = interaction.options.getInteger('meal');
+        const drinkId = interaction.options.getInteger('drink');
+        const chefId = interaction.options.getUser('chef')?.id || null;
+        const bartenderId = interaction.options.getUser('bartender')?.id || null;
+        const waiterId = interaction.options.getUser('waiter', true).id;
+        const membership = await verifyVenueMembers(interaction.guild, {
+          userIds: [waiterId, chefId, bartenderId],
+          completeRoster: Boolean((mealId && !chefId) || (drinkId && !bartenderId)),
+        });
         const result = await createVenueOrder(guildId, interaction.user.id, {
-          mealId: interaction.options.getInteger('meal'),
-          drinkId: interaction.options.getInteger('drink'),
-          chefId: interaction.options.getUser('chef')?.id || null,
-          bartenderId: interaction.options.getUser('bartender')?.id || null,
-          waiterId: interaction.options.getUser('waiter', true).id,
+          mealId,
+          drinkId,
+          chefId,
+          bartenderId,
+          waiterId,
           tipAmount: interaction.options.getInteger('tip', true),
           channelId: interaction.channelId,
+          membership,
         });
         const makerIds = [...new Set(result.items.filter((item) => !item.makerIsNpc).map((item) => item.makerUserId))];
         const mentionIds = [...new Set([interaction.user.id, result.order.waiterUserId, ...makerIds].filter(Boolean))];
@@ -306,9 +317,11 @@ module.exports = {
         }
 
         const target = interaction.options.getUser('user', true);
+        const membership = await verifyVenueMembers(interaction.guild, { userIds: [target.id] });
         const item = await reassignVenueOrderItem(guildId, interaction.options.getInteger('order-item-id', true), target.id, {
           operatorId: interaction.user.id,
           reason: interaction.options.getString('reason') || '管理員重新指派',
+          membership,
         });
         await interaction.reply({
           content: [`已重新指派訂單項目 #${item.id}｜${item.itemName}`, `新的製作者：${target}`].join('\n'),
@@ -324,9 +337,11 @@ module.exports = {
         }
 
         const target = interaction.options.getUser('user', true);
+        const membership = await verifyVenueMembers(interaction.guild, { userIds: [target.id] });
         const order = await reassignVenueWaiter(guildId, interaction.options.getInteger('order-id', true), target.id, {
           operatorId: interaction.user.id,
           reason: interaction.options.getString('reason') || '管理員重新指派服務生',
+          membership,
         });
         await interaction.reply({
           content: [`已重新指派訂單 #${order.id} 的服務生。`, `新的服務生：${target}`, `小費：${formatChips(order.tipAmount)}`].join('\n'),

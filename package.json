@@ -1,18 +1,19 @@
 {
   "name": "xiaoji-discord-bot",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "小吉 Discord slash command bot built with discord.js.",
   "main": "src/index.js",
   "type": "commonjs",
   "private": true,
   "engines": {
-    "node": ">=20.18.1"
+    "node": ">=24.21.0 <25"
   },
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "deploy": "node deploy-commands.js",
     "check": "node scripts/check-project.js",
+    "ci:runtime": "node scripts/ci-public-runtime.js",
     "test": "node scripts/run-tests.js",
     "audit": "npm audit --audit-level=moderate",
     "site:preview": "node scripts/serve-website.js",

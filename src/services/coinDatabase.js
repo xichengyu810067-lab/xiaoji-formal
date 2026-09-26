@@ -7,7 +7,335 @@ const { deriveServerGameReward } = require('./gameRewardPolicy');
 
 const rootPath = path.resolve(__dirname, '..', '..');
 const defaultRelativeDbPath = path.join('data', 'xiaoji.sqlite');
-const schemaVersion = 21;
+const schemaVersion = 22;
+
+const globalEconomyV22Sql = `
+CREATE TABLE IF NOT EXISTS coin_bank_accounts_global (
+  user_id TEXT PRIMARY KEY,
+  balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0 AND balance <= 9007199254740991),
+  interest_accrued REAL NOT NULL DEFAULT 0 CHECK (interest_accrued >= 0),
+  last_interest_date TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES coin_wallets(user_id)
+);
+CREATE TABLE IF NOT EXISTS coin_bank_rates_global (
+  rate_key TEXT PRIMARY KEY,
+  rate REAL NOT NULL CHECK (rate >= 0),
+  previous_rate REAL,
+  is_event INTEGER NOT NULL DEFAULT 0 CHECK (is_event IN (0, 1)),
+  event_ends_at TEXT,
+  updated_by TEXT,
+  reason TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coin_rate_history_global (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  operator_id TEXT NOT NULL,
+  rate_key TEXT NOT NULL,
+  old_rate REAL NOT NULL,
+  new_rate REAL NOT NULL,
+  reason TEXT,
+  is_event INTEGER NOT NULL DEFAULT 0,
+  event_ends_at TEXT,
+  source_guild_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chip_accounts_global (
+  user_id TEXT PRIMARY KEY,
+  balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0 AND balance <= 9007199254740991),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES coin_wallets(user_id)
+);
+CREATE TABLE IF NOT EXISTS reward_grants_v2 (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reward_key TEXT NOT NULL UNIQUE,
+  operation_id TEXT UNIQUE,
+  kind TEXT NOT NULL,
+  canonical_source_id TEXT NOT NULL,
+  reward_kind TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  source_guild_id TEXT,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  payload_hash TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  debt_offset INTEGER NOT NULL DEFAULT 0 CHECK (debt_offset >= 0),
+  net_amount INTEGER NOT NULL DEFAULT 0 CHECK (net_amount >= 0),
+  transaction_id INTEGER NOT NULL,
+  legacy_grant_id INTEGER UNIQUE,
+  created_at TEXT NOT NULL,
+  UNIQUE (user_id, reward_key),
+  FOREIGN KEY (user_id) REFERENCES coin_wallets(user_id),
+  FOREIGN KEY (transaction_id) REFERENCES coin_transactions(id)
+);
+CREATE TABLE IF NOT EXISTS coin_operation_receipts (
+  operation_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  source_guild_id TEXT,
+  payload_hash TEXT NOT NULL,
+  transaction_id INTEGER,
+  reward_key TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coin_owner_campaigns (
+  campaign_id TEXT PRIMARY KEY,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  reason TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coin_owner_campaign_audiences (
+  campaign_id TEXT NOT NULL,
+  source_guild_id TEXT NOT NULL,
+  audience_type TEXT NOT NULL CHECK (audience_type IN ('member', 'role')),
+  role_id TEXT NOT NULL DEFAULT '',
+  audience_hash TEXT NOT NULL,
+  snapshot_count INTEGER NOT NULL CHECK (snapshot_count >= 0),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (campaign_id, source_guild_id, audience_type, role_id),
+  FOREIGN KEY (campaign_id) REFERENCES coin_owner_campaigns(campaign_id)
+);
+CREATE TABLE IF NOT EXISTS coin_owner_campaign_recipients (
+  campaign_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  first_source_guild_id TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  PRIMARY KEY (campaign_id, user_id),
+  FOREIGN KEY (campaign_id) REFERENCES coin_owner_campaigns(campaign_id)
+);
+CREATE TABLE IF NOT EXISTS coin_owner_campaign_audience_members (
+  campaign_id TEXT NOT NULL,
+  source_guild_id TEXT NOT NULL,
+  audience_type TEXT NOT NULL,
+  role_id TEXT NOT NULL DEFAULT '',
+  user_id TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  PRIMARY KEY (campaign_id, source_guild_id, audience_type, role_id, user_id),
+  FOREIGN KEY (campaign_id, source_guild_id, audience_type, role_id)
+    REFERENCES coin_owner_campaign_audiences(campaign_id, source_guild_id, audience_type, role_id)
+);
+CREATE TABLE IF NOT EXISTS coin_owner_campaign_history_reviews (
+  campaign_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  prior_grant INTEGER NOT NULL CHECK (prior_grant IN (0, 1)),
+  source_sha256 TEXT NOT NULL,
+  review_batch_sha256 TEXT NOT NULL,
+  review_id TEXT NOT NULL,
+  review_reason TEXT NOT NULL,
+  reviewed_by TEXT NOT NULL,
+  reviewed_at TEXT NOT NULL,
+  PRIMARY KEY (campaign_id, user_id),
+  FOREIGN KEY (campaign_id, user_id)
+    REFERENCES coin_owner_campaign_recipients(campaign_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS coin_owner_campaign_history_classifications (
+  campaign_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  record_type TEXT NOT NULL CHECK (record_type IN ('transaction', 'legacy_grant', 'admin_log')),
+  record_id INTEGER NOT NULL,
+  row_sha256 TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  evidence_reference TEXT NOT NULL,
+  review_reason TEXT NOT NULL,
+  reviewed_by TEXT NOT NULL,
+  reviewed_at TEXT NOT NULL,
+  PRIMARY KEY (campaign_id, user_id, record_type, record_id),
+  FOREIGN KEY (campaign_id, user_id)
+    REFERENCES coin_owner_campaign_recipients(campaign_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS coin_primary_jobs_global (
+  user_id TEXT PRIMARY KEY,
+  job_name TEXT NOT NULL,
+  work_days INTEGER NOT NULL CHECK (work_days > 0),
+  legacy_job_id INTEGER,
+  source_guild_id TEXT,
+  next_cycle_id TEXT UNIQUE,
+  requested_at TEXT NOT NULL,
+  not_before_at TEXT,
+  effective_from TEXT,
+  effective_until TEXT,
+  state TEXT NOT NULL CHECK (state IN ('pending_legacy', 'active', 'closed')),
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coin_primary_job_cycles (
+  cycle_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  job_name TEXT NOT NULL,
+  work_days INTEGER NOT NULL CHECK (work_days > 0),
+  source_guild_id TEXT NOT NULL,
+  starts_at TEXT NOT NULL,
+  ends_at TEXT NOT NULL,
+  salary_rule_version TEXT NOT NULL,
+  salary_snapshot_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'settled', 'cancelled')),
+  reward_key TEXT UNIQUE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES coin_primary_jobs_global(user_id)
+);
+CREATE TABLE IF NOT EXISTS coin_primary_cycle_penalties (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cycle_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  task_id INTEGER,
+  amount INTEGER NOT NULL CHECK (amount >= 0),
+  status TEXT NOT NULL,
+  reason TEXT,
+  applied_at TEXT,
+  refunded_at TEXT,
+  appeal_deadline TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (cycle_id) REFERENCES coin_primary_job_cycles(cycle_id)
+);
+CREATE TABLE IF NOT EXISTS coin_primary_cycle_payroll (
+  cycle_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  source_guild_id TEXT NOT NULL,
+  gross_amount INTEGER NOT NULL CHECK (gross_amount >= 0),
+  paid_amount INTEGER NOT NULL CHECK (paid_amount >= 0),
+  pay_ratio REAL NOT NULL CHECK (pay_ratio >= 0 AND pay_ratio <= 1),
+  settlement_reason TEXT NOT NULL,
+  reward_key TEXT NOT NULL UNIQUE,
+  transaction_id INTEGER,
+  settled_at TEXT NOT NULL,
+  FOREIGN KEY (cycle_id) REFERENCES coin_primary_job_cycles(cycle_id)
+);
+CREATE TABLE IF NOT EXISTS coin_primary_cycle_penalty_appeals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  penalty_id INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  review_by TEXT,
+  review_reason TEXT,
+  created_at TEXT NOT NULL,
+  reviewed_at TEXT,
+  FOREIGN KEY (penalty_id) REFERENCES coin_primary_cycle_penalties(id)
+);
+CREATE INDEX IF NOT EXISTS idx_primary_cycle_penalties
+  ON coin_primary_cycle_penalties (cycle_id, status, id);
+CREATE INDEX IF NOT EXISTS idx_primary_cycle_appeals
+  ON coin_primary_cycle_penalty_appeals (penalty_id, status, id);
+CREATE TABLE IF NOT EXISTS coin_work_legacy_snapshots (
+  job_id INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  source_guild_id TEXT NOT NULL,
+  job_name TEXT NOT NULL,
+  job_role_id TEXT,
+  daily_salary INTEGER NOT NULL,
+  work_days INTEGER NOT NULL,
+  total_salary INTEGER NOT NULL,
+  start_at TEXT NOT NULL,
+  pay_at TEXT NOT NULL,
+  status TEXT NOT NULL,
+  is_paid INTEGER NOT NULL,
+  payroll_status TEXT NOT NULL,
+  rule_version TEXT NOT NULL,
+  rules_json TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  cutover_state_hash TEXT NOT NULL,
+  snapshot_item_count INTEGER NOT NULL CHECK (snapshot_item_count >= 0),
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS coin_work_legacy_snapshot_items (
+  job_id INTEGER NOT NULL,
+  item_kind TEXT NOT NULL CHECK (item_kind IN ('task', 'penalty', 'appeal', 'payroll')),
+  item_id INTEGER NOT NULL,
+  source_hash TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  captured_at TEXT NOT NULL,
+  PRIMARY KEY (job_id, item_kind, item_id),
+  FOREIGN KEY (job_id) REFERENCES coin_work_legacy_snapshots(job_id)
+);
+CREATE TABLE IF NOT EXISTS coin_work_legacy_settlements (
+  job_id INTEGER NOT NULL,
+  period_key TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  source_guild_id TEXT NOT NULL,
+  reward_key TEXT NOT NULL UNIQUE,
+  amount INTEGER NOT NULL CHECK (amount >= 0),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'granted', 'legacy_paid', 'manual_review')),
+  transaction_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (job_id, period_key, user_id)
+);
+CREATE TABLE IF NOT EXISTS discord_game_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  source_guild_id TEXT NOT NULL,
+  channel_id TEXT,
+  message_id TEXT,
+  game_type TEXT NOT NULL,
+  difficulty TEXT,
+  seed TEXT NOT NULL,
+  state_json TEXT NOT NULL,
+  status TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  action_count INTEGER NOT NULL DEFAULT 0 CHECK (action_count >= 0),
+  score INTEGER NOT NULL DEFAULT 0,
+  reward_amount INTEGER NOT NULL DEFAULT 0 CHECK (reward_amount >= 0),
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS discord_game_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK (revision > 0),
+  interaction_id TEXT NOT NULL UNIQUE,
+  action_hash TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (session_id, revision),
+  FOREIGN KEY (session_id) REFERENCES discord_game_sessions(id)
+);
+CREATE TABLE IF NOT EXISTS discord_game_rewards (
+  session_id TEXT PRIMARY KEY,
+  reward_key TEXT UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'granted', 'no_reward')),
+  amount INTEGER NOT NULL CHECK (amount >= 0),
+  receipt_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES discord_game_sessions(id)
+);
+CREATE TABLE IF NOT EXISTS coin_global_economy_migrations (
+  to_version INTEGER PRIMARY KEY,
+  source_sha256 TEXT NOT NULL,
+  source_bank_balance_sum INTEGER NOT NULL,
+  target_bank_balance_sum INTEGER NOT NULL,
+  source_chip_balance_sum INTEGER NOT NULL,
+  target_chip_balance_sum INTEGER NOT NULL,
+  source_interest_sum REAL NOT NULL,
+  target_interest_sum REAL NOT NULL,
+  source_fixed_principal_sum INTEGER NOT NULL,
+  target_fixed_principal_sum INTEGER NOT NULL,
+  source_fixed_interest_sum INTEGER NOT NULL,
+  target_fixed_interest_sum INTEGER NOT NULL,
+  source_loan_principal_sum INTEGER NOT NULL,
+  target_loan_principal_sum INTEGER NOT NULL,
+  source_loan_debt_sum INTEGER NOT NULL,
+  target_loan_debt_sum INTEGER NOT NULL,
+  completed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reward_grants_v2_source
+  ON reward_grants_v2 (kind, canonical_source_id, reward_kind, user_id);
+CREATE INDEX IF NOT EXISTS idx_coin_fixed_deposits_global_user
+  ON coin_fixed_deposits (user_id, status, maturity_at);
+CREATE INDEX IF NOT EXISTS idx_casino_loans_global_user
+  ON casino_loans (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_casino_ledger_global_user
+  ON casino_ledger (user_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_chip_ledger_global_user
+  ON chip_ledger (user_id, created_at DESC, id DESC);
+`;
 
 const schemaSql = `
 PRAGMA foreign_keys = ON;
@@ -1213,6 +1541,7 @@ let sqlModulePromise = null;
 let initializationPromise = null;
 let state = null;
 let operationQueue = Promise.resolve();
+let allowCreateOnNextOpenForTests = false;
 
 class CoinDatabaseError extends Error {
   constructor(message, cause) {
@@ -1718,10 +2047,36 @@ function verifyFeaturePlatformSchema(db) {
   }
 }
 
+function assertForeignKeysEnabled(db) {
+  if (Number(getRow(db, 'PRAGMA foreign_keys')?.foreign_keys) !== 1) {
+    throw new Error('SQLite foreign key enforcement is disabled');
+  }
+}
+
+function enableForeignKeys(db) {
+  runSql(db, 'PRAGMA foreign_keys = ON');
+  assertForeignKeysEnabled(db);
+}
+
+function verifyForeignKeyIntegrity(db) {
+  const violation = getRow(db, 'PRAGMA foreign_key_check');
+  if (violation) throw new Error(`SQLite foreign key violation in ${violation.table}`);
+}
+
+function exportDatabase(db) {
+  assertForeignKeysEnabled(db);
+  try {
+    return Buffer.from(db.export());
+  } finally {
+    // sql.js reopens the connection during export and resets connection-local PRAGMAs.
+    enableForeignKeys(db);
+  }
+}
+
 function writeDatabaseFile(dbPath, db) {
   const directory = path.dirname(dbPath);
   const tempPath = `${dbPath}.tmp`;
-  const exported = Buffer.from(db.export());
+  const exported = exportDatabase(db);
 
   try {
     fs.mkdirSync(directory, { recursive: true });
@@ -1737,6 +2092,11 @@ function writeDatabaseFile(dbPath, db) {
     }
     throw error;
   }
+}
+
+function writeNewDatabaseFile(dbPath, db) {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, exportDatabase(db), { flag: 'wx' });
 }
 
 function verifyIntegrity(db) {
@@ -2428,6 +2788,241 @@ function verifyGlobalEconomyV21Schema(db) {
   if (foreignKeyFailure) throw new Error(`global economy foreign key failure: ${foreignKeyFailure.table}`);
 }
 
+function taipeiSettlementDate(now) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  const today = `${parts.year}-${parts.month}-${parts.day}`;
+  if (Number(parts.hour) >= 23) return today;
+  return new Date(Date.parse(`${today}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+}
+
+function safeSum(rows, key, label) {
+  const total = rows.reduce((sum, row) => sum + Number(row[key]), 0);
+  if (!Number.isSafeInteger(total) || total < 0) throw new Error(`${label} is outside supported range`);
+  return total;
+}
+
+function inspectGlobalEconomyV22(db, now = new Date(), sourceSha256 = null) {
+  const bankRows = getRows(db, `SELECT guild_id, user_id, bank_balance, bank_interest_accrued,
+    last_interest_date, created_at, updated_at FROM coin_guild_players ORDER BY user_id, guild_id`);
+  const chipRows = getRows(db, 'SELECT * FROM chip_accounts ORDER BY user_id, guild_id');
+  const rateRows = getRows(db, 'SELECT * FROM coin_bank_rates ORDER BY guild_id, rate_key');
+  const fixedRows = getRows(db, 'SELECT id, guild_id, user_id, principal, expected_interest, status FROM coin_fixed_deposits ORDER BY id');
+  const loanRows = getRows(db, 'SELECT id, guild_id, user_id, principal_amount, current_debt_amount, status FROM casino_loans ORDER BY id');
+  const rewardRows = getRows(db, 'SELECT id, guild_id, user_id, source_type, source_id, reward_kind, amount, transaction_id, created_at FROM reward_grants ORDER BY id');
+  const settlementDate = taipeiSettlementDate(now);
+  const conflicts = [];
+  const legacyRewardConflicts = [];
+  const loanConflicts = [];
+  const bankByUser = new Map();
+  const chipsByUser = new Map();
+  for (const row of bankRows) {
+    const balance = Number(row.bank_balance);
+    const accrued = Number(row.bank_interest_accrued);
+    if (!Number.isSafeInteger(balance) || balance < 0 || !Number.isFinite(accrued) || accrued < 0) {
+      conflicts.push({ code: 'INVALID_BANK_VALUE', userId: row.user_id, sourceGuildId: row.guild_id });
+      continue;
+    }
+    if (balance > 0 && (!row.last_interest_date || row.last_interest_date < settlementDate)) {
+      conflicts.push({ code: 'UNSETTLED_LEGACY_INTEREST', userId: row.user_id, sourceGuildId: row.guild_id });
+    }
+    const account = bankByUser.get(row.user_id) || {
+      userId: row.user_id, balance: 0, interestAccrued: 0,
+      lastInterestDate: row.last_interest_date, positiveBalanceDate: null,
+      createdAt: row.created_at, updatedAt: row.updated_at,
+    };
+    account.balance += balance;
+    account.interestAccrued += accrued;
+    if (balance > 0 && account.positiveBalanceDate && row.last_interest_date && account.positiveBalanceDate !== row.last_interest_date) {
+      conflicts.push({ code: 'MIXED_INTEREST_DATES', userId: row.user_id });
+    }
+    if (balance > 0) account.positiveBalanceDate = row.last_interest_date;
+    if (row.last_interest_date > (account.lastInterestDate || '')) account.lastInterestDate = row.last_interest_date;
+    if (row.created_at < account.createdAt) account.createdAt = row.created_at;
+    if (row.updated_at > account.updatedAt) account.updatedAt = row.updated_at;
+    if (!Number.isSafeInteger(account.balance) || account.balance > Number.MAX_SAFE_INTEGER || !Number.isFinite(account.interestAccrued)) {
+      conflicts.push({ code: 'BANK_SUM_OVERFLOW', userId: row.user_id });
+    }
+    bankByUser.set(row.user_id, account);
+  }
+  for (const row of chipRows) {
+    const amount = Number(row.balance);
+    if (!Number.isSafeInteger(amount) || amount < 0) {
+      conflicts.push({ code: 'INVALID_CHIP_VALUE', userId: row.user_id, sourceGuildId: row.guild_id });
+      continue;
+    }
+    const account = chipsByUser.get(row.user_id) || { userId: row.user_id, balance: 0, createdAt: row.created_at, updatedAt: row.updated_at };
+    account.balance += amount;
+    if (row.created_at < account.createdAt) account.createdAt = row.created_at;
+    if (row.updated_at > account.updatedAt) account.updatedAt = row.updated_at;
+    if (!Number.isSafeInteger(account.balance)) conflicts.push({ code: 'CHIP_SUM_OVERFLOW', userId: row.user_id });
+    chipsByUser.set(row.user_id, account);
+  }
+  for (const row of rateRows) {
+    if (Number(row.is_event) === 1) {
+      conflicts.push({ code: 'LEGACY_RATE_EVENT', sourceGuildId: row.guild_id, rateKey: row.rate_key });
+    }
+  }
+  const pendingGames = Number(getRow(db, "SELECT COUNT(*) AS count FROM casino_games WHERE status != 'settled'").count);
+  const pendingBlackjack = Number(getRow(db, "SELECT COUNT(*) AS count FROM casino_blackjack_sessions WHERE status = 'active'").count);
+  const escrowedTips = Number(getRow(db, "SELECT COUNT(*) AS count FROM casino_venue_orders WHERE tip_status = 'escrowed'").count);
+  if (pendingGames || pendingBlackjack || escrowedTips) {
+    conflicts.push({ code: 'UNSETTLED_GAME_OR_ESCROW', pendingGames, pendingBlackjack, escrowedTips });
+  }
+  const legacyRewardKeys = new Map();
+  const activeLoansByUser = new Map();
+  for (const row of loanRows.filter((loan) => loan.status === 'active')) {
+    const loans = activeLoansByUser.get(row.user_id) || [];
+    loans.push(row.id);
+    activeLoansByUser.set(row.user_id, loans);
+  }
+  for (const [userId, loanIds] of activeLoansByUser) {
+    if (loanIds.length > 1) loanConflicts.push({ code: 'MULTIPLE_ACTIVE_LOANS', userId, loanIds });
+  }
+  for (const row of rewardRows) {
+    const key = JSON.stringify([row.user_id, row.source_type, row.source_id, row.reward_kind]);
+    const prior = legacyRewardKeys.get(key);
+    if (prior && (Number(prior.amount) !== Number(row.amount) || prior.guild_id !== row.guild_id)) {
+      legacyRewardConflicts.push({ code: 'LEGACY_REWARD_SOURCE_COLLISION', legacyGrantIds: [prior.id, row.id] });
+    }
+    legacyRewardKeys.set(key, row);
+  }
+  const completeSourceSha256 = sourceSha256 || crypto.createHash('sha256').update(exportDatabase(db)).digest('hex');
+  const blockingSettlements = conflicts.filter((conflict) =>
+    ['UNSETTLED_LEGACY_INTEREST', 'UNSETTLED_GAME_OR_ESCROW'].includes(conflict.code));
+  const decisionRequired = [
+    ...conflicts.filter((conflict) => !blockingSettlements.includes(conflict)),
+    ...loanConflicts,
+    ...legacyRewardConflicts,
+  ];
+  return {
+    fromVersion: 21, toVersion: 22, settlementDate, sourceSha256: completeSourceSha256,
+    canApply: conflicts.length === 0 && decisionRequired.length === 0,
+    conflicts, blockingSettlements, decisionRequired, legacyRewardConflicts, loanConflicts,
+    autoMigratable: {
+      bankAccountCount: bankByUser.size,
+      chipAccountCount: chipsByUser.size,
+      fixedContractCount: fixedRows.length,
+      loanContractCount: loanRows.length,
+    },
+    bankAccounts: [...bankByUser.values()], chipAccounts: [...chipsByUser.values()],
+    totals: {
+      bankBalance: safeSum(bankRows, 'bank_balance', 'bank balance'),
+      chipBalance: safeSum(chipRows, 'balance', 'chip balance'),
+      interestAccrued: bankRows.reduce((sum, row) => sum + Number(row.bank_interest_accrued), 0),
+      fixedPrincipal: safeSum(fixedRows.filter((row) => row.status === 'active' || row.status === 'matured'), 'principal', 'fixed principal'),
+      fixedInterest: safeSum(fixedRows.filter((row) => row.status === 'active' || row.status === 'matured'), 'expected_interest', 'fixed interest'),
+      loanPrincipal: safeSum(loanRows.filter((row) => row.status === 'active'), 'principal_amount', 'loan principal'),
+      loanDebt: safeSum(loanRows.filter((row) => row.status === 'active'), 'current_debt_amount', 'loan debt'),
+    },
+  };
+}
+
+function migrateGlobalEconomyV22(db, { expectedSourceSha256 = null, requireExpectedSource = false, sourceSha256 = null } = {}) {
+  const plan = inspectGlobalEconomyV22(db, new Date(), sourceSha256);
+  if (requireExpectedSource && !/^[a-f0-9]{64}$/.test(String(expectedSourceSha256 || ''))) {
+    throw new Error('v22 migration requires a reviewed v21 source SHA-256');
+  }
+  if (expectedSourceSha256 && expectedSourceSha256 !== plan.sourceSha256) {
+    throw new Error('v22 source SHA-256 changed since dry run');
+  }
+  if (!plan.canApply) {
+    const unresolved = [...plan.blockingSettlements, ...plan.decisionRequired];
+    const error = new Error(`v22 migration has ${unresolved.length} unresolved conflicts`);
+    error.conflicts = unresolved;
+    throw error;
+  }
+  let transactionStarted = false;
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    transactionStarted = true;
+    db.exec(globalEconomyV22Sql);
+    addColumnIfMissing(db, 'coin_work_tasks', 'global_cycle_id', 'TEXT REFERENCES coin_primary_job_cycles(cycle_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_coin_work_tasks_global_cycle ON coin_work_tasks (global_cycle_id, status, id)');
+    addColumnIfMissing(db, 'casino_venue_orders', 'waiter_global_cycle_id', 'TEXT REFERENCES coin_primary_job_cycles(cycle_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_venue_orders_waiter_global_cycle ON casino_venue_orders (waiter_global_cycle_id, tip_status, id)');
+    addColumnIfMissing(db, 'casino_venue_order_items', 'global_cycle_id', 'TEXT REFERENCES coin_primary_job_cycles(cycle_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_venue_order_items_global_cycle ON casino_venue_order_items (global_cycle_id, status, id)');
+    const timestamp = new Date().toISOString();
+    for (const account of plan.bankAccounts) {
+      runSql(db, `INSERT INTO coin_bank_accounts_global
+        (user_id, balance, interest_accrued, last_interest_date, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)`, [account.userId, account.balance, account.interestAccrued,
+        account.lastInterestDate, account.createdAt, account.updatedAt]);
+    }
+    for (const account of plan.chipAccounts) {
+      runSql(db, `INSERT INTO chip_accounts_global (user_id, balance, created_at, updated_at)
+        VALUES (?, ?, ?, ?)`, [account.userId, account.balance, account.createdAt, account.updatedAt]);
+    }
+    for (const [rateKey, rate] of Object.entries({ demand: 0.0003, fixed_7: 0.0035,
+      fixed_14: 0.008, fixed_30: 0.02, fixed_90: 0.07 })) {
+      runSql(db, `INSERT INTO coin_bank_rates_global (rate_key, rate, updated_by, reason, updated_at)
+        VALUES (?, ?, 'system', 'v22 global default', ?)`, [rateKey, rate, timestamp]);
+    }
+    const targetBankBalance = Number(getRow(db, 'SELECT COALESCE(SUM(balance), 0) AS total FROM coin_bank_accounts_global').total);
+    const targetChipBalance = Number(getRow(db, 'SELECT COALESCE(SUM(balance), 0) AS total FROM chip_accounts_global').total);
+    const targetInterest = Number(getRow(db, 'SELECT COALESCE(SUM(interest_accrued), 0) AS total FROM coin_bank_accounts_global').total);
+    if (targetBankBalance !== plan.totals.bankBalance || targetChipBalance !== plan.totals.chipBalance ||
+      Math.abs(targetInterest - plan.totals.interestAccrued) > 1e-8) throw new Error('v22 asset conservation check failed');
+    runSql(db, `INSERT INTO coin_global_economy_migrations
+      (to_version, source_sha256, source_bank_balance_sum, target_bank_balance_sum,
+       source_chip_balance_sum, target_chip_balance_sum, source_interest_sum, target_interest_sum,
+       source_fixed_principal_sum, target_fixed_principal_sum, source_fixed_interest_sum, target_fixed_interest_sum,
+       source_loan_principal_sum, target_loan_principal_sum, source_loan_debt_sum, target_loan_debt_sum, completed_at)
+       VALUES (22, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [plan.sourceSha256,
+      plan.totals.bankBalance, targetBankBalance, plan.totals.chipBalance, targetChipBalance,
+      plan.totals.interestAccrued, targetInterest, plan.totals.fixedPrincipal,
+      plan.totals.fixedPrincipal, plan.totals.fixedInterest, plan.totals.fixedInterest,
+      plan.totals.loanPrincipal, plan.totals.loanPrincipal,
+      plan.totals.loanDebt, plan.totals.loanDebt, timestamp]);
+    db.exec('COMMIT');
+    transactionStarted = false;
+  } catch (error) {
+    if (transactionStarted) db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function verifyGlobalEconomyV22Schema(db) {
+  for (const [table, columns] of Object.entries({
+    coin_bank_accounts_global: ['user_id', 'balance', 'interest_accrued', 'last_interest_date'],
+    coin_bank_rates_global: ['rate_key', 'rate', 'is_event'],
+    coin_rate_history_global: ['id', 'rate_key', 'old_rate', 'new_rate', 'source_guild_id'],
+    chip_accounts_global: ['user_id', 'balance'],
+    reward_grants_v2: ['reward_key', 'user_id', 'amount', 'payload_hash', 'debt_offset', 'net_amount', 'transaction_id'],
+    coin_operation_receipts: ['operation_id', 'payload_hash', 'transaction_id'],
+    coin_owner_campaigns: ['campaign_id', 'amount', 'reason'],
+    coin_owner_campaign_audiences: ['campaign_id', 'source_guild_id', 'audience_type', 'role_id'],
+    coin_owner_campaign_recipients: ['campaign_id', 'user_id', 'first_source_guild_id'],
+    coin_owner_campaign_audience_members: ['campaign_id', 'source_guild_id', 'audience_type', 'role_id', 'user_id'],
+    coin_owner_campaign_history_reviews: ['campaign_id', 'user_id', 'prior_grant', 'source_sha256', 'review_batch_sha256', 'review_id', 'review_reason'],
+    coin_owner_campaign_history_classifications: ['campaign_id', 'user_id', 'record_type', 'record_id', 'row_sha256', 'source_sha256', 'evidence_reference'],
+    coin_primary_jobs_global: ['user_id', 'job_name', 'work_days', 'state', 'next_cycle_id'],
+    coin_primary_job_cycles: ['cycle_id', 'user_id', 'job_name', 'starts_at', 'ends_at'],
+    coin_primary_cycle_penalties: ['id', 'cycle_id', 'user_id', 'amount', 'status'],
+    coin_primary_cycle_penalty_appeals: ['id', 'penalty_id', 'status', 'reason', 'review_reason'],
+    coin_primary_cycle_payroll: ['cycle_id', 'user_id', 'gross_amount', 'paid_amount', 'pay_ratio', 'reward_key', 'settled_at'],
+    coin_work_legacy_snapshots: ['job_id', 'source_hash', 'cutover_state_hash', 'snapshot_item_count'],
+    coin_work_legacy_snapshot_items: ['job_id', 'item_kind', 'item_id', 'source_hash'],
+    coin_work_legacy_settlements: ['job_id', 'period_key', 'user_id', 'source_guild_id', 'reward_key', 'status'],
+    discord_game_sessions: ['id', 'user_id', 'source_guild_id', 'game_type', 'revision', 'state_json', 'completed_at'],
+    discord_game_actions: ['session_id', 'revision', 'interaction_id', 'action_hash', 'result_json'],
+    discord_game_rewards: ['session_id', 'reward_key', 'status', 'amount', 'receipt_id'],
+    coin_global_economy_migrations: ['to_version', 'source_sha256'],
+  })) requireColumns(db, table, columns);
+  requireColumns(db, 'coin_work_tasks', ['global_cycle_id']);
+  requireColumns(db, 'casino_venue_orders', ['waiter_global_cycle_id']);
+  requireColumns(db, 'casino_venue_order_items', ['global_cycle_id']);
+  const receipt = getRow(db, 'SELECT * FROM coin_global_economy_migrations WHERE to_version = 22');
+  if (!receipt) throw new Error('missing v22 migration receipt');
+  const bank = Number(getRow(db, 'SELECT COALESCE(SUM(balance), 0) AS total FROM coin_bank_accounts_global').total);
+  const chips = Number(getRow(db, 'SELECT COALESCE(SUM(balance), 0) AS total FROM chip_accounts_global').total);
+  if (bank < 0 || chips < 0) throw new Error('invalid v22 global assets');
+  if (getRow(db, 'PRAGMA foreign_key_check')) throw new Error('v22 foreign key failure');
+}
+
 function buildApi(db) {
   return {
     db,
@@ -2935,15 +3530,24 @@ function migrateGameSessionsV18Bounds(db) {
   }
 }
 
-async function createOrOpenDatabase() {
+async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
   const SQL = await getSqlModule();
   const dbPath = getCoinDatabasePath();
   const existed = fs.existsSync(dbPath);
+  if (!existed && !allowNewDatabase) {
+    throw new CoinDatabaseError('已選用的吉幣資料庫不存在；已停止啟動。新安裝須明確執行初始化，不能自動建立空庫。');
+  }
   let db;
+  let sourceSha256 = null;
 
   try {
     if (existed) {
-      db = new SQL.Database(fs.readFileSync(dbPath));
+      const sourceBytes = fs.readFileSync(dbPath);
+      if (sourceBytes.length < 100 || sourceBytes.subarray(0, 16).toString('binary') !== 'SQLite format 3\0') {
+        throw new Error('SQLite source file is empty or has an invalid header');
+      }
+      sourceSha256 = crypto.createHash('sha256').update(sourceBytes).digest('hex');
+      db = new SQL.Database(sourceBytes);
     } else {
       db = new SQL.Database();
     }
@@ -2952,10 +3556,10 @@ async function createOrOpenDatabase() {
     throw new CoinDatabaseError('吉幣資料庫讀取失敗，不會自動重建空資料庫。', error);
   }
 
-  runSql(db, 'PRAGMA foreign_keys = ON');
-
   try {
+    enableForeignKeys(db);
     verifyIntegrity(db);
+    verifyForeignKeyIntegrity(db);
   } catch (error) {
     db.close();
     logger.error(`吉幣資料庫完整性檢查失敗，已停止載入：${dbPath}`, error);
@@ -2976,9 +3580,10 @@ async function createOrOpenDatabase() {
     try {
       verifyGlobalWalletV20Schema(db);
       if (preBootstrapVersion >= 21) verifyGlobalEconomyV21Schema(db);
+      if (preBootstrapVersion >= 22) verifyGlobalEconomyV22Schema(db);
     } catch (error) {
       db.close();
-      throw new CoinDatabaseError('吉幣資料庫 v20 結構不完整、不支援，或 v21 全域經濟契約損壞；已停止啟動避免建立第二份權威資料。', error);
+      throw new CoinDatabaseError('吉幣資料庫 v20 結構不完整、不支援，或 v21/v22 全域經濟契約損壞；已停止啟動避免建立第二份權威資料。', error);
     }
   }
 
@@ -3272,6 +3877,21 @@ async function createOrOpenDatabase() {
     }
   }
 
+  if (currentVersion < 22) {
+    try {
+      const reviewedV21Source = existed && preBootstrapVersion === 21;
+      migrateGlobalEconomyV22(db, {
+        expectedSourceSha256: reviewedV21Source ? process.env.COIN_V22_EXPECTED_SOURCE_SHA256 || null : null,
+        requireExpectedSource: reviewedV21Source,
+        sourceSha256: reviewedV21Source ? sourceSha256 : null,
+      });
+    } catch (error) {
+      db.close();
+      logger.error('Coin database schema v22 migration failed', error);
+      throw new CoinDatabaseError('吉幣資料庫 v22 全域銀行與籌碼升級未完成，原始資料不會被覆寫。', error);
+    }
+  }
+
   try {
     db.exec(globalWalletRevisionIndexSql);
   } catch (error) {
@@ -3315,10 +3935,11 @@ async function createOrOpenDatabase() {
     verifyFeaturePlatformSchema(db);
     verifyGlobalWalletV20Schema(db);
     verifyGlobalEconomyV21Schema(db);
+    verifyGlobalEconomyV22Schema(db);
   } catch (error) {
     db.close();
     logger.error('Coin database global economy schema verification failed', error);
-    throw new CoinDatabaseError('吉幣資料庫 v20 結構驗證失敗，或 v21 全域經濟契約損壞；已停止啟動避免破壞資料。', error);
+    throw new CoinDatabaseError('吉幣資料庫 v20 結構驗證失敗，或 v21/v22 全域經濟契約損壞；已停止啟動避免破壞資料。', error);
   }
 
   const afterTables = getTableNames(db);
@@ -3333,7 +3954,13 @@ async function createOrOpenDatabase() {
     [String(schemaVersion), now]
   );
 
-  writeDatabaseFile(dbPath, db);
+  if (existed && crypto.createHash('sha256').update(fs.readFileSync(dbPath)).digest('hex') !== sourceSha256) {
+    db.close();
+    throw new CoinDatabaseError('吉幣來源資料庫在載入期間已變更，已停止寫回避免覆蓋。');
+  }
+  verifyForeignKeyIntegrity(db);
+  if (existed) writeDatabaseFile(dbPath, db);
+  else writeNewDatabaseFile(dbPath, db);
 
   const info = {
     path: dbPath,
@@ -3361,16 +3988,31 @@ async function createOrOpenDatabase() {
 
 async function initializeCoinDatabase() {
   if (state) {
+    assertForeignKeysEnabled(state.db);
     return state.info;
   }
 
   if (!initializationPromise) {
-    initializationPromise = createOrOpenDatabase().catch((error) => {
+    const allowNewDatabase = allowCreateOnNextOpenForTests;
+    allowCreateOnNextOpenForTests = false;
+    initializationPromise = createOrOpenDatabase({ allowNewDatabase }).catch((error) => {
       initializationPromise = null;
       throw error;
     });
   }
 
+  return initializationPromise;
+}
+
+async function initializeNewCoinDatabase({ expectedPath = getCoinDatabasePath() } = {}) {
+  const activePath = path.resolve(getCoinDatabasePath());
+  if (path.resolve(expectedPath) !== activePath || fs.existsSync(activePath) || state || initializationPromise) {
+    throw new CoinDatabaseError('初裝初始化要求目前所選資料庫路徑完全一致、來源不存在，且尚未開啟。');
+  }
+  initializationPromise = createOrOpenDatabase({ allowNewDatabase: true }).catch((error) => {
+    initializationPromise = null;
+    throw error;
+  });
   return initializationPromise;
 }
 
@@ -3400,7 +4042,7 @@ async function withCoinDatabase(work, { persist = false } = {}) {
 async function withCoinTransaction(work) {
   return withCoinDatabase(async (api) => {
     let transactionStarted = false;
-    const snapshot = Buffer.from(state.db.export());
+    const snapshot = exportDatabase(state.db);
 
     try {
       api.run('BEGIN IMMEDIATE');
@@ -3416,7 +4058,8 @@ async function withCoinTransaction(work) {
         const Database = state.db.constructor;
         state.db.close();
         state.db = new Database(snapshot);
-        runSql(state.db, 'PRAGMA foreign_keys = ON');
+        enableForeignKeys(state.db);
+        verifyForeignKeyIntegrity(state.db);
         throw new CoinDatabaseError('吉幣資料庫落盤失敗，交易已復原。', writeError);
       }
 
@@ -3445,7 +4088,31 @@ async function getCoinDatabaseInfo() {
   };
 }
 
-function resetCoinDatabaseForTests() {
+async function dryRunGlobalEconomyV22({ dbPath = getCoinDatabasePath(), now = new Date() } = {}) {
+  const absolutePath = path.resolve(dbPath);
+  if (!fs.existsSync(absolutePath)) throw new CoinDatabaseError('來源吉幣資料庫不存在，不能以空資料庫預演。');
+  const SQL = await getSqlModule();
+  let db;
+  try {
+    const sourceBytes = fs.readFileSync(absolutePath);
+    const sourceSha256 = crypto.createHash('sha256').update(sourceBytes).digest('hex');
+    db = new SQL.Database(sourceBytes);
+    enableForeignKeys(db);
+    verifyIntegrity(db);
+    verifyForeignKeyIntegrity(db);
+    const version = Number(getRow(db, "SELECT value FROM coin_metadata WHERE key = 'schema_version'")?.value);
+    if (version !== 21) throw new Error(`v22 dry run requires schema v21, received ${version}`);
+    verifyGlobalWalletV20Schema(db);
+    verifyGlobalEconomyV21Schema(db);
+    return inspectGlobalEconomyV22(db, now, sourceSha256);
+  } catch (error) {
+    throw new CoinDatabaseError('吉幣資料庫 v22 預演失敗；來源未改動。', error);
+  } finally {
+    if (db) db.close();
+  }
+}
+
+function resetCoinDatabaseForTests({ allowCreateOnNextOpen = false } = {}) {
   if (state?.db) {
     state.db.close();
   }
@@ -3453,13 +4120,16 @@ function resetCoinDatabaseForTests() {
   state = null;
   initializationPromise = null;
   operationQueue = Promise.resolve();
+  allowCreateOnNextOpenForTests = allowCreateOnNextOpen === true;
 }
 
 module.exports = {
   CoinDatabaseError,
+  dryRunGlobalEconomyV22,
   getCoinDatabaseInfo,
   getCoinDatabasePath,
   initializeCoinDatabase,
+  initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,

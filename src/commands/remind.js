@@ -14,7 +14,12 @@ function formatReminderList(reminders) {
 
   return reminders
     .slice(0, 10)
-    .map((reminder) => `\`${reminder.id}\` - <t:${Math.floor(reminder.remindAt / 1000)}:R> - ${reminder.message}`)
+    .map((reminder) => {
+      const status = reminder.status === 'failed'
+        ? ' [失敗：' + (reminder.failureReason || '請人工核對') + ']'
+        : reminder.status === 'sending' ? ' [投遞確認中]' : '';
+      return '`' + reminder.id + '` - <t:' + Math.floor(reminder.remindAt / 1000) + ':R> - ' + reminder.message + status;
+    })
     .join('\n');
 }
 
@@ -57,11 +62,11 @@ module.exports = {
       return;
     }
 
+    try {
     const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === 'list') {
       const reminders = listUserReminders({
-        guildId: interaction.guildId,
         userId: interaction.user.id,
       });
       await interaction.reply({ content: formatReminderList(reminders), ephemeral: true });
@@ -71,7 +76,6 @@ module.exports = {
     if (subcommand === 'delete') {
       const reminderId = interaction.options.getString('id', true).trim();
       const removed = deleteUserReminder({
-        guildId: interaction.guildId,
         userId: interaction.user.id,
         reminderId,
       });
@@ -107,6 +111,14 @@ module.exports = {
       content: `提醒已設定：\`${reminder.id}\`，<t:${Math.floor(reminder.remindAt / 1000)}:R> 我會在這個頻道提醒你。`,
       ephemeral: true,
     });
+    } catch (error) {
+      const response = {
+        content: '提醒資料目前無法安全讀寫，請聯絡管理員檢查資料檔與初始化狀態。',
+        ephemeral: true,
+      };
+      if (interaction.replied || interaction.deferred) await interaction.followUp(response);
+      else await interaction.reply(response);
+    }
   },
 };
 

@@ -127,15 +127,28 @@ test('disabled game server stays closed without parsing inactive unsafe configur
     enabled: false,
     host: '0.0.0.0',
     allowedOrigins: new Set(['*']),
+    drainState: async () => ({ active: 0, pendingRewards: 0, drained: true }),
     healthReporter: async (...args) => { health.push(args); },
     loggerImpl: { info() {}, warn() {} },
   });
   assert.deepEqual(result, { started: false, reason: 'disabled' });
-  assert.deepEqual(health.map(([feature, status]) => [feature, status]), [
-    ['tetris', 'maintenance'],
-    ['number_match', 'maintenance'],
-    ['sudoku', 'maintenance'],
-  ]);
+  assert.deepEqual(health, []);
+});
+
+test('legacy game API refuses early retirement and stays closed after drain', async () => {
+  await assert.rejects(() => startGameServer({
+    enabled: false,
+    drainState: async () => ({ active: 1, pendingRewards: 0, drained: false }),
+    loggerImpl: { info() {}, warn() {} },
+  }), /must stay available/);
+  const result = await startGameServer({
+    enabled: true,
+    secret: 'synthetic-game-session-secret-32-bytes-minimum',
+    allowedOrigins: new Set(['https://games.example']),
+    drainState: async () => ({ active: 0, pendingRewards: 0, drained: true }),
+    loggerImpl: { info() {}, warn() {} },
+  });
+  assert.deepEqual(result, { started: false, reason: 'drained' });
 });
 
 test('enabled game server rejects a short secret before opening a listener', async () => {

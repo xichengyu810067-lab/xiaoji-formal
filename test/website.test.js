@@ -4,6 +4,8 @@ const vm = require('node:vm');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { PUBLIC_SYSTEM_CATALOG } = require('../website/publicFeatureCatalog');
+const { createPolicyPublication, publication } = require('../website/policyPublication');
+const { renderPolicyPublicationFallbacks } = require('../scripts/render-policy-publication');
 
 const root = path.resolve(__dirname, '..');
 const PUBLIC_STATUS_WORKER_BASE = 'https://xiaoji-public-status.xichengyu810067.workers.dev';
@@ -47,12 +49,15 @@ test('public website provides local text support and no-JavaScript policy pages 
     'website/games/sudoku/index.html',
   ].map((file) => fs.readFileSync(path.join(root, file), 'utf8'));
   const policies = fs.readFileSync(path.join(root, 'website/policies.html'), 'utf8');
+  const policyPublication = fs.readFileSync(path.join(root, 'website/policyPublication.js'), 'utf8');
   const support = fs.readFileSync(path.join(root, 'website/siteSupport.js'), 'utf8');
   const supportCss = fs.readFileSync(path.join(root, 'website/support.css'), 'utf8');
   const gameClient = fs.readFileSync(path.join(root, 'website/games/gameClient.js'), 'utf8');
 
+  new vm.Script(policyPublication, { filename: 'website/policyPublication.js' });
   new vm.Script(support, { filename: 'website/siteSupport.js' });
-  assert.ok(pages.every((page) => page.includes('siteSupport.js')));
+  assert.ok(pages.every((page) => page.includes('policyPublication.js') && page.includes('siteSupport.js')));
+  assert.ok(pages.every((page) => page.indexOf('policyPublication.js') < page.indexOf('siteSupport.js')));
   assert.ok(pages.slice(2).every((page) => page.includes('data-support-footer-links')));
   assert.match(policies, /<link rel="canonical" href="\/policies\.html"/);
   assert.match(policies, /id="terms"/);
@@ -60,8 +65,33 @@ test('public website provides local text support and no-JavaScript policy pages 
   assert.match(policies, /id="public-data"/);
   assert.match(policies, /Google Fonts/);
   assert.match(policies, /非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉/);
-  assert.match(policies, /不宣稱所有記憶都會在 30 天後自動刪除/);
+  assert.match(policies, /與小吉 AI 的互動包含私訊/);
+  assert.match(policies, /資料沒有固定保存期限/);
+  assert.match(policies, /小吉擁有者（原作者）可在職責範圍內查看與小吉的對話內容/);
+  assert.match(policies, /這不表示對話會被用來訓練模型/);
+  const escapedPublicationText = publication.displayText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.equal((policies.match(new RegExp(`data-policy-publication><noscript>${escapedPublicationText}`, 'g')) || []).length, 2);
+  assert.match(policies, /版本：1\.1\.0。生效日期：2026 年 9 月 26 日。最後更新：2026 年 9 月 26 日。本政策適用於小吉已啟用的功能。/);
   assert.match(support, /非機器人、非系統的公開頻道文字訊息可能被記錄為公開頻道記憶，即使未提及小吉/);
+  assert.match(support, /與小吉 AI 的互動包含私訊/);
+  assert.match(support, /資料沒有固定保存期限/);
+  assert.match(support, /小吉擁有者（原作者）可在職責範圍內查看與小吉的對話內容/);
+  assert.match(support, /這不表示對話會被用來訓練模型/);
+  assert.equal(publication.version, '1.1.0');
+  assert.equal(publication.effectiveDate, '2026 年 9 月 26 日');
+  assert.match(publication.displayText, /版本：1\.1\.0。生效日期：2026 年 9 月 26 日。/);
+  const effectivePublication = createPolicyPublication({
+    version: '1.1.0',
+    lastUpdatedDate: '2026 年 9 月 26 日',
+    effectiveDate: '2026 年 10 月 1 日',
+  });
+  assert.equal(effectivePublication.displayText, '版本：1.1.0。生效日期：2026 年 10 月 1 日。最後更新：2026 年 9 月 26 日。本政策適用於小吉已啟用的功能。');
+  const effectivePolicyPage = renderPolicyPublicationFallbacks(policies, effectivePublication);
+  assert.equal((effectivePolicyPage.match(new RegExp(`data-policy-publication><noscript>${effectivePublication.displayText}`, 'g')) || []).length, 2);
+  assert.doesNotMatch(effectivePolicyPage, /尚未生效/);
+  assert.match(support, /policyPublication\.displayText/);
+  assert.match(support, /本頁與政策彈窗會顯示相同政策文字與更新日期。\$\{policyPublication\.displayText\}/);
+  assert.doesNotMatch(policies + policyPublication + support, /候選政策版本|本候選文本/);
   assert.match(support, /xichengyu810067@gmail\.com/);
   assert.match(support, /小吉服務詢問/);
   assert.match(support, /小吉自助客服/);

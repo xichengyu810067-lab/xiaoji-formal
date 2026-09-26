@@ -6,6 +6,9 @@ const path = require('node:path');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-query-memory-test-'));
 process.env.XIAOJI_MEMORY_PATH = path.join(testRoot, 'xiaojiMemory.json');
+const guildConfig = require('../src/utils/guildConfig');
+const originalGetGuildConfig = guildConfig.getGuildConfig;
+guildConfig.getGuildConfig = () => structuredClone(guildConfig.defaultGuildConfig);
 const {
   answerMemoryQuery,
   clearMemoryForTests,
@@ -13,8 +16,11 @@ const {
   recordPrivateInteraction,
   recordPublicMessage,
 } = require('../src/services/memoryService');
+guildConfig.getGuildConfig = originalGetGuildConfig;
 
 test.after(() => {
+  assert.equal(path.dirname(path.resolve(testRoot)), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(testRoot).startsWith('xiaoji-query-memory-test-'));
   fs.rmSync(testRoot, { recursive: true, force: true });
   delete process.env.XIAOJI_MEMORY_PATH;
 });

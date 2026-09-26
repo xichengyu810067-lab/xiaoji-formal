@@ -6,12 +6,20 @@ const { loadCommands } = require('./loadCommands');
 const { loadPrivateExtensionHost } = require('./extensions/extensionHost');
 const { configureBoardRuntime } = require('./games/boardRuntimeRegistry');
 const { createBoardDiscordRuntime } = require('./games/discord/boardDiscordRuntime');
+const { configureSoloRuntime } = require('./systems/games/soloRuntimeRegistry');
+const { createDefaultSoloDiscordRuntime } = require('./systems/games/soloDiscordRuntime');
+const { configureArchivePathResolver } = require('./services/aiArchiveService');
+const { resolveDataPath } = require('./platform/dataPaths');
+const { preflightRuntimeData } = require('./platform/runtimeDataPreflight');
+const { startRuntime } = require('./platform/startupSequence');
 const { registerEvents } = require('./handlers/registerEvents');
 const { getBotOwnerId, getDiscordToken, requireEnvValue } = require('./utils/env');
 const logger = require('./utils/logger');
 const { stopPublicStatusServer } = require('./services/publicStatusServer');
 const { stopStatusSnapshotPublisher } = require('./services/statusSnapshotPublisher');
 const { stopGameServer } = require('./services/gameServer');
+
+configureArchivePathResolver(resolveDataPath);
 
 const token = getDiscordToken();
 const ownerId = getBotOwnerId();
@@ -34,9 +42,11 @@ const boardRuntime = configureBoardRuntime(createBoardDiscordRuntime({
   client,
   privateCorpusRoot: process.env.TURTLE_SOUP_CORPUS_ROOT || null,
 }));
+const soloRuntime = configureSoloRuntime(createDefaultSoloDiscordRuntime({ client, runtimeLogger: logger }));
 
 client.extensionHost = extensionHost;
 client.boardRuntime = boardRuntime;
+client.soloRuntime = soloRuntime;
 client.commands = loadCommands(undefined, { extensionHost });
 registerEvents(client);
 
@@ -71,12 +81,16 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
 async function start() {
-  if (shouldAutoDeployCommands()) {
-    logger.info('AUTO_DEPLOY_COMMANDS 已啟用，登入前部署 Slash Commands。');
-    await deployCommands({ extensionHost });
-  }
-
-  await client.login(token);
+  await startRuntime({
+    preflightPublic: preflightRuntimeData,
+    preflightPrivate: () => extensionHost.preflight({ client }),
+    shouldDeploy: shouldAutoDeployCommands,
+    deploy: async () => {
+      logger.info('AUTO_DEPLOY_COMMANDS 已啟用，登入前部署 Slash Commands。');
+      await deployCommands({ extensionHost });
+    },
+    login: () => client.login(token),
+  });
 }
 
 start().catch((error) => {

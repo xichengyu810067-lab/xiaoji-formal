@@ -1,0 +1,34 @@
+name: Public core
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  public-core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run ci:runtime
+      - name: Prepare clean public export
+        shell: pwsh
+        run: node scripts/create-public-export.js --output (Join-Path $env:RUNNER_TEMP 'public-core')
+      - name: Verify exported runtime
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/public-core
+        run: |
+          npm ci
+          npm run check
+          npm test
+          npm run ci:runtime
