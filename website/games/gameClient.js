@@ -4,9 +4,9 @@
   const labels = Object.freeze({ tetris: '俄羅斯方塊', 'number-match': '數字配對', sudoku: '數獨' });
   const difficultyLabels = Object.freeze({ easy: '簡單', normal: '一般', complex: '複雜', hard: '困難' });
   const errorLabels = Object.freeze({
-    missing_launch_token: '請回到 Discord 使用 /games play，由小吉建立一次性遊戲連結。',
-    token_invalid: '這個遊戲連結已使用或無效，請回 Discord 重新建立。',
-    session_expired: '遊戲連結已逾時，請回 Discord 重新建立。',
+    missing_launch_token: '遊戲已搬到 Discord，請使用 /games menu 開始新局。',
+    token_invalid: '舊遊戲連結已使用或無效，請在 Discord 使用 /games menu。',
+    session_expired: '舊遊戲連結已逾時，請在 Discord 使用 /games menu。',
     replay_mismatch: '動作順序不一致，為保護獎勵，這局已停止同步。',
     rate_limited: '操作太快囉，稍等一下再繼續。',
   });

@@ -2,7 +2,6 @@ const { Events } = require('discord.js');
 const { restoreActivePolls } = require('../services/pollService');
 const { restoreActiveReminders } = require('../services/reminderService');
 const { checkAndAutoLeave, syncExistingGuilds } = require('../services/auditService');
-const { initializeCoinDatabase } = require('../services/coinDatabase');
 const { processDueJobs, processExpiredWorkTasks, processWorkPenaltyAnnouncements, processWorkReminders } = require('../services/workService');
 const { processBankInterest } = require('../services/bankService');
 const { processCasinoLoanInterest, processExpiredBlackjackSessions } = require('../services/casinoService');
@@ -49,7 +48,6 @@ module.exports = {
     
     await runStartupTask('AI 對話記憶過期清理', () => clearExpiredConversationHistory());
     await runStartupTask('AI 對話記憶清理排程啟動', () => startConversationHistoryCleanupScheduler());
-    await runStartupTask('吉幣系統資料庫載入', () => initializeCoinDatabase());
     await runStartupTask('Discord 桌遊資料恢復', () => getBoardRuntime().startLifecycle());
     await runStartupTask('遊戲獎勵恢復', () => resumePendingGameRewards());
     await runStartupTask('遊戲服務啟動', () => startGameServer());

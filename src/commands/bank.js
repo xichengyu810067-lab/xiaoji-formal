@@ -16,6 +16,7 @@ const {
   withdraw,
 } = require('../services/bankService');
 const { ensureModerationAccess } = require('../utils/moderation');
+const { ensureBotOwner } = require('../utils/ownerOnly');
 const { formatCoins, replyCoinError } = require('../utils/coinPresentation');
 
 function formatRate(rate) {
@@ -286,7 +287,7 @@ module.exports = {
       if (subcommand === 'fixed-claim') {
         const item = await claimFixedDeposit(interaction.guildId, interaction.user.id, interaction.options.getInteger('fixed-id', true));
         await interaction.reply({
-          content: `已領取定存 #${item.id}，入帳 ${formatCoins(item.paidAmount)}。\n目前錢包：${formatCoins(item.walletAfter)}`,
+          content: `已領取定存 #${item.id}，本金與利息共 ${formatCoins(item.grossAmount)}；利息抵欠款 ${formatCoins(item.debtOffset)}，錢包入帳 ${formatCoins(item.paidAmount)}。\n目前錢包：${formatCoins(item.walletAfter)}`,
           ephemeral: true,
         });
         return;
@@ -295,14 +296,14 @@ module.exports = {
       if (subcommand === 'fixed-cancel') {
         const item = await cancelFixedDeposit(interaction.guildId, interaction.user.id, interaction.options.getInteger('fixed-id', true));
         await interaction.reply({
-          content: `已提前解約定存 #${item.id}，退回 ${formatCoins(item.paidAmount)}，其中利息 ${formatCoins(item.interestPaid)}。\n目前錢包：${formatCoins(item.walletAfter)}`,
+          content: `已提前解約定存 #${item.id}，本金與利息共 ${formatCoins(item.grossAmount)}，其中利息 ${formatCoins(item.interestPaid)}；利息抵欠款 ${formatCoins(item.debtOffset)}，錢包入帳 ${formatCoins(item.paidAmount)}。\n目前錢包：${formatCoins(item.walletAfter)}`,
           ephemeral: true,
         });
         return;
       }
 
       if (subcommand === 'rate-set-demand') {
-        if (!(await requireBankAdmin(interaction))) return;
+        if (!(await ensureBotOwner(interaction))) return;
         const result = await setDemandRate(interaction.guildId, interaction.options.getNumber('rate-percent', true), {
           operatorId: interaction.user.id,
           reason: interaction.options.getString('reason') || '',
@@ -316,7 +317,7 @@ module.exports = {
       }
 
       if (subcommand === 'rate-set-fixed') {
-        if (!(await requireBankAdmin(interaction))) return;
+        if (!(await ensureBotOwner(interaction))) return;
         const result = await setFixedRate(
           interaction.guildId,
           interaction.options.getInteger('term-days', true),

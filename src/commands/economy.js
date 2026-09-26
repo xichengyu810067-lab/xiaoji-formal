@@ -104,6 +104,15 @@ function formatInventoryLine(item) {
 }
 
 function formatJobLine(job) {
+  if (job.scope === 'primary') {
+    return [
+      `<@${job.userId}>`, '全域主職', job.jobName,
+      job.status === 'pending_legacy' ? '等待舊工作結清' : job.status === 'active' ? '進行中' : '已結束',
+      `來源群 ${job.sourceGuildId}`,
+      job.settledAmount == null ? '薪資尚未結算' : `實際發放 ${formatCoins(job.settledAmount)}`,
+      job.payAt ? `本期結束 ${formatTimestamp(job.payAt)}` : null,
+    ].filter(Boolean).join('｜');
+  }
   return [
     `#${job.id}`,
     `<@${job.userId}>`,
@@ -182,6 +191,8 @@ async function ensureAdmin(interaction) {
 }
 
 async function buildUserReport(interaction, user) {
+  const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+  if (!member) return '只能查詢目前在此伺服器的成員。';
   const [summary, fixed, purchases, inventory, work, payroll] = await Promise.all([
     getBalanceSummary(interaction.guildId, user.id),
     listFixedDeposits(interaction.guildId, { userId: user.id, includeClosed: true, limit: 25 }),
@@ -199,8 +210,13 @@ async function buildUserReport(interaction, user) {
     `定存數量：${fixed.length} 筆（未結束 ${fixedOpen}，已結束 ${fixedClosed}）`,
     `購買紀錄：最近 ${purchases.length} 筆`,
     `擁有商品：${inventory.length} 種`,
-    work.activeJob ? `目前職業：${work.activeJob.jobName}，任務 ${work.activeJob.todayCompletedTaskCount}/${work.activeJob.todayTaskCount}` : '目前職業：無',
+    work.activePrimaryJob ? `目前全域主職：${work.activePrimaryJob.jobName}，來源群 ${work.activePrimaryJob.sourceGuildId}`
+      : work.activeJob ? `目前職業：${work.activeJob.jobName}，任務 ${work.activeJob.todayCompletedTaskCount}/${work.activeJob.todayTaskCount}`
+        : work.primaryStatusView?.status === 'pending_legacy'
+          ? `下一期全域主職：${work.primaryStatusView.jobName}，等待舊工作結清`
+          : '目前職業：無',
     payroll.length ? `最近發薪：${formatCoins(payroll[0].paidAmount)}，${formatTimestamp(payroll[0].createdAt)}` : '最近發薪：無',
+    work.latestPrimaryPayroll ? `最近主職實際發薪：${formatCoins(work.latestPrimaryPayroll.paidAmount)}，${formatTimestamp(work.latestPrimaryPayroll.settledAt)}` : null,
     '',
     '**最近購買**',
     purchases.length ? purchases.slice(0, 5).map(formatPurchaseLine).join('\n') : '無',
@@ -238,17 +254,28 @@ async function buildAuditReport(interaction, type, user, limit) {
 
   if (type === 'work') {
     if (user) {
+      const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+      if (!member) return '只能查詢目前在此伺服器的成員。';
       const status = await getWorkStatus(interaction.guildId, user.id);
       const lines = [
         `**${formatUser(user)} 職業紀錄**`,
-        status.activeJob ? formatJobLine(status.activeJob) : '目前沒有進行中的工作。',
+        status.primaryStatusView ? formatJobLine(status.primaryStatusView) : null,
+        status.activeJobs.length ? status.activeJobs.map(formatJobLine).join('\n') : null,
+        !status.primaryStatusView && !status.activeJobs.length ? '目前沒有進行中的工作。' : null,
         status.recentTasks.length ? ['', '**最近工作任務**', ...status.recentTasks.map(formatTaskLine)].join('\n') : null,
       ].filter(Boolean);
       return lines.join('\n');
     }
 
-    const rows = await getAllWorkStatuses(interaction.guildId, { limit });
-    return rows.length ? ['**職業紀錄**', ...rows.map(formatJobLine)].join('\n') : '沒有職業紀錄。';
+    const members = await interaction.guild.members.fetch().catch(() => null);
+    if (!members || Number.isSafeInteger(interaction.guild.memberCount) &&
+        members.size < interaction.guild.memberCount) {
+      return '目前無法核對本群完整成員名單，已暫停全域工作總覽。';
+    }
+    const rows = await getAllWorkStatuses(interaction.guildId, {
+      limit, visibleUserIds: members.keys(),
+    });
+    return rows.length ? ['**本群舊工作及目前本群成員的全域主職**', ...rows.map(formatJobLine)].join('\n') : '沒有職業紀錄。';
   }
 
   if (type === 'tasks') {

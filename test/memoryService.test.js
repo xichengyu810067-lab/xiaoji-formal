@@ -6,6 +6,9 @@ const path = require('node:path');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-query-memory-test-'));
 process.env.XIAOJI_MEMORY_PATH = path.join(testRoot, 'xiaojiMemory.json');
+const guildConfig = require('../src/utils/guildConfig');
+const originalGetGuildConfig = guildConfig.getGuildConfig;
+guildConfig.getGuildConfig = () => structuredClone(guildConfig.defaultGuildConfig);
 const {
   answerMemoryQuery,
   clearMemoryForTests,
@@ -13,8 +16,11 @@ const {
   recordPrivateInteraction,
   recordPublicMessage,
 } = require('../src/services/memoryService');
+guildConfig.getGuildConfig = originalGetGuildConfig;
 
 test.after(() => {
+  assert.equal(path.dirname(path.resolve(testRoot)), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(testRoot).startsWith('xiaoji-query-memory-test-'));
   fs.rmSync(testRoot, { recursive: true, force: true });
   delete process.env.XIAOJI_MEMORY_PATH;
 });
@@ -90,7 +96,7 @@ test('private AI context follows the same user across guilds and isolates every 
   assert.doesNotMatch(sameUserContextInGuildB, /guild-a|channel-a|travelling-user/);
 });
 
-test('private AI context has explicit record and character bounds', () => {
+test('private AI context keeps the latest append within record and character bounds when timestamps tie', () => {
   clearMemoryForTests();
 
   for (let index = 0; index < 8; index += 1) {
@@ -103,6 +109,12 @@ test('private AI context has explicit record and character bounds', () => {
       assistantText: `回覆-${index}-${'摘要'.repeat(50)}`,
     });
   }
+
+  const memory = JSON.parse(fs.readFileSync(process.env.XIAOJI_MEMORY_PATH, 'utf8'));
+  for (const record of memory.private_user_memory['bounded-user']) {
+    record.timestamp = '2026-09-26T00:00:00.000Z';
+  }
+  fs.writeFileSync(process.env.XIAOJI_MEMORY_PATH, JSON.stringify(memory), 'utf8');
 
   const context = getPrivateMemoryContext('bounded-user', { maxRecords: 2, maxCharacters: 240 });
   assert.ok(context.length <= 240);

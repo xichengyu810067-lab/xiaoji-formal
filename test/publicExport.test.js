@@ -37,11 +37,20 @@ test('repository public export plan is allowlisted and excludes protected roots'
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'public-export', 'manifest.json'), 'utf8'));
   const files = buildPublicExportPlan();
   assert.ok(files.includes('src/index.js'));
+  assert.ok(files.includes('src/platform/startupSequence.js'));
   assert.ok(files.includes('src/games/discord/boardDiscordRuntime.js'));
+  assert.ok(files.includes('src/systems/games/board/storage/boardSchema.js'));
+  assert.ok(files.includes('src/systems/games/board/storage/sqliteBoardStore.js'));
+  assert.ok(files.includes('src/systems/conversation/aiArchive.js'));
+  assert.ok(files.includes('src/systems/games/soloDiscordRuntime.js'));
   assert.ok(files.includes('website/statusData.js'));
   assert.ok(files.includes('website/policies.html'));
   assert.ok(files.includes('website/siteSupport.js'));
   assert.ok(files.includes('website/support.css'));
+  assert.deepEqual(
+    files.filter((file) => file.startsWith('.github/workflows/')),
+    ['.github/workflows/public-core.yml']
+  );
   assert.equal(files.some((file) => /(^|\/)private\//.test(file)), false);
   assert.equal(files.some((file) => /(^|\/)(?:data|logs)\//.test(file)), false);
   assert.deepEqual(files.filter((file) => file.startsWith('deploy/')), []);
@@ -77,15 +86,25 @@ test('clean public export npm test passes without deployment-only tools', {
   try {
     exportPublicFiles({ sourceRoot: projectRoot, outputPath });
     const program = process.platform === 'win32' ? process.env.ComSpec : 'npm';
-    const args = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd test'] : ['test'];
     const childEnv = { ...process.env };
     delete childEnv.NODE_TEST_CONTEXT;
-    const result = cp.spawnSync(program, args, {
-      cwd: outputPath,
-      encoding: 'utf8',
-      env: childEnv,
-      maxBuffer: 16 * 1024 * 1024,
-    });
+    delete childEnv.NODE_PATH;
+    const runNpm = (args) => {
+      const commandArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd', ...args] : args;
+      return cp.spawnSync(program, commandArgs, {
+        cwd: outputPath,
+        encoding: 'utf8',
+        env: childEnv,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+    };
+    const install = runNpm(['ci']);
+    assert.equal(
+      install.status,
+      0,
+      `Public export npm ci failed.\n${install.error?.message || ''}\n${(install.stdout || '').slice(-4000)}\n${(install.stderr || '').slice(-4000)}`
+    );
+    const result = runNpm(['test']);
     assert.equal(
       result.status,
       0,
@@ -112,7 +131,7 @@ test('actual public export can load board commands and runtime dependencies', ()
     assert.equal(typeof runtimeModule.createBoardDiscordRuntime, 'function');
 
     const packageJson = JSON.parse(fs.readFileSync(path.join(outputPath, 'package.json'), 'utf8'));
-    assert.equal(packageJson.version, '1.0.0');
+    assert.equal(packageJson.version, '1.1.0');
     for (const scriptName of [
       'smoke:login',
       'prod:check',
@@ -186,6 +205,9 @@ test('public export exclusions are exact files and remain safe after exclusion',
 
 test('board storage export exception permits source only and rejects database artifacts', () => {
   assert.equal(assertAllowedPath('src/games/storage/boardSchema.js'), 'src/games/storage/boardSchema.js');
+  assert.equal(assertAllowedPath('src/systems/games/board/storage/boardSchema.js'), 'src/systems/games/board/storage/boardSchema.js');
+  assert.equal(assertAllowedPath('src/systems/games/board/storage/sqliteBoardStore.js'), 'src/systems/games/board/storage/sqliteBoardStore.js');
+  assert.throws(() => assertAllowedPath('src/systems/games/board/storage/unlisted.js'));
   for (const artifact of ['session.db', 'session.sqlite', 'session.sqlite-wal', 'snapshot.json']) {
     assert.throws(
       () => assertAllowedPath(`src/games/storage/${artifact}`),

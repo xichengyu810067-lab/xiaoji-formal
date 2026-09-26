@@ -5,13 +5,16 @@ const {
   addPendingTask,
   cancelJob,
   createWorkPenaltyAppeal,
+  createPrimaryPenaltyAppeal,
   deleteWorkSubmission,
   editWorkSubmission,
   getActiveJobs,
   getAllWorkStatuses,
   getPayrollHistory,
+  getPrimaryPayrollHistory,
   getWorkStatus,
   listWorkPenalties,
+  listPrimaryPenalties,
   listPendingWorkSubmissions,
   listJobs,
   listWorkTasks,
@@ -19,6 +22,7 @@ const {
   processWorkReminders,
   reportWork,
   reviewWorkPenaltyAppeal,
+  reviewPrimaryPenaltyAppeal,
   reviewWorkSubmission,
   startJob,
   startVenueJobs,
@@ -74,6 +78,8 @@ function statusLabel(status) {
     expired: '已逾期',
     cancelled: '已取消',
     no_work_available: '無工作可做',
+    pending_legacy: '等待舊工作結清',
+    closed: '本期已結束',
   };
 
   return labels[status] || status || '未知';
@@ -105,6 +111,22 @@ function formatJobBlock(job, { includeUser = false } = {}) {
   }
 
   const jobType = JOB_TYPES.find((item) => item.name === job.jobName);
+
+  if (job.scope === 'primary') {
+    return [
+      includeUser ? `使用者：<@${job.userId}>` : null,
+      `全域主職：${job.jobName}`,
+      includeUser ? `週期 ID：${job.globalCycleId}` : null,
+      includeUser ? `選擇來源群 ID：${job.sourceGuildId}` : null,
+      `天數：${job.workDays} 天`,
+      `狀態：${statusLabel(job.status)}`,
+      job.status === 'pending_legacy' ? `最早生效：${formatTimestamp(job.notBeforeAt)}` : null,
+      job.startAt ? `生效時間：${formatTimestamp(job.startAt)}` : null,
+      job.payAt ? `本期結束：${formatTimestamp(job.payAt)}` : null,
+      job.settledAmount == null ? '本期薪資：尚未結算' : `實際發放：${formatCoins(job.settledAmount)}`,
+      '角色同步：由私有擴充核對',
+    ].filter(Boolean).join('\n');
+  }
 
   return [
     includeUser ? `使用者：<@${job.userId}>` : null,
@@ -230,7 +252,7 @@ module.exports = {
     .addSubcommand((subcommand) =>
       subcommand
         .setName('start')
-        .setDescription('開始或切換一份工作')
+        .setDescription('選擇下一期唯一主職')
         .addStringOption((option) =>
           option
             .setName('job')
@@ -245,7 +267,7 @@ module.exports = {
     .addSubcommand((subcommand) =>
       subcommand
         .setName('start-venue')
-        .setDescription('開始賭場場館多職業')
+        .setDescription('選擇一種場館主職')
         .addIntegerOption((option) =>
           option.setName('days').setDescription('共同工作天數 (1-30 天)').setRequired(true).setMinValue(1).setMaxValue(30)
         )
@@ -275,13 +297,14 @@ module.exports = {
         .setDescription('管理員查詢伺服器工作紀錄')
         .addIntegerOption((option) => option.setName('limit').setDescription('筆數，預設 10').setMinValue(1).setMaxValue(25))
     )
-    .addSubcommand((subcommand) => subcommand.setName('cancel').setDescription('取消目前進行中的工作'))
+    .addSubcommand((subcommand) => subcommand.setName('cancel').setDescription('查詢舊工作取消限制'))
     .addSubcommand((subcommand) =>
       subcommand
         .setName('submit')
         .setDescription('提交今日工作內容與證明')
         .addStringOption((option) => option.setName('content').setDescription('工作內容').setRequired(true).setMaxLength(1000))
         .addAttachmentOption((option) => option.setName('proof').setDescription('截圖或附件證明'))
+        .addIntegerOption((option) => option.setName('task-id').setDescription('要完成的待辦 ID').setMinValue(1))
         .addStringOption((option) => option.setName('task-type').setDescription('任務類型，例如公告、翻譯、整理').setMaxLength(80))
         .addIntegerOption((option) =>
           option.setName('external-servers').setDescription('翻譯官外部伺服器任務數').setMinValue(0).setMaxValue(30)
@@ -335,6 +358,7 @@ module.exports = {
         .addStringOption((option) => option.setName('task-type').setDescription('任務類型，例如公告、翻譯、整理').setMaxLength(80))
         .addStringOption((option) => option.setName('description').setDescription('工作內容摘要').setMaxLength(500))
         .addAttachmentOption((option) => option.setName('proof').setDescription('截圖或附件證明'))
+        .addIntegerOption((option) => option.setName('task-id').setDescription('要完成的待辦 ID').setMinValue(1))
         .addIntegerOption((option) =>
           option.setName('external-servers').setDescription('翻譯官外部伺服器任務數').setMinValue(0).setMaxValue(30)
         )
@@ -423,6 +447,8 @@ module.exports = {
       subcommand
         .setName('appeal')
         .setDescription('申訴一筆扣薪紀錄')
+        .addStringOption((option) => option.setName('scope').setDescription('扣薪類型').setRequired(true)
+          .addChoices({ name: '舊工作', value: 'legacy' }, { name: '全域主職', value: 'primary' }))
         .addIntegerOption((option) => option.setName('penalty-id').setDescription('扣薪 ID').setRequired(true).setMinValue(1))
         .addStringOption((option) => option.setName('reason').setDescription('申訴事由').setRequired(true).setMaxLength(1000))
     )
@@ -430,6 +456,8 @@ module.exports = {
       subcommand
         .setName('appeal-review')
         .setDescription('擁有者審核扣薪申訴')
+        .addStringOption((option) => option.setName('scope').setDescription('申訴類型').setRequired(true)
+          .addChoices({ name: '舊工作', value: 'legacy' }, { name: '全域主職', value: 'primary' }))
         .addIntegerOption((option) => option.setName('appeal-id').setDescription('申訴 ID').setRequired(true).setMinValue(1))
         .addStringOption((option) =>
           option
@@ -492,82 +520,43 @@ module.exports = {
         return;
       }
 
-      if (subcommand === 'start') {
-        await interaction.deferReply();
-        const jobName = interaction.options.getString('job', true);
+      if (subcommand === 'start' || subcommand === 'start-venue') {
+        await interaction.deferReply({ ephemeral: true });
         const days = interaction.options.getInteger('days', true);
-        const job = await startJob(interaction.guildId, interaction.user.id, jobName, days);
-        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-        const roleResult = member
-          ? await runWorkRoleHook(interaction.client, 'syncJobRoleForMember', {
-            member,
-            jobName: job.jobName,
-            options: { jobId: job.id },
-          })
-          : { warnings: ['找不到你的成員資料，無法同步職業身分組。'] };
-
+        const selection = subcommand === 'start'
+          ? await startJob(interaction.guildId, interaction.user.id, interaction.options.getString('job', true), days)
+          : await startVenueJobs(interaction.guildId, interaction.user.id, {
+            days,
+            chef: interaction.options.getBoolean('chef') || false,
+            bartender: interaction.options.getBoolean('bartender') || false,
+            waiter: interaction.options.getString('waiter') || 'none',
+          });
         await interaction.editReply({
           content: [
-            '**工作已開始！**',
-            job.replacedJob ? `已切換職業：${job.replacedJob.jobName} -> ${job.jobName}` : `職業：${job.jobName}`,
-            `天數：${job.workDays} 天`,
-            `每日薪水：${formatCoins(job.dailySalary)}`,
-            `預計總薪水：${formatCoins(job.totalSalary)}`,
-            `請記得將每日工作內容提交到 \`#${JOB_TYPES.find((item) => item.name === job.jobName)?.reportChannelName || job.jobName}\`。`,
-            `預計發薪時間：${formatTimestamp(job.payAt)}`,
-            roleResult.role ? `職業身分組：${roleResult.role}` : null,
-            ...formatRoleWarnings(roleResult.warnings),
-          ]
-            .filter(Boolean)
-            .join('\n'),
+            selection.alreadySelected ? '你已選擇這份下一期主職。' : '已記錄下一期主職選擇。',
+            '職業：' + selection.jobName,
+            '天數：' + selection.workDays + ' 天',
+            '舊工作仍依原群、原規則處理；全部結清後才會啟動新週期。',
+            '最早生效：' + formatTimestamp(selection.notBeforeAt),
+            '選擇本身不建立新工作或變更身分組。',
+          ].join('\n'),
         });
         return;
       }
-
-      if (subcommand === 'start-venue') {
-        await interaction.deferReply();
-        const result = await startVenueJobs(interaction.guildId, interaction.user.id, {
-          days: interaction.options.getInteger('days', true),
-          chef: interaction.options.getBoolean('chef') || false,
-          bartender: interaction.options.getBoolean('bartender') || false,
-          waiter: interaction.options.getString('waiter') || 'none',
-        });
-        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-        const roleResults = [];
-        if (member) {
-          for (const job of result.jobs) {
-            roleResults.push(await runWorkRoleHook(interaction.client, 'syncJobRoleForMember', {
-              member,
-              jobName: job.jobName,
-              options: { jobId: job.id },
-            }));
-          }
-        }
-        const warnings = roleResults.flatMap((item) => item.warnings || []);
-        await interaction.editReply({
-          content: [
-            '**場館工作已開始！**',
-            `職業：${result.jobs.map((job) => job.jobName).join('、')}`,
-            result.skippedJobs.length ? `已在職，略過：${result.skippedJobs.map((job) => job.jobName).join('、')}` : null,
-            `共同天數：${result.workDays} 天`,
-            `預計發薪時間：${formatTimestamp(result.payAt)}`,
-            '場館多職業會共用相同工作週期。',
-            ...formatRoleWarnings(member ? warnings : ['找不到你的成員資料，無法同步職業身分組。']),
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        });
-        return;
-      }
-
       if (subcommand === 'status') {
         const status = await getWorkStatus(interaction.guildId, interaction.user.id);
 
         await interaction.reply({
           content: [
             '**目前工作狀態**',
-            formatJobListBlock(status.activeJobs || (status.activeJob ? [status.activeJob] : [])),
+            status.primaryStatusView ? formatJobBlock(status.primaryStatusView) : null,
+            status.activeJobs?.length
+              ? formatJobListBlock(status.activeJobs)
+              : status.primaryStatusView ? null : '目前沒有進行中的工作。',
             status.latestPayroll ? ['', '**最近發薪紀錄**', formatPayrollLine(status.latestPayroll)].join('\n') : null,
+            status.latestPrimaryPayroll ? ['', '**最近主職實際發薪**',
+              status.latestPrimaryPayroll.jobName + '｜' + formatCoins(status.latestPrimaryPayroll.paidAmount) +
+              '｜' + formatTimestamp(status.latestPrimaryPayroll.settledAt)].join('\n') : null,
             status.recentTasks.length ? ['', '**最近任務**', ...status.recentTasks.slice(0, 5).map(formatTaskLine)].join('\n') : null,
           ]
             .filter(Boolean)
@@ -579,13 +568,23 @@ module.exports = {
 
       if (subcommand === 'status-user') {
         const user = interaction.options.getUser('user', true);
+        const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+        if (!member) {
+          await interaction.reply({ content: '只能查詢目前在此伺服器的成員。', ephemeral: true });
+          return;
+        }
         const status = await getWorkStatus(interaction.guildId, user.id);
 
         await interaction.reply({
           content: [
             `**${formatUser(user)} 的工作狀態**`,
-            formatJobListBlock(status.activeJobs || (status.activeJob ? [status.activeJob] : [])),
+            status.primaryStatusView ? formatJobBlock(status.primaryStatusView) : null,
+            status.activeJobs?.length ? formatJobListBlock(status.activeJobs) : null,
+            !status.primaryStatusView && !status.activeJobs?.length ? '目前沒有進行中的工作。' : null,
             status.latestPayroll ? ['', '**最近發薪紀錄**', formatPayrollLine(status.latestPayroll)].join('\n') : null,
+            status.latestPrimaryPayroll ? ['', '**最近主職實際發薪**',
+              status.latestPrimaryPayroll.jobName + '｜' + formatCoins(status.latestPrimaryPayroll.paidAmount) +
+              '｜' + formatTimestamp(status.latestPrimaryPayroll.settledAt)].join('\n') : null,
             status.recentTasks.length ? ['', '**最近任務**', ...status.recentTasks.slice(0, 8).map(formatTaskLine)].join('\n') : null,
           ]
             .filter(Boolean)
@@ -597,11 +596,19 @@ module.exports = {
 
       if (subcommand === 'status-all') {
         const limit = interaction.options.getInteger('limit') || 10;
-        const jobs = await getAllWorkStatuses(interaction.guildId, { limit });
-        const lines = jobs.map((job) => `#${job.id}｜${formatJobBlock(job, { includeUser: true }).replaceAll('\n', '｜')}`);
+        const members = await interaction.guild.members.fetch().catch(() => null);
+        if (!members || Number.isSafeInteger(interaction.guild.memberCount) &&
+            members.size < interaction.guild.memberCount) {
+          await interaction.reply({ content: '目前無法核對本群成員，已暫停全域工作總覽。', ephemeral: true });
+          return;
+        }
+        const jobs = await getAllWorkStatuses(interaction.guildId, {
+          limit, visibleUserIds: members.keys(),
+        });
+        const lines = jobs.map((job) => formatJobBlock(job, { includeUser: true }).replaceAll('\n', '｜'));
 
         await interaction.reply({
-          content: jobs.length ? ['**伺服器工作紀錄**', ...lines].join('\n') : '目前沒有工作紀錄。',
+          content: jobs.length ? ['**本群舊工作及目前本群成員的全域主職**', ...lines].join('\n') : '目前沒有工作紀錄。',
           ephemeral: true,
         });
         return;
@@ -626,6 +633,7 @@ module.exports = {
 
       if (subcommand === 'submit') {
         const result = await reportWork(interaction.guildId, interaction.user.id, {
+          taskId: interaction.options.getInteger('task-id'),
           taskType: interaction.options.getString('task-type') || 'work_submit',
           description: interaction.options.getString('content', true),
           ...getSubmissionContext(interaction),
@@ -707,6 +715,7 @@ module.exports = {
       if (subcommand === 'report') {
         const mode = interaction.options.getString('mode') || 'completed';
         const result = await reportWork(interaction.guildId, interaction.user.id, {
+          taskId: interaction.options.getInteger('task-id'),
           taskType: interaction.options.getString('task-type') || 'work_report',
           description: interaction.options.getString('description') || '',
           noWorkAvailable: mode === 'no-work-available',
@@ -804,30 +813,44 @@ module.exports = {
         const user = interaction.options.getUser('user');
 
         if (user) {
-          const jobs = await getActiveJobs(interaction.guildId, user.id);
-          if (!jobs.length) {
-            await interaction.editReply(`${formatUser(user)} 目前沒有進行中的工作。`);
-            return;
-          }
-
           const member = await interaction.guild.members.fetch(user.id).catch(() => null);
           if (!member) {
             await interaction.editReply(`找不到 ${formatUser(user)} 的伺服器成員資料。`);
             return;
           }
+          const jobs = await getActiveJobs(interaction.guildId, user.id);
+          if (!jobs.length) {
+            await interaction.editReply(`${formatUser(user)} 目前沒有進行中的工作。`);
+            return;
+          }
+          const legacyJobs = jobs.filter((job) => job.scope === 'legacy' &&
+            job.roleSyncEligible && job.sourceGuildId === interaction.guildId);
+          const primaryJob = jobs.find((job) => job.scope === 'primary');
 
           const results = [];
-          for (const job of jobs) {
+          for (const job of legacyJobs) {
             results.push(await runWorkRoleHook(interaction.client, 'syncJobRoleForMember', {
               member,
               jobName: job.jobName,
-              options: { jobId: job.id },
+              options: {
+                jobId: job.id,
+                sourceGuildId: job.sourceGuildId,
+                triggerGuildId: interaction.guildId,
+              },
+            }));
+          }
+          if (primaryJob?.status === 'active' && primaryJob.sourceGuildId === interaction.guildId) {
+            results.push(await runWorkRoleHook(interaction.client, 'syncPrimaryJobRoleForMember', {
+              member,
+              jobName: primaryJob.jobName,
+              options: { cycleId: primaryJob.globalCycleId, sourceGuildId: primaryJob.sourceGuildId },
             }));
           }
           const warnings = results.flatMap((result) => result.warnings || []);
           await interaction.editReply([
-            `${formatUser(user)} 的職業身分組同步完成。`,
-            `職業：${jobs.map((job) => job.jobName).join('、')}`,
+            results.length ? `${formatUser(user)} 的職業身分組同步檢查完成。` : '沒有可同步的來源群職業身分組。',
+            legacyJobs.length ? `原群職業：${legacyJobs.map((job) => job.jobName).join('、')}` : null,
+            primaryJob ? `全域主職：${primaryJob.jobName}；僅來源群可核對角色同步。` : null,
             ...formatRoleWarnings(warnings),
           ].filter(Boolean).join('\n'));
           return;
@@ -841,8 +864,9 @@ module.exports = {
         });
         await interaction.editReply([
           `工作身分組同步完成：${result.synced}/${result.total}`,
+          result.cleaned ? `已清理結束週期角色：${result.cleaned}` : null,
           ...formatRoleWarnings(result.warnings.slice(0, 10)),
-        ].join('\n'));
+        ].filter(Boolean).join('\n'));
         return;
       }
 
@@ -872,13 +896,21 @@ module.exports = {
 
       if (subcommand === 'payroll') {
         const limit = interaction.options.getInteger('limit') || 10;
-        const [history, preview] = await Promise.all([
+        const [history, preview, primaryHistory] = await Promise.all([
           getPayrollHistory(interaction.guildId, { userId: interaction.user.id, limit }),
           previewPayroll(interaction.guildId, { userId: interaction.user.id, limit: 3 }),
+          getPrimaryPayrollHistory(interaction.user.id, { limit }),
         ]);
 
         await interaction.reply({
           content: [
+            primaryHistory.length
+              ? ['**全域主職結算**', ...primaryHistory.map((item) =>
+                item.jobName + '｜發放 ' + formatCoins(item.paidAmount) +
+                '｜比例 ' + formatPercent(item.payRatio) +
+                '｜' + formatTimestamp(item.settledAt) + '｜' + item.reason
+              )].join('\n')
+              : '**全域主職結算**\n目前沒有結算紀錄。',
             preview.length ? ['**待發薪預覽**', ...preview.map(formatPayrollPreviewLine)].join('\n') : '**待發薪預覽**\n目前沒有待發薪工作。',
             history.length ? ['**最近發薪紀錄**', ...history.map(formatPayrollLine)].join('\n') : '**最近發薪紀錄**\n目前沒有發薪紀錄。',
           ].join('\n\n'),
@@ -888,30 +920,35 @@ module.exports = {
       }
 
       if (subcommand === 'penalties') {
-        const penalties = await listWorkPenalties(interaction.guildId, {
-          userId: interaction.user.id,
-          limit: interaction.options.getInteger('limit') || 10,
-        });
-        await interaction.reply({
-          content: penalties.length ? ['**你的扣薪紀錄**', ...penalties.map(formatPenaltyLine)].join('\n') : '目前沒有扣薪紀錄。',
-          ephemeral: true,
-        });
+        const limit = interaction.options.getInteger('limit') || 10;
+        const [legacy, primary] = await Promise.all([
+          listWorkPenalties(interaction.guildId, { userId: interaction.user.id, limit }),
+          listPrimaryPenalties(interaction.user.id, { limit }),
+        ]);
+        const lines = [
+          legacy.length ? ['**原群扣薪**', ...legacy.map(formatPenaltyLine)].join('\n') : null,
+          primary.length ? ['**全域主職扣薪**', ...primary.map((item) =>
+            '#' + item.id + '｜扣薪 ' + formatCoins(item.amount) +
+            '｜狀態 ' + statusLabel(item.status) +
+            '｜申訴期限 ' + formatTimestamp(item.appealDeadline) +
+            '｜' + item.reason
+          )].join('\n') : null,
+        ].filter(Boolean);
+        await interaction.reply({ content: lines.length ? lines.join('\n\n') : '目前沒有扣薪紀錄。', ephemeral: true });
         return;
       }
 
       if (subcommand === 'appeal') {
-        const result = await createWorkPenaltyAppeal(
-          interaction.guildId,
-          interaction.user.id,
-          interaction.options.getInteger('penalty-id', true),
-          { reason: interaction.options.getString('reason', true) }
-        );
+        const scope = interaction.options.getString('scope', true);
+        const penaltyId = interaction.options.getInteger('penalty-id', true);
+        const reason = interaction.options.getString('reason', true);
+        const result = scope === 'primary'
+          ? await createPrimaryPenaltyAppeal(interaction.user.id, penaltyId, { reason })
+          : await createWorkPenaltyAppeal(interaction.guildId, interaction.user.id, penaltyId, { reason });
+        const appealId = scope === 'primary' ? result.appealId : result.appeal.id;
         await interaction.reply({
-          content: [
-            `已送出扣薪申訴 #${result.appeal.id}。`,
-            `扣薪紀錄：#${result.penalty.id}`,
-            '請等待擁有者審核。',
-          ].join('\n'),
+          content: '已送出' + (scope === 'primary' ? '全域主職' : '原群工作') +
+            '扣薪申訴 #' + appealId + '，請等待擁有者審核。',
           ephemeral: true,
         });
         return;
@@ -922,28 +959,23 @@ module.exports = {
           await interaction.reply({ content: '只有小吉擁有者可以審核扣薪申訴。', ephemeral: true });
           return;
         }
-
-        const result = await reviewWorkPenaltyAppeal(
-          interaction.guildId,
-          interaction.user.id,
-          interaction.options.getInteger('appeal-id', true),
-          {
-            action: interaction.options.getString('action', true),
-            reason: interaction.options.getString('reason') || '',
-          }
-        );
+        const scope = interaction.options.getString('scope', true);
+        const appealId = interaction.options.getInteger('appeal-id', true);
+        const review = {
+          action: interaction.options.getString('action', true),
+          reason: interaction.options.getString('reason') || '',
+        };
+        const result = scope === 'primary'
+          ? await reviewPrimaryPenaltyAppeal(interaction.user.id, appealId, review)
+          : await reviewWorkPenaltyAppeal(interaction.guildId, interaction.user.id, appealId, review);
+        const status = scope === 'primary' ? result.status : result.appeal.status;
         await interaction.reply({
-          content: [
-            `申訴 #${result.appeal.id} 已${result.appeal.status === 'approved' ? '通過' : '駁回'}。`,
-            `扣薪紀錄：#${result.penalty.id}`,
-            result.refund ? `已補發：${formatCoins(result.refund.amount)}` : null,
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          content: '申訴 #' + appealId + ' 已' + (status === 'approved' ? '通過' : '駁回') + '。' +
+            (result.refund ? ' 已補發：' + formatCoins(result.refund.grossAmount || result.refund.amount) : ''),
           ephemeral: true,
         });
-      }
-    } catch (error) {
+        return;
+      }    } catch (error) {
       await replyCoinError(interaction, error);
     }
   },

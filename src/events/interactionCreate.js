@@ -8,6 +8,7 @@ const { recordPublicInteraction } = require('../services/publicStatusService');
 const logger = require('../utils/logger');
 const { getClientExtensionHost } = require('../extensions/extensionHost');
 const { getBoardRuntime } = require('../games/boardRuntimeRegistry');
+const { getSoloRuntime } = require('../systems/games/soloRuntimeRegistry');
 
 const AUDIT_PENDING_MESSAGE = '小吉在這個伺服器尚未通過機器人擁有者的審核，暫時無法提供服務。請耐心等待批准。';
 
@@ -29,6 +30,13 @@ module.exports = {
 
     if (interaction.guildId && !isOwner && !isGuildApproved(interaction.guildId)) {
       await replyEphemeral(interaction, AUDIT_PENDING_MESSAGE);
+      return;
+    }
+
+    if ((interaction.isButton() || interaction.isModalSubmit() || interaction.isStringSelectMenu?.()) &&
+      interaction.customId?.startsWith('solo|1|')) {
+      await getSoloRuntime().handleInteraction(interaction);
+      await recordPublicInteraction();
       return;
     }
 
