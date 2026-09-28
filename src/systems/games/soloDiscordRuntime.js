@@ -40,7 +40,7 @@ function modalForMove(customId, verb) {
   const definitions = {
     'move.t': { title: '俄羅斯方塊：落下一塊', fields: [['column', '欄位（1–10）'], ['rotation', '旋轉（0–3）']] },
     'move.n': { title: '數字配對：選兩格', fields: [['first', '第一格（例：A1）'], ['second', '第二格（例：B1）']] },
-    'move.s': { title: '數獨：填入格子', fields: [['cell', '格子（例：A1）'], ['value', '數字（1–9；0 清除）']] },
+    'move.s': { title: '數獨：填入格子', fields: [['cell', '欄 A–I＋列 1–9（例：A1）'], ['value', '數字（1–9；0 清除）']] },
   };
   const definition = definitions[verb];
   if (!definition) throw new GameError('INVALID_CUSTOM_ID', 'Unsupported game move.');
@@ -98,6 +98,26 @@ function friendlyError(error) {
     GUILD_NOT_APPROVED: '小吉在這個伺服器尚未通過機器人擁有者的審核，暫時無法提供服務。',
   };
   return messages[error?.code] || '遊戲目前無法處理，請稍後再試。';
+}
+
+function resultMessage(session) {
+  if (session.status === 'expired') return '這局已逾時，請開始新遊戲。';
+  if (session.status === 'completed') {
+    const ending = session.gameType === 'tetris' ? '本局已結束！' : '通關！';
+    if (session.rewardStatus === 'granted') {
+      if (Number.isSafeInteger(session.rewardDebtOffset) && Number.isSafeInteger(session.rewardNetAmount)) {
+        return session.rewardDebtOffset > 0
+          ? `${ending}獎勵 ${session.rewardAmount} 吉幣，其中 ${session.rewardDebtOffset} 吉幣抵欠款，錢包入帳 ${session.rewardNetAmount} 吉幣。`
+          : `${ending}錢包入帳 ${session.rewardNetAmount} 吉幣。`;
+      }
+      return `${ending}已結算 ${session.rewardAmount} 吉幣。`;
+    }
+    return session.rewardStatus === 'no_reward' ? '本局已結束，沒有獎勵。' : '本局已結束，獎勵狀態待確認。';
+  }
+  if (session.gameType === 'sudoku' && session.state.entries.every((row) => row.every((value) => value > 0))) {
+    return '數獨已填滿但尚未通關；請檢查每列、每欄與每個九宮格的重複數字。';
+  }
+  return '遊戲面板已更新。';
 }
 
 function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRuntime, renderPng, runtimeLogger,
@@ -184,6 +204,7 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
   async function handleInteraction(interaction) {
     const customId = String(interaction?.customId || '');
     if (!customId.startsWith('solo|1|')) return false;
+    let scope = null;
     try {
       assertAdmitted(interaction);
       if (customId === 'solo|1|menu' && interaction.isStringSelectMenu()) {
@@ -202,33 +223,52 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
         return true;
       }
       const decoded = parseSoloCustomId(customId);
+      scope = { sessionId: decoded.sessionId, actorId: interaction.user.id, guildId: interaction.guildId,
+        channelId: interaction.channelId, messageId: interaction.message?.id };
+      if (!scope.messageId) throw new GameError('MESSAGE_MISMATCH', 'Game message is missing.');
       if (interaction.isButton() && decoded.verb.startsWith('move.')) {
+        const current = await service.get(scope);
+        if (current.status === 'expired') {
+          try { await editPanel(current); } catch (error) { runtimeLogger?.error?.('solo game expired panel edit failed', error); }
+          await interaction.reply({ content: friendlyError(new GameError('SESSION_EXPIRED', 'Solo game has expired.')),
+            ephemeral: true, allowedMentions: { parse: [] } });
+          return true;
+        }
+        if (current.status !== 'active') throw new GameError('SESSION_NOT_ACTIVE', 'Solo game has ended.');
+        if (current.revision !== decoded.revision) throw new GameError('STALE_REVISION', 'Solo game changed.');
         await interaction.showModal(modalForMove(customId, decoded.verb));
         return true;
       }
       await interaction.deferReply({ ephemeral: true });
-      const scope = { sessionId: decoded.sessionId, actorId: interaction.user.id, guildId: interaction.guildId,
-        channelId: interaction.channelId, messageId: interaction.message?.id };
-      if (!scope.messageId) throw new GameError('MESSAGE_MISMATCH', 'Game message is missing.');
       let result;
       if (interaction.isModalSubmit() && decoded.verb.startsWith('move.')) {
         const current = await service.get(scope);
         const expectedGame = { 'move.t': 'tetris', 'move.n': 'number-match', 'move.s': 'sudoku' }[decoded.verb];
         if (current.gameType !== expectedGame) throw new GameError('INVALID_CUSTOM_ID', 'Game type mismatch.');
+        if (current.status === 'expired') {
+          try { await editPanel(current); } catch (error) { runtimeLogger?.error?.('solo game expired panel edit failed', error); }
+          await interaction.editReply({ content: friendlyError(new GameError('SESSION_EXPIRED', 'Solo game has expired.')),
+            allowedMentions: { parse: [] } });
+          return true;
+        }
         result = await service.apply({ ...scope, expectedRevision: decoded.revision,
           interactionId: interaction.id, action: parseMove(interaction, current) });
       } else if (interaction.isButton() && decoded.verb === 'refresh') result = await service.get(scope);
       else throw new GameError('INVALID_CUSTOM_ID', 'Unsupported game control.');
-      let message = '遊戲面板已更新。';
+      let message = resultMessage(result);
       try { await editPanel(result); }
       catch (error) {
         runtimeLogger?.error?.('solo game panel edit failed', error);
-        message = '這一步已儲存，但面板更新失敗；請按重新整理或使用 /games resume。';
+        message += ' 這一步已儲存，但面板更新失敗；請按重新整理或使用 /games resume。';
       }
       await interaction.editReply({ content: message, allowedMentions: { parse: [] } });
       return true;
     } catch (error) {
       runtimeLogger?.error?.('solo game interaction failed', error);
+      if (error?.code === 'SESSION_EXPIRED' && scope) {
+        try { await editPanel(await service.get(scope)); }
+        catch (panelError) { runtimeLogger?.error?.('solo game expired panel edit failed', panelError); }
+      }
       const response = { content: friendlyError(error), allowedMentions: { parse: [] } };
       if (interaction.deferred) await interaction.editReply(response);
       else if (interaction.replied) await interaction.followUp({ ...response, ephemeral: true });

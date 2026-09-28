@@ -2,8 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const commandPath = path.join(process.cwd(), 'src', 'commands', 'coins.js');
-const coinServicePath = path.join(process.cwd(), 'src', 'services', 'coinService.js');
+const commandPath = path.join(__dirname, '..', 'src', 'commands', 'coins.js');
+const coinServicePath = path.join(__dirname, '..', 'src', 'services', 'coinService.js');
 
 function createInteraction({ guildId = 'guild-test', user, target, guildMembers }) {
   let lastReply;

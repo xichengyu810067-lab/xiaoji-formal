@@ -131,7 +131,7 @@ test('actual public export can load board commands and runtime dependencies', ()
     assert.equal(typeof runtimeModule.createBoardDiscordRuntime, 'function');
 
     const packageJson = JSON.parse(fs.readFileSync(path.join(outputPath, 'package.json'), 'utf8'));
-    assert.equal(packageJson.version, '1.1.0');
+    assert.equal(packageJson.version, '1.1.1');
     for (const scriptName of [
       'smoke:login',
       'prod:check',

@@ -37,7 +37,7 @@ const commandGroups = [
       ['/casino-venue menu/order/recipe/make/serve', '餐廳、吧檯與服務流程'],
       ['/luxury list/buy/inventory/history', '獨立奢侈品商店街'],
       ['/pawn quote/sell/active/redeem/history', '奢侈品當鋪與贖回'],
-      ['/games play', '建立瀏覽器遊戲的一次性連結'],
+      ['/games menu/play/resume', '在 Discord 選擇遊戲、開啟個人遊戲面板，或重新顯示目前頻道的個人遊戲'],
       ['/board start/join/leave/status/stop', '在同一頻道建立、加入、離開或查看棋盤與推理遊戲；結束限制依遊戲狀態而定'],
     ],
   },
