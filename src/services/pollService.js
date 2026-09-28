@@ -8,7 +8,8 @@ const {
 } = require('discord.js');
 const logger = require('../utils/logger');
 
-const pollsPath = path.join(__dirname, '..', 'data', 'polls.json');
+const { retainedDataFile } = require('../platform/retainedDataSource');
+const pollsPath = retainedDataFile('polls.json');
 const pollTimers = new Map();
 
 function ensurePollFile() {

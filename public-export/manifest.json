@@ -35,6 +35,7 @@
     "src/handlers",
     "src/platform/dataPaths.js",
     "src/platform/personalDataPaths.js",
+    "src/platform/retainedDataSource.js",
     "src/platform/identityContext.js",
     "src/platform/runtimeDataPreflight.js",
     "src/platform/startupSequence.js",

@@ -3,7 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { resolveDataPath, assertDistinctDataPaths, DataPathError } = require('./dataPaths');
 
-const projectRoot = path.resolve(__dirname, '..', '..');
+const { getRetainedDataSourceRoot } = require('./retainedDataSource');
+const projectRoot = getRetainedDataSourceRoot();
 const SETTINGS = Object.freeze({
   reminders: { name: 'reminders.json', pathEnv: 'XIAOJI_REMINDERS_PATH', digestEnv: 'XIAOJI_REMINDERS_PROVENANCE_SHA256' },
   calendar: { name: 'calendarEvents.json', pathEnv: 'XIAOJI_CALENDAR_PATH', digestEnv: 'XIAOJI_CALENDAR_PROVENANCE_SHA256' },
