@@ -245,7 +245,9 @@ function renderGraph(board, frame, playerOrder, colors, gameKey) {
   const ys = board.points.map((point) => Number(point.y));
   const minX = Math.min(...xs); const maxX = Math.max(...xs);
   const minY = Math.min(...ys); const maxY = Math.max(...ys);
-  const scale = Math.min(frame.width / Math.max(1, maxX - minX), frame.height / Math.max(1, maxY - minY));
+  const showPointIds = gameKey === 'checkers';
+  const inset = showPointIds ? 32 : 0;
+  const scale = Math.min((frame.width - inset * 2) / Math.max(1, maxX - minX), (frame.height - inset * 2) / Math.max(1, maxY - minY));
   const left = frame.left + (frame.width - (maxX - minX) * scale) / 2;
   const top = frame.top + (frame.height - (maxY - minY) * scale) / 2;
   const pointMap = new Map(board.points.map((point) => [point.id, {
@@ -260,11 +262,16 @@ function renderGraph(board, frame, playerOrder, colors, gameKey) {
     result += `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${colors.line}" stroke-width="2"/>`;
   }
   result += drawDecorations(board, { resolvePosition }, colors, 'foreground');
-  const radius = Math.max(12, Math.min(28, scale * 0.32));
+  const radius = showPointIds ? Math.max(10, Math.min(16, scale * 0.25)) : Math.max(12, Math.min(28, scale * 0.32));
   for (const point of pointMap.values()) result += `<circle cx="${point.x}" cy="${point.y}" r="${Math.max(2, radius * 0.12)}" fill="${colors.line}"/>`;
   for (const piece of board.pieces) {
     const point = resolvePosition(piece.position);
     result += drawPiece({ piece, ...point, radius, playerOrder, colors, gameKey });
+  }
+  if (showPointIds) {
+    for (const [id, point] of pointMap) {
+      result += `<text data-point-label="${escapeXml(id)}" x="${point.x}" y="${point.y + radius + 11}" text-anchor="middle" font-family="Cubic 11" font-size="10" fill="${colors.text}">${escapeXml(id)}</text>`;
+    }
   }
   return result;
 }

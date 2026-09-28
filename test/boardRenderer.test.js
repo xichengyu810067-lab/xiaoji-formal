@@ -96,6 +96,21 @@ test('grid labels match the coordinates accepted by Discord move inputs', () => 
   }
 });
 
+test('checkers board exposes every point ID required by the move modal', () => {
+  const engine = require('../src/games/engines/checkers');
+  const players = ['p1', 'p2'];
+  const state = engine.createInitialState({ players, rules: engine.normalizeOptions({}), seed: 'point-labels' });
+  const view = engine.getPublicView(state);
+  const svg = renderBoardSvg(view, { playerOrder: players });
+  const labels = [...svg.matchAll(/data-point-label="([^"]+)" x="([0-9.]+)" y="([0-9.]+)"/g)];
+  assert.equal(labels.length, 121);
+  assert.deepEqual(new Set(labels.map((entry) => entry[1])), new Set(view.board.points.map((point) => point.id)));
+  for (const [, , x, y] of labels) {
+    assert(Number(x) >= 84 + 20 && Number(x) <= 876 - 20, 'point IDs need horizontal room inside the board');
+    assert(Number(y) > 130 && Number(y) < 860, 'point IDs must stay inside the board frame');
+  }
+});
+
 test('grid renderer supports coordinates, river, palace lines, Chinese pieces, and seat markers', () => {
   const svg = renderBoardSvg(gridView(), { playerOrder: ['red', 'black'], title: '象棋' });
   assert.match(svg, /data-decoration="river"/);
