@@ -279,7 +279,7 @@ function renderGraph(board, frame, playerOrder, colors, gameKey) {
 function renderNarrative(view, frame, colors) {
   const prompts = (view.prompts || []).slice(0, 5);
   let result = `<rect x="${frame.left}" y="${frame.top}" width="${frame.width}" height="${frame.height}" rx="28" fill="${colors.boardAlt}" stroke="${colors.line}" stroke-width="4"/>`;
-  result += `<text x="${frame.left + 40}" y="${frame.top + 70}" font-family="Cubic 11" font-size="34" fill="${colors.text}">${escapeXml(view.title || '海龜湯')}</text>`;
+  result += `<text x="${frame.left + 40}" y="${frame.top + 70}" font-family="Cubic 11" font-size="34" fill="${colors.text}">${escapeXml(view.title || GAME_LABELS[view.gameKey] || '桌遊')}</text>`;
   prompts.forEach((prompt, index) => {
     result += `<text x="${frame.left + 40}" y="${frame.top + 130 + index * 52}" font-family="Cubic 11" font-size="24" fill="${colors.text}">${escapeXml(prompt.text).slice(0, 80)}</text>`;
   });
