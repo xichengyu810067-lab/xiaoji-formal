@@ -9,6 +9,7 @@ const FONT_DIRECTORY = path.join(__dirname, '..', '..', '..', '..', 'games', 'as
 const FONT_FILES = Object.freeze([
   path.join(FONT_DIRECTORY, 'NotoSansSymbols-Regular.ttf'),
   path.join(FONT_DIRECTORY, 'Cubic_11.ttf'),
+  path.join(FONT_DIRECTORY, 'NotoSansSymbols2-Regular.ttf'),
 ]);
 
 const THEMES = Object.freeze({
@@ -95,6 +96,10 @@ function validatePublicBoard(view) {
 function normalizeRendererView(view) {
   const publicView = validatePublicBoard(view);
   const board = publicView.board;
+  if (board.kind === 'grid' && ['chess', 'gomoku', 'go', 'xiangqi'].includes(publicView.gameKey)) {
+    board.columnLabels ??= Array.from({ length: board.width }, (_, x) => String.fromCharCode(65 + x));
+    board.rowLabels ??= Array.from({ length: board.height }, (_, y) => publicView.gameKey === 'chess' ? board.height - y : y + 1);
+  }
   if (board.kind === 'grid' && ['go', 'gomoku', 'xiangqi'].includes(publicView.gameKey) && !board.coordinateMode) {
     board.coordinateMode = 'intersections';
   }
@@ -153,7 +158,7 @@ function drawPiece({ piece, x, y, radius, playerOrder, colors, gameKey }) {
   const badge = seat >= 0
     ? `<circle cx="${x + radius * 0.68}" cy="${y - radius * 0.68}" r="${Math.max(7, radius * 0.28)}" fill="${colors.canvas}" stroke="${colors.line}" stroke-width="2"/><text x="${x + radius * 0.68}" y="${y - radius * 0.68}" text-anchor="middle" dominant-baseline="central" font-family="Cubic 11" font-size="${Math.max(10, radius * 0.32)}" fill="${colors.text}">${seat + 1}</text>`
     : '';
-  return `<g data-piece-id="${escapeXml(piece.id)}" data-seat="${seat}"><circle cx="${x}" cy="${y}" r="${radius}" fill="${escapeXml(fill)}" stroke="${colors.pieceStroke}" stroke-width="3" stroke-dasharray="${dash}"/><text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Noto Sans Symbols, Cubic 11" font-size="${radius * 1.15}" fill="${darkText ? '#111111' : '#ffffff'}">${symbol}</text>${badge}</g>`;
+  return `<g data-piece-id="${escapeXml(piece.id)}" data-seat="${seat}"><circle cx="${x}" cy="${y}" r="${radius}" fill="${escapeXml(fill)}" stroke="${colors.pieceStroke}" stroke-width="3" stroke-dasharray="${dash}"/><text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Noto Sans Symbols 2, Noto Sans Symbols, Cubic 11" font-size="${radius * 1.15}" fill="${darkText ? '#111111' : '#ffffff'}">${symbol}</text>${badge}</g>`;
 }
 
 function drawDecorations(board, geometry, colors, layer = 'foreground') {
@@ -240,7 +245,9 @@ function renderGraph(board, frame, playerOrder, colors, gameKey) {
   const ys = board.points.map((point) => Number(point.y));
   const minX = Math.min(...xs); const maxX = Math.max(...xs);
   const minY = Math.min(...ys); const maxY = Math.max(...ys);
-  const scale = Math.min(frame.width / Math.max(1, maxX - minX), frame.height / Math.max(1, maxY - minY));
+  const showPointIds = gameKey === 'checkers';
+  const inset = showPointIds ? 32 : 0;
+  const scale = Math.min((frame.width - inset * 2) / Math.max(1, maxX - minX), (frame.height - inset * 2) / Math.max(1, maxY - minY));
   const left = frame.left + (frame.width - (maxX - minX) * scale) / 2;
   const top = frame.top + (frame.height - (maxY - minY) * scale) / 2;
   const pointMap = new Map(board.points.map((point) => [point.id, {
@@ -255,11 +262,16 @@ function renderGraph(board, frame, playerOrder, colors, gameKey) {
     result += `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${colors.line}" stroke-width="2"/>`;
   }
   result += drawDecorations(board, { resolvePosition }, colors, 'foreground');
-  const radius = Math.max(12, Math.min(28, scale * 0.32));
+  const radius = showPointIds ? Math.max(10, Math.min(16, scale * 0.25)) : Math.max(12, Math.min(28, scale * 0.32));
   for (const point of pointMap.values()) result += `<circle cx="${point.x}" cy="${point.y}" r="${Math.max(2, radius * 0.12)}" fill="${colors.line}"/>`;
   for (const piece of board.pieces) {
     const point = resolvePosition(piece.position);
     result += drawPiece({ piece, ...point, radius, playerOrder, colors, gameKey });
+  }
+  if (showPointIds) {
+    for (const [id, point] of pointMap) {
+      result += `<text data-point-label="${escapeXml(id)}" x="${point.x}" y="${point.y + radius + 11}" text-anchor="middle" font-family="Cubic 11" font-size="10" fill="${colors.text}">${escapeXml(id)}</text>`;
+    }
   }
   return result;
 }
@@ -329,13 +341,13 @@ function resolveResvg(options) {
 function renderBoardPng(view, options = {}) {
   const svg = renderBoardSvg(view, options);
   const Resvg = resolveResvg(options);
-  const fontBuffers = options.fontBuffers || loadBundledFontBuffers();
   const renderer = new Resvg(svg, {
     background: (THEMES[options.theme] || THEMES.light).canvas,
     shapeRendering: 2,
     textRendering: 1,
     font: {
-      fontBuffers,
+      // The native resvg-js API loads files; fontBuffers is WASM-only.
+      fontFiles: FONT_FILES,
       loadSystemFonts: false,
       defaultFontFamily: 'Cubic 11',
       sansSerifFamily: 'Cubic 11',
