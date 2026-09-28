@@ -110,6 +110,13 @@ function createSoloSessionService({ withTransaction, withDatabase, grantRewardOn
       const session = publicSession(row);
       if (row.status === 'completed') {
         session.rewardStatus = api.get('SELECT status FROM discord_game_rewards WHERE session_id = ?', [row.id])?.status || 'pending';
+        if (session.rewardStatus === 'granted') {
+          const grant = api.get('SELECT debt_offset, net_amount FROM reward_grants_v2 WHERE reward_key = ?', [makeRewardKey({ sessionId: row.id, userId: row.user_id })]);
+          if (grant) {
+            session.rewardDebtOffset = Number(grant.debt_offset);
+            session.rewardNetAmount = Number(grant.net_amount);
+          }
+        }
       }
       return session;
     });
@@ -192,6 +199,8 @@ function createSoloSessionService({ withTransaction, withDatabase, grantRewardOn
       [JSON.stringify(next), status, revision, nextActionCount, score, rewardAmount, timestamp.toISOString(), status === 'completed' ? timestamp.toISOString() : null, id, expectedRevision]);
       if (Number(api.get('SELECT changes() AS count').count) !== 1) throw new GameError('STALE_REVISION', 'Solo game changed.');
       let rewardStatus = 'none';
+      let rewardDebtOffset = null;
+      let rewardNetAmount = null;
       if (status === 'completed') {
         const rewardKey = makeRewardKey({ sessionId: id, userId: row.user_id });
         let receiptId = null;
@@ -206,13 +215,17 @@ function createSoloSessionService({ withTransaction, withDatabase, grantRewardOn
           if (receipt && typeof receipt.then === 'function') throw new GameError('REWARD_CONTRACT_INVALID', 'Reward grant must complete inside the transaction.');
           receiptId = receipt?.receipt?.id || receipt?.receiptId || null;
           rewardStatus = 'granted';
+          if (Number.isSafeInteger(receipt?.debtOffset) && receipt.debtOffset >= 0 && receipt.debtOffset <= rewardAmount) {
+            rewardDebtOffset = receipt.debtOffset;
+            rewardNetAmount = rewardAmount - rewardDebtOffset;
+          }
         } else rewardStatus = 'no_reward';
         api.run(`INSERT INTO discord_game_rewards (session_id,reward_key,status,amount,receipt_id,created_at,updated_at)
           VALUES (?,?,?,?,?,?,?)`, [id, rewardKey, rewardStatus, rewardAmount, receiptId, timestamp.toISOString(), timestamp.toISOString()]);
       }
       const result = { ...publicSession({ ...row, state_json: JSON.stringify(next), status, revision, action_count: nextActionCount,
         score, reward_amount: rewardAmount, updated_at: timestamp.toISOString(), completed_at: status === 'completed' ? timestamp.toISOString() : null }),
-      rewardStatus, replayed: false };
+      rewardStatus, rewardDebtOffset, rewardNetAmount, replayed: false };
       api.run(`INSERT INTO discord_game_actions (session_id,revision,interaction_id,action_hash,result_json,created_at)
         VALUES (?,?,?,?,?,?)`, [id, revision, interaction, actionHash, JSON.stringify(result), timestamp.toISOString()]);
       return result;

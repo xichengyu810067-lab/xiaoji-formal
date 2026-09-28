@@ -71,7 +71,7 @@ test('tetris clears only full rows and applies rounded streak scoring with reset
 
 test('number match requires orthogonal eligible pairs, compacts row-major, and detects no moves', () => {
   const state = { board: [1, 9, 2, 8, 5, 5], rows: 2, columns: 3, completed: false, noMoves: false };
-  assert.throws(() => applyNumberMatchAction(state, { type: 'pair', first: 0, second: 4 }), /adjacent pair/);
+  assert.throws(() => applyNumberMatchAction(state, { type: 'pair', first: 0, second: 4 }), /這兩格必須相鄰/);
   const next = applyNumberMatchAction(state, { type: 'pair', first: 0, second: 1 });
   assert.deepEqual(next.board, [2, 8, 5, 5, null, null]);
   const stuck = applyNumberMatchAction({ board: [1, 9, 2, 2], rows: 2, columns: 2, completed: false, noMoves: false }, { type: 'pair', first: 0, second: 1 });

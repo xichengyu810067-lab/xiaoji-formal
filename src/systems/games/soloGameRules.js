@@ -109,7 +109,7 @@ function applyNumberMatchAction(state, action) {
   const rowDistance = Math.abs(Math.floor(first / state.columns) - Math.floor(second / state.columns));
   const columnDistance = Math.abs((first % state.columns) - (second % state.columns));
   if (rowDistance + columnDistance !== 1 || !isNumberMatchPair(state.board[first], state.board[second])) {
-    throw new GameError('INVALID_ACTION', 'Numbers are not an eligible adjacent pair.');
+    throw new GameError('INVALID_ACTION', '這兩格必須相鄰，且數字相同或相加等於 10。');
   }
   const compact = state.board.filter((_value, index) => index !== first && index !== second);
   while (compact.length < state.board.length) compact.push(null);

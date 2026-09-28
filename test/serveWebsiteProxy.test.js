@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { once } = require('node:events');
 const cp = require('node:child_process');
+const path = require('node:path');
 
 function allocatePort() {
   return new Promise((resolve, reject) => {
@@ -137,7 +138,7 @@ test('serve-website proxies public status endpoints with exact route and method 
     statusServer.on('error', reject);
   });
 
-  const websiteProcess = cp.spawn(process.execPath, ['scripts/serve-website.js'], {
+  const websiteProcess = cp.spawn(process.execPath, [path.join(__dirname, '..', 'scripts', 'serve-website.js')], {
     env: {
       ...process.env,
       WEBSITE_PORT: String(websitePort),
