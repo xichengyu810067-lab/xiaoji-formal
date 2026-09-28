@@ -223,3 +223,13 @@ test('renderer normalizes the committed Go and Xiangqi public-view shapes', () =
   assert.equal(xiangqi.board.decorations.filter((item) => item.type === 'river').length, 1);
   assert.equal(xiangqi.board.decorations.filter((item) => item.type === 'line').length, 4);
 });
+
+
+test('waiting-room narrative labels do not misidentify chess games as turtle soup', () => {
+  for (const gameKey of ['chess', 'gomoku', 'go', 'checkers', 'xiangqi']) {
+    const view = {gameKey, rulesVersion: 'fixture', board: {kind: 'narrative', points: [], pieces: []}, turn: null, prompts: [{text: '等待玩家進入。'}], outcome: null};
+    const svg = renderBoardSvg(view);
+    assert.ok(!svg.includes('海龜湯'), gameKey);
+    assert.ok(svg.includes('等待玩家進入。'));
+  }
+});
