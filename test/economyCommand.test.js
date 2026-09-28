@@ -2,11 +2,11 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const commandPath = path.join(process.cwd(), 'src', 'commands', 'economy.js');
-const moderationPath = path.join(process.cwd(), 'src', 'utils', 'moderation.js');
-const coinServicePath = path.join(process.cwd(), 'src', 'services', 'coinService.js');
-const bankServicePath = path.join(process.cwd(), 'src', 'services', 'bankService.js');
-const workServicePath = path.join(process.cwd(), 'src', 'services', 'workService.js');
+const commandPath = path.join(__dirname, '..', 'src', 'commands', 'economy.js');
+const moderationPath = path.join(__dirname, '..', 'src', 'utils', 'moderation.js');
+const coinServicePath = path.join(__dirname, '..', 'src', 'services', 'coinService.js');
+const bankServicePath = path.join(__dirname, '..', 'src', 'services', 'bankService.js');
+const workServicePath = path.join(__dirname, '..', 'src', 'services', 'workService.js');
 
 function createInteraction({ guildId = 'guild-1', targetUser }) {
   let lastReply;

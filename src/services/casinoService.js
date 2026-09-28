@@ -421,12 +421,38 @@ function getBaccaratValue(hand) {
   return hand.reduce((sum, card) => sum + getBaccaratCardValue(card), 0) % 10;
 }
 
-function drawBaccaratSide(deck) {
-  const hand = [drawCard(deck), drawCard(deck)];
-  if (getBaccaratValue(hand) <= 5) {
-    hand.push(drawCard(deck));
+function drawBaccaratHands(deck) {
+  // 起手四張依閒、莊、閒、莊發出；補牌必須同時考慮兩手。
+  const playerHand = [drawCard(deck)];
+  const bankerHand = [drawCard(deck)];
+  playerHand.push(drawCard(deck));
+  bankerHand.push(drawCard(deck));
+
+  const playerTotal = getBaccaratValue(playerHand);
+  const bankerTotal = getBaccaratValue(bankerHand);
+  if (playerTotal >= 8 || bankerTotal >= 8) {
+    return { playerHand, bankerHand };
   }
-  return hand;
+
+  let playerThirdValue = null;
+  if (playerTotal <= 5) {
+    const thirdCard = drawCard(deck);
+    playerHand.push(thirdCard);
+    playerThirdValue = getBaccaratCardValue(thirdCard);
+  }
+
+  const bankerDraws = playerThirdValue === null
+    ? bankerTotal <= 5
+    : bankerTotal <= 2
+      || (bankerTotal === 3 && playerThirdValue !== 8)
+      || (bankerTotal === 4 && playerThirdValue >= 2 && playerThirdValue <= 7)
+      || (bankerTotal === 5 && playerThirdValue >= 4 && playerThirdValue <= 7)
+      || (bankerTotal === 6 && playerThirdValue >= 6 && playerThirdValue <= 7);
+  if (bankerDraws) {
+    bankerHand.push(drawCard(deck));
+  }
+
+  return { playerHand, bankerHand };
 }
 
 function playBaccarat(guildId, userId, { amount, choice, rng = defaultRng, date = new Date() } = {}) {
@@ -441,8 +467,7 @@ function playBaccarat(guildId, userId, { amount, choice, rng = defaultRng, date 
     }
 
     const deck = createDeck(rng);
-    const playerHand = drawBaccaratSide(deck);
-    const bankerHand = drawBaccaratSide(deck);
+    const { playerHand, bankerHand } = drawBaccaratHands(deck);
     const playerValue = getBaccaratValue(playerHand);
     const bankerValue = getBaccaratValue(bankerHand);
     const outcome = playerValue === bankerValue ? 'tie' : playerValue > bankerValue ? 'player' : 'banker';
@@ -1081,6 +1106,7 @@ module.exports = {
   buildBlackjackPayload,
   borrowCasinoLoan,
   collectCasinoDebt,
+  drawBaccaratHands,
   formatCard,
   formatHand,
   getCasinoDebtStatus,

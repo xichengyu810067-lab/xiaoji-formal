@@ -9,6 +9,12 @@ function shouldAutoDeployCommands(env = process.env) {
   return String(env.AUTO_DEPLOY_COMMANDS || '').trim().toLowerCase() === 'true';
 }
 
+function parseDeploymentArgs(args = []) {
+  if (args.length === 0) return { publicOnly: false };
+  if (args.length === 1 && args[0] === '--public-only') return { publicOnly: true };
+  throw new Error('Usage: node deploy-commands.js [--public-only]');
+}
+
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
@@ -81,17 +87,21 @@ async function deployCommands({
   token = getDiscordToken(),
   clientId = getDiscordClientId(),
   rest,
-  extensionHost = loadPrivateExtensionHost(),
+  extensionHost,
+  publicOnly = false,
   cleanupGuildIds = [],
   dryRun = false,
 } = {}) {
   requireEnvValue('DISCORD_CLIENT_ID', clientId, ['CLIENT_ID']);
   if (!dryRun && !rest) requireEnvValue('DISCORD_TOKEN', token);
+  if (publicOnly && cleanupGuildIds.length > 0) throw new Error('Public-only deployment cannot clean up guild commands.');
 
-  const publicCommands = loadCommandData(undefined, { scope: 'public', extensionHost });
-  const privateCommandGroups = loadPrivateCommandGroups(extensionHost);
+  const publicCommands = loadCommandData(undefined, { scope: 'public' });
+  // A public-only run must not load a configured private extension or touch guild routes.
+  const host = publicOnly ? null : extensionHost || loadPrivateExtensionHost();
+  const privateCommandGroups = publicOnly ? [] : loadPrivateCommandGroups(host);
   const privateCommands = privateCommandGroups.flatMap((group) => group.commands);
-  const deploymentTargets = extensionHost.getDeploymentTargets();
+  const deploymentTargets = publicOnly ? [] : host.getDeploymentTargets();
   const plan = buildDeploymentPlan({
     clientId,
     publicCommands,
@@ -121,6 +131,7 @@ async function deployCommands({
 
   return {
     dryRun,
+    publicOnly,
     globalCount: publicCommands.length,
     privateCommandCount: privateCommands.length,
     privateGuildCount: plan.filter((item) => item.kind === 'private-guild').length,
@@ -130,7 +141,7 @@ async function deployCommands({
 }
 
 if (require.main === module) {
-  deployCommands().then((result) => {
+  Promise.resolve().then(() => deployCommands(parseDeploymentArgs(process.argv.slice(2)))).then((result) => {
     console.log(`Slash commands deployed: ${result.globalCount} public, ${result.privateCommandCount} private.`);
   }).catch((error) => {
     console.error(error);
@@ -142,5 +153,6 @@ module.exports = {
   buildDeploymentPlan,
   assertCleanupReadback,
   deployCommands,
+  parseDeploymentArgs,
   shouldAutoDeployCommands,
 };
