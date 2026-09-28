@@ -34,12 +34,66 @@ function gridView() {
 }
 
 test('bundled board fonts are exact pinned bytes and do not depend on host fonts', () => {
-  assert.equal(FONT_FILES.length, 2);
+  assert.equal(FONT_FILES.length, 3);
   const hashes = loadBundledFontBuffers().map((buffer) => createHash('sha256').update(buffer).digest('hex'));
   assert.deepEqual(hashes, [
     '0088617baec0e8ac47e022cc1f38695f772301c9ef6d1f24a785abbef1e05d79',
     '0193f5f033612496df6b45ee92ac3b335bc6a5a24ff95da55ca87b33e57dcf62',
+    '7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21',
   ]);
+});
+
+test('native PNG renderer draws distinct Chinese glyphs without system fonts', () => {
+  // Inspect real native output: SVG text assertions cannot detect missing glyphs.
+  const view = gridView();
+  const options = { playerOrder: ['red', 'black'], title: '象棋' };
+  const original = renderBoardPng(view, options);
+  const changedPiece = structuredClone(view);
+  changedPiece.board.pieces[0].symbol = '車';
+  assert.notDeepEqual(original, renderBoardPng(changedPiece, options), 'different Chinese pieces must not both render as missing-glyph boxes');
+  assert.notDeepEqual(original, renderBoardPng(view, { ...options, title: '圍棋' }), 'Chinese game titles must retain distinct glyphs');
+  const changedRiver = structuredClone(view);
+  changedRiver.board.decorations[0].leftLabel = '漢界';
+  assert.notDeepEqual(original, renderBoardPng(changedRiver, options), 'river labels must retain distinct glyphs');
+});
+
+test('native chess glyphs remain distinguishable with only bundled fonts', () => {
+  const { Resvg } = require('@resvg/resvg-js');
+  const view = gridView();
+  view.board.pieces = [view.board.pieces[0]];
+  view.board.decorations = [];
+  const images = new Set();
+  for (const symbol of '♔♕♖♗♘♙♚♛♜♝♞♟') {
+    view.board.pieces[0].symbol = symbol;
+    const png = renderBoardPng(view, { playerOrder: ['red'] });
+    images.add(createHash('sha256').update(png).digest('hex'));
+  }
+  assert.equal(images.size, 12, 'each chess piece must have a distinct raster glyph');
+  const svg = renderBoardSvg(view, { playerOrder: ['red'] });
+  const expected = Buffer.from(new Resvg(svg, {
+    background: '#f6f2e8', shapeRendering: 2, textRendering: 1,
+    font: { fontFiles: FONT_FILES, loadSystemFonts: false, defaultFontFamily: 'Cubic 11', sansSerifFamily: 'Cubic 11' },
+  }).render().asPng());
+  assert.deepEqual(renderBoardPng(view, { playerOrder: ['red'] }), expected, 'PNG output must use the bundled native font files, not host fallback fonts');
+});
+
+test('grid labels match the coordinates accepted by Discord move inputs', () => {
+  const { parseGridCoordinate } = require('../src/systems/games/board/discord/boardInteractionAdapter');
+  for (const [gameKey, width, height] of [['chess', 8, 8], ['gomoku', 15, 15], ['go', 9, 9], ['xiangqi', 9, 10]]) {
+    const view = { ...gridView(), gameKey, board: { kind: 'grid', width, height, points: [], pieces: [] } };
+    const { board } = normalizeRendererView(view);
+    assert.equal(board.columnLabels[0], 'A');
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const input = `${board.columnLabels[x]}${board.rowLabels[y]}`;
+        const coordinate = gameKey === 'chess'
+          ? { x: input.charCodeAt(0) - 65, y: 8 - Number(input.slice(1)) }
+          : parseGridCoordinate(input, board);
+        assert.deepEqual(coordinate, { x, y });
+      }
+    }
+    assert.equal(view.board.columnLabels, undefined, 'normalization must not mutate saved game state');
+  }
 });
 
 test('grid renderer supports coordinates, river, palace lines, Chinese pieces, and seat markers', () => {
@@ -51,7 +105,7 @@ test('grid renderer supports coordinates, river, palace lines, Chinese pieces, a
   assert.match(svg, />帥<\/text>/);
   assert.match(svg, />將<\/text>/);
   assert.match(svg, />楚河<\/text>/);
-  assert.match(svg, /font-family="Noto Sans Symbols, Cubic 11"/);
+  assert.match(svg, /font-family="Noto Sans Symbols 2, Noto Sans Symbols, Cubic 11"/);
 });
 
 test('graph renderer resolves point IDs and differentiates multiplayer seats', () => {
