@@ -6,6 +6,7 @@ const { createSoloSessionService, makeRewardKey } = require('../src/systems/game
 const { buildSoloCustomId, parseSoloCustomId } = require('../src/systems/games/soloCustomId');
 const { buildSoloMessagePayload, renderSoloPng } = require('../src/systems/games/soloPresenter');
 const { createSoloDiscordRuntime, parseMove, menuPayload } = require('../src/systems/games/soloDiscordRuntime');
+const { buildSudoku, countSudokuSolutions } = require('../src/systems/games/soloGameRules');
 
 const CREATE_TABLES = `
 CREATE TABLE discord_game_sessions (id TEXT PRIMARY KEY,user_id TEXT NOT NULL,source_guild_id TEXT NOT NULL,channel_id TEXT,
@@ -19,6 +20,7 @@ CREATE TABLE discord_game_rewards (session_id TEXT PRIMARY KEY,reward_key TEXT U
  receipt_id INTEGER,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
 CREATE TABLE coin_guild_settings (guild_id TEXT PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE fake_reward_receipts (reward_key TEXT PRIMARY KEY,amount INTEGER NOT NULL);
+CREATE TABLE reward_grants_v2 (reward_key TEXT PRIMARY KEY,debt_offset INTEGER NOT NULL,net_amount INTEGER NOT NULL);
 `;
 
 async function harness() {
@@ -47,8 +49,11 @@ async function harness() {
     const key = makeRewardKey({ sessionId: input.canonicalSourceId.slice('discord:'.length), userId: input.userId });
     const existing = sqlApi.get('SELECT amount FROM fake_reward_receipts WHERE reward_key = ?', [key]);
     if (existing && Number(existing.amount) !== input.amount) throw new Error('reward conflict');
-    if (!existing) sqlApi.run('INSERT INTO fake_reward_receipts VALUES (?,?)', [key, input.amount]);
-    return { alreadyGranted: Boolean(existing), receipt: { id: 1, rewardKey: key } };
+    if (!existing) {
+      sqlApi.run('INSERT INTO fake_reward_receipts VALUES (?,?)', [key, input.amount]);
+      sqlApi.run('INSERT INTO reward_grants_v2 VALUES (?,?,?)', [key, 0, input.amount]);
+    }
+    return { alreadyGranted: Boolean(existing), debtOffset: 0, receipt: { id: 1, rewardKey: key } };
   };
   const makeService = () => createSoloSessionService({ withDatabase, withTransaction, grantRewardOnceV2WithApi,
     clock: () => now, idFactory: () => `session${++sessionNumber}`, seedFactory: () => `seed${sessionNumber}` });
@@ -68,6 +73,8 @@ test('Discord solo session rejects wrong owner, scope, message, and stale simult
   for (const field of [{ actorId: 'other' }, { guildId: 'other' }, { channelId: 'other' }, { messageId: 'other' }]) {
     await assert.rejects(() => firstEndpoint.get(scope(created, field)), (error) => Boolean(error.code));
   }
+  await assert.rejects(() => firstEndpoint.apply({ ...scope(created), expectedRevision: 0, interactionId: 'wrong-pair',
+    action: { type: 'pair', first: 0, second: 2 } }), (error) => error.code === 'INVALID_ACTION' && /這兩格必須相鄰/.test(error.message));
   const firstAction = { type: 'pair', first: 0, second: 1 };
   const [one, two] = await Promise.allSettled([
     firstEndpoint.apply({ ...scope(created), expectedRevision: 0, interactionId: 'click1', action: firstAction }),
@@ -178,6 +185,41 @@ test('solo custom controls, modalities, and PNG show the same authoritative boar
   h.db.close();
 });
 
+test('Sudoku coordinates complete the unique puzzle, while a full wrong board has no reward', async () => {
+  const h = await harness();
+  const service = h.makeService();
+  const created = await service.create({ userId: 'owner', guildId: 'guild', channelId: 'channel', gameType: 'sudoku', difficulty: 'easy' });
+  await service.bindMessage(scope(created));
+  const answer = buildSudoku('seed1', 'easy');
+  assert.equal(countSudokuSolutions(answer.puzzle), 1);
+  const cells = [];
+  for (let row = 0; row < 9; row += 1) for (let column = 0; column < 9; column += 1) {
+    if (answer.puzzle[row][column] === 0) cells.push({ row, column, value: answer.solution[row][column] });
+  }
+  let revision = 0;
+  let last;
+  for (const [index, cell] of cells.entries()) {
+    const value = index === 0 ? cell.value % 9 + 1 : cell.value;
+    const fields = { cell: `${String.fromCharCode(65 + cell.column)}${cell.row + 1}`, value: String(value) };
+    last = await service.apply({ ...scope(created), expectedRevision: revision, interactionId: `sudoku${index}`,
+      action: parseMove({ fields: { getTextInputValue: (key) => fields[key] } }, created) });
+    revision += 1;
+  }
+  assert.equal(last.status, 'active');
+  assert.equal(last.rewardAmount, 0);
+  assert.match(buildSoloMessagePayload(last, { renderPng: () => Buffer.from('synthetic png') }).content, /已填滿但尚未通關/);
+  assert.equal(h.api.get('SELECT COUNT(*) AS count FROM fake_reward_receipts').count, 0);
+  const corrected = await service.apply({ ...scope(created), expectedRevision: revision, interactionId: 'sudoku-correction',
+    action: { type: 'set', ...cells[0], value: cells[0].value } });
+  assert.equal(corrected.status, 'completed');
+  assert.equal(corrected.rewardAmount, 20);
+  assert.equal(corrected.rewardStatus, 'granted');
+  assert.equal(corrected.rewardNetAmount, 20);
+  assert.equal((await service.get(scope(created))).rewardNetAmount, 20);
+  assert.equal(h.api.get('SELECT COUNT(*) AS count FROM fake_reward_receipts').count, 1);
+  h.db.close();
+});
+
 test('failed Discord panel edit leaves committed move available for a later refresh', async () => {
   const h = await harness();
   const service = h.makeService();
@@ -197,6 +239,72 @@ test('failed Discord panel edit leaves committed move available for a later refr
   assert.equal(await runtime.handleInteraction(interaction), true);
   assert.match(replies[0].content, /已儲存/);
   assert.equal((await service.get(scope(created))).revision, 1);
+  h.db.close();
+});
+
+test('expired move control closes the panel instead of opening another modal', async () => {
+  const h = await harness();
+  const service = h.makeService();
+  const created = await service.create({ userId: 'owner', guildId: 'guild', channelId: 'channel', gameType: 'sudoku', difficulty: 'easy' });
+  await service.bindMessage(scope(created));
+  h.setTime('2026-09-26T00:30:01.000Z');
+  const edits = [];
+  const replies = [];
+  const client = { channels: { fetch: async () => ({ guildId: 'guild', messages: { fetch: async () => ({ edit: async (value) => { edits.push(value); } }) } }) } };
+  const runtime = createSoloDiscordRuntime({ service, client, renderPng: () => Buffer.from('synthetic png'),
+    isGuildApproved: () => true, isBotOwner: () => false, runtimeLogger: { error() {} } });
+  const interaction = {
+    customId: buildSoloCustomId({ sessionId: created.id, revision: 0, verb: 'move.s' }),
+    guildId: 'guild', channelId: 'channel', user: { id: 'owner' }, message: { id: 'message' },
+    isButton: () => true, isModalSubmit: () => false,
+    async showModal() { throw new Error('expired modal must not open'); },
+    async reply(value) { replies.push(value); },
+  };
+  assert.equal(await runtime.handleInteraction(interaction), true);
+  assert.match(replies[0].content, /已逾時/);
+  assert.match(edits[0].content, /已逾時/);
+  assert.deepEqual(edits[0].components, []);
+  assert.equal(h.api.get('SELECT COUNT(*) AS count FROM fake_reward_receipts').count, 0);
+  h.db.close();
+});
+
+test('a failed final panel edit keeps the single reward and a reopened service can refresh the result', async () => {
+  const h = await harness();
+  const service = h.makeService();
+  const created = await service.create({ userId: 'owner', guildId: 'guild', channelId: 'channel', gameType: 'number-match', difficulty: 'easy' });
+  await service.bindMessage(scope(created));
+  await service.apply({ ...scope(created), expectedRevision: 0, interactionId: 'first-pair', action: { type: 'pair', first: 0, second: 1 } });
+  let failEdit = true;
+  const edits = [];
+  const client = { channels: { fetch: async () => ({ guildId: 'guild', messages: { fetch: async () => ({
+    edit: async (value) => { if (failEdit) throw new Error('synthetic edit failure'); edits.push(value); },
+  }) } }) } };
+  const runtime = createSoloDiscordRuntime({ service, client, renderPng: () => Buffer.from('synthetic png'),
+    isGuildApproved: () => true, isBotOwner: () => false, runtimeLogger: { error() {} } });
+  const replies = [];
+  const fields = { first: 'A1', second: 'B1' };
+  const finalInteraction = {
+    id: 'final-pair', customId: buildSoloCustomId({ sessionId: created.id, revision: 1, verb: 'move.n' }),
+    guildId: 'guild', channelId: 'channel', user: { id: 'owner' }, message: { id: 'message' },
+    fields: { getTextInputValue: (name) => fields[name] }, isButton: () => false, isModalSubmit: () => true,
+    async deferReply() { this.deferred = true; }, async editReply(value) { replies.push(value); },
+  };
+  await runtime.handleInteraction(finalInteraction);
+  assert.match(replies[0].content, /錢包入帳 20 吉幣/);
+  assert.match(replies[0].content, /已儲存，但面板更新失敗/);
+  assert.equal(h.api.get('SELECT COUNT(*) AS count FROM fake_reward_receipts').count, 1);
+  failEdit = false;
+  const reopened = createSoloDiscordRuntime({ service: h.makeService(), client, renderPng: () => Buffer.from('synthetic png'),
+    isGuildApproved: () => true, isBotOwner: () => false, runtimeLogger: { error() {} } });
+  const refresh = { customId: buildSoloCustomId({ sessionId: created.id, revision: 1, verb: 'refresh' }),
+    guildId: 'guild', channelId: 'channel', user: { id: 'owner' }, message: { id: 'message' },
+    isButton: () => true, isModalSubmit: () => false,
+    async deferReply() { this.deferred = true; }, async editReply(value) { replies.push(value); },
+  };
+  await reopened.handleInteraction(refresh);
+  assert.match(edits[0].content, /錢包入帳 20 吉幣/);
+  assert.deepEqual(edits[0].components, []);
+  assert.equal(h.api.get('SELECT COUNT(*) AS count FROM fake_reward_receipts').count, 1);
   h.db.close();
 });
 

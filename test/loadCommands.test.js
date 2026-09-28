@@ -15,8 +15,12 @@ test('public core loads without a private extension', () => {
 });
 
 test('public deployment data contains public commands', () => {
-  const names = loadCommandData().map((command) => command.name);
+  const commands = loadCommandData();
+  const names = commands.map((command) => command.name);
   assert.ok(names.includes('set-welcome'));
+  const games = commands.find((command) => command.name === 'games');
+  assert.deepEqual(games.options.map((option) => option.name), ['menu', 'resume', 'play']);
+  assert.match(games.options.find((option) => option.name === 'play').description, /Discord/);
 });
 
 test('help contains public features and omits private management catalog', async () => {
@@ -29,5 +33,6 @@ test('help contains public features and omits private management catalog', async
   const text = embed.fields.map((field) => field.value).join('\n');
   assert.match(text, /\/set-welcome channel/);
   assert.match(text, /\/word-chain start\/stop\/status/);
-  assert.match(text, /\/games play/);
+  assert.match(text, /\/games menu\/play\/resume/);
+  assert.doesNotMatch(text, /一次性連結/);
 });

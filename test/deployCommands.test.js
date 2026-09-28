@@ -1,13 +1,51 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Routes } = require('discord.js');
-const { buildDeploymentPlan, deployCommands, shouldAutoDeployCommands } = require('../deploy-commands');
+const { buildDeploymentPlan, deployCommands, parseDeploymentArgs, shouldAutoDeployCommands } = require('../deploy-commands');
 const { createExtensionHost } = require('../src/extensions/extensionHost');
 
 test('AUTO_DEPLOY_COMMANDS accepts only explicit enabled values', () => {
   for (const value of ['true', 'TRUE', ' true ']) assert.equal(shouldAutoDeployCommands({ AUTO_DEPLOY_COMMANDS: value }), true);
   for (const value of [undefined, '', '0', '1', 'false', 'yes', 'on']) {
     assert.equal(shouldAutoDeployCommands({ AUTO_DEPLOY_COMMANDS: value }), false);
+  }
+});
+
+test('public-only CLI mode is explicit and rejects unknown arguments', () => {
+  assert.deepEqual(parseDeploymentArgs([]), { publicOnly: false });
+  assert.deepEqual(parseDeploymentArgs(['--public-only']), { publicOnly: true });
+  assert.throws(() => parseDeploymentArgs(['--public-only', '--cleanup']), /Usage/);
+});
+
+test('explicit public-only deployment registers all games subcommands globally without loading private scope', async () => {
+  const calls = [];
+  const privatePath = process.env.XIAOJI_PRIVATE_EXTENSION_PATH;
+  process.env.XIAOJI_PRIVATE_EXTENSION_PATH = 'synthetic-invalid-private-extension';
+  try {
+    const result = await deployCommands({
+      publicOnly: true,
+      token: 'synthetic-token',
+      clientId: 'client-1',
+      extensionHost: { getCommandDirectories() { throw new Error('private commands were loaded'); },
+        getDeploymentTargets() { throw new Error('private targets were loaded'); } },
+      rest: { get() { throw new Error('guild readback was attempted'); },
+        async put(route, options) { calls.push({ route, body: options.body }); } },
+    });
+    assert.equal(result.publicOnly, true);
+    assert.equal(result.privateCommandCount, 0);
+    assert.equal(result.privateGuildCount, 0);
+    assert.equal(result.cleanupCount, 0);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].route, Routes.applicationCommands('client-1'));
+    const games = calls[0].body.find((command) => command.name === 'games');
+    assert.ok(games);
+    assert.deepEqual(games.options.map((option) => option.name), ['menu', 'resume', 'play']);
+    assert.match(games.options.find((option) => option.name === 'play').description, /Discord/);
+    await assert.rejects(deployCommands({ publicOnly: true, clientId: 'client-1', token: 'synthetic-token',
+      cleanupGuildIds: ['synthetic-guild'], rest: { put() { throw new Error('must not mutate'); } } }), /cannot clean up guild/);
+  } finally {
+    if (privatePath === undefined) delete process.env.XIAOJI_PRIVATE_EXTENSION_PATH;
+    else process.env.XIAOJI_PRIVATE_EXTENSION_PATH = privatePath;
   }
 });
 

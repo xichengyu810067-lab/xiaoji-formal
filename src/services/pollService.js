@@ -171,12 +171,14 @@ async function createPoll(interaction, { question, options, durationMinutes }) {
 }
 
 async function endPoll(client, poll, now = Date.now()) {
-  if (poll.endedAt) {
-    return poll;
+  // Timers hold the creation snapshot; votes may have been saved since then.
+  const currentPoll = getPoll(poll.messageId);
+  if (!currentPoll || currentPoll.endedAt) {
+    return currentPoll;
   }
 
-  poll.endedAt = now;
-  savePoll(poll);
+  currentPoll.endedAt = now;
+  savePoll(currentPoll);
 
   const existingTimer = pollTimers.get(poll.messageId);
   if (existingTimer) {
@@ -185,14 +187,14 @@ async function endPoll(client, poll, now = Date.now()) {
   }
 
   try {
-    const channel = await client.channels.fetch(poll.channelId);
-    const message = await channel.messages.fetch(poll.messageId);
-    await message.edit(buildPollPayload(poll));
+    const channel = await client.channels.fetch(currentPoll.channelId);
+    const message = await channel.messages.fetch(currentPoll.messageId);
+    await message.edit(buildPollPayload(currentPoll));
   } catch (error) {
     logger.warn(`Failed to close poll ${poll.messageId}: ${error?.code ?? 'unknown'} ${error?.message ?? ''}`);
   }
 
-  return poll;
+  return currentPoll;
 }
 
 function schedulePollEnd(client, poll) {
