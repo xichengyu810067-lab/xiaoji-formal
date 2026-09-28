@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const retainedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-poll-test-'));
+const retainedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-poll-test-')));
 require('../src/platform/retainedDataSource').configureRetainedDataSourceRoot(retainedRoot);
 const servicePath = require.resolve('../src/services/pollService');
 let { createPoll, getPollCounts, handlePollButton, readPolls, restoreActivePolls, validatePollInput } = require(servicePath);
