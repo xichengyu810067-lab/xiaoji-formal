@@ -1,7 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const quotaPath = path.join(__dirname, '..', 'data', 'guildQuotas.json');
+const { retainedDataFile } = require('../platform/retainedDataSource');
+const quotaPath = retainedDataFile('guildQuotas.json');
 const QUOTA_EXHAUSTED_MESSAGE = '小吉現在有點忙，請晚點再試。';
 
 function ensureQuotaFile() {

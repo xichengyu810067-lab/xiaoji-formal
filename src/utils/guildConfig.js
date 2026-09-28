@@ -1,7 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const configPath = path.join(__dirname, '..', 'data', 'guildConfig.json');
+const { retainedDataFile } = require('../platform/retainedDataSource');
+const configPath = retainedDataFile('guildConfig.json');
 
 const defaultGuildConfig = {
   welcomeChannelId: null,

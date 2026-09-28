@@ -1,8 +1,8 @@
-const path = require('node:path');
+const { retainedDataFile } = require('../platform/retainedDataSource');
 const { createCalendarSystem } = require('../systems/community/calendarSystem');
 const { resolvePersonalDataPath } = require('../platform/personalDataPaths');
 
-const calendarPath = path.join(__dirname, '..', 'data', 'calendarEvents.json');
+const calendarPath = retainedDataFile('calendarEvents.json');
 let activeSystem = null;
 function getActiveSystem() {
   if (!activeSystem) activeSystem = createCalendarSystem({ filePath: resolvePersonalDataPath('calendar').filePath });

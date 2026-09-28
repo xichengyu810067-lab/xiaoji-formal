@@ -1,9 +1,9 @@
-const path = require('node:path');
+const { retainedDataFile } = require('../platform/retainedDataSource');
 const logger = require('../utils/logger');
 const { createReminderSystem } = require('../systems/reminders/reminderSystem');
 const { resolvePersonalDataPath } = require('../platform/personalDataPaths');
 
-const remindersPath = path.join(__dirname, '..', 'data', 'reminders.json');
+const remindersPath = retainedDataFile('reminders.json');
 let activeSystem = null;
 function getActiveSystem() {
   if (!activeSystem) {
