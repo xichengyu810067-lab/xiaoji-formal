@@ -10,18 +10,9 @@ module.exports = {
       .setColor(0x22c55e)
       .setTitle('小吉狀態')
       .addFields(
-        { name: 'Uptime', value: status.uptime, inline: true },
-        {
-          name: 'Memory',
-          value: `RSS ${status.memoryUsage.rss}\nHeap ${status.memoryUsage.heapUsed} / ${status.memoryUsage.heapTotal}`,
-          inline: true,
-        },
-        { name: '伺服器數', value: String(status.guildCount), inline: true },
-        { name: '指令數', value: String(status.commandCount), inline: true },
-        { name: '版本號', value: status.version, inline: true },
-        { name: '最近啟動時間', value: `<t:${Math.floor(status.startedAt.getTime() / 1000)}:F>`, inline: false }
-      )
-      .setTimestamp(new Date());
+        { name: '目前狀態', value: status.online ? '小吉目前在線' : '狀態暫時無法確認', inline: true },
+        { name: '公開版本', value: status.version, inline: true }
+      );
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
   },

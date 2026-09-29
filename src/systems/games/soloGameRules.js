@@ -167,12 +167,26 @@ function buildSudoku(seed, difficulty) {
 }
 
 function applySudokuAction(state, action) {
-  if (action?.type !== 'set' || !Number.isInteger(action.row) || !Number.isInteger(action.column) ||
-      !Number.isInteger(action.value) || action.row < 0 || action.row > 8 || action.column < 0 ||
-      action.column > 8 || action.value < 0 || action.value > 9) throw new GameError('INVALID_ACTION', 'Invalid sudoku action.');
-  if (state.puzzle[action.row][action.column] !== 0) throw new GameError('GIVEN_LOCKED', 'Sudoku given cells cannot change.');
+  const cells = action?.type === 'set' ? [action] : action?.type === 'set_batch' ? action.cells : null;
+  if (!Array.isArray(cells) || cells.length < 1 || cells.length > 81) {
+    throw new GameError('INVALID_ACTION', '請輸入 1–81 格答案。');
+  }
+  const seen = new Set();
+  const wrong = [];
+  for (const cell of cells) {
+    if (!cell || !Number.isInteger(cell.row) || !Number.isInteger(cell.column) || !Number.isInteger(cell.value) ||
+        cell.row < 0 || cell.row > 8 || cell.column < 0 || cell.column > 8 || cell.value < 0 || cell.value > 9) {
+      throw new GameError('INVALID_ACTION', '數獨座標或數字不正確。');
+    }
+    const label = `${String.fromCharCode(65 + cell.column)}${cell.row + 1}`;
+    if (seen.has(label)) throw new GameError('INVALID_ACTION', `座標 ${label} 重複。`);
+    seen.add(label);
+    if (state.puzzle[cell.row][cell.column] !== 0) throw new GameError('GIVEN_LOCKED', `題目格 ${label} 不能修改。`);
+    if (cell.value !== 0 && cell.value !== state.solution[cell.row][cell.column]) wrong.push(label);
+  }
+  if (wrong.length) throw new GameError('WRONG_SUDOKU_ENTRY', `答案錯誤：${wrong.join('、')}。棋盤未更新。`);
   const entries = state.entries.map((row) => [...row]);
-  entries[action.row][action.column] = action.value;
+  for (const cell of cells) entries[cell.row][cell.column] = cell.value;
   const completed = entries.every((row, y) => row.every((value, x) => value === state.solution[y][x]));
   return { ...state, entries, completed };
 }

@@ -6,21 +6,21 @@ const logger = require('../utils/logger');
 function getAdvice(weather) {
   const advice = [];
 
-  if (weather.tempMaxRaw >= 30) {
+  if (weather.tempMaxRaw !== null && weather.tempMaxRaw >= 30) {
     advice.push('天氣炎熱，請注意防曬並多補充水分');
-  } else if (weather.tempMinRaw <= 15) {
+  } else if (weather.tempMinRaw !== null && weather.tempMinRaw <= 15) {
     advice.push('天氣偏冷，出門請記得穿暖一點');
-  } else {
+  } else if (weather.tempMinRaw !== null && weather.tempMaxRaw !== null) {
     advice.push('氣溫舒適，出門保持一般準備就可以');
   }
 
-  if (weather.popRaw > 0.4) {
+  if (weather.popRaw > 40) {
     advice.push('降雨機率偏高，建議帶傘');
-  } else if (weather.popRaw > 0.1) {
+  } else if (weather.popRaw > 10) {
     advice.push('有一點降雨機率，可以視情況帶傘');
   }
 
-  return `${advice.join('，')}。`;
+  return advice.length ? `${advice.join('，')}。` : '請留意最新預報。';
 }
 
 function formatWeatherReply(weather, timeStr, suggest) {
@@ -30,35 +30,24 @@ function formatWeatherReply(weather, timeStr, suggest) {
   }
 
   if (weather.isWeek) {
-    return `${weather.city}未來一週天氣：\n${weather.weekSummary}`;
+    return `${weather.city}未來${weather.forecastDays || 7}日預報：\n${weather.weekSummary}${weather.sourceLabel ? `\n${weather.sourceLabel}` : ''}`;
   }
 
   reply += `${weather.city}${timeStr}天氣：\n\n`;
   reply += `天氣狀況：${weather.description}\n`;
   reply += `氣溫：${weather.tempMin} ~ ${weather.tempMax}\n`;
+  if (weather.forecastPeriod) reply += `預報日期：${weather.forecastPeriod}\n`;
 
   if (weather.pop) {
     reply += `降雨機率：${weather.pop}\n`;
   }
+  if (weather.windDirection) reply += `風向：${weather.windDirection}\n`;
+  if (weather.windSpeed) reply += `風速：${weather.windSpeed}\n`;
 
   reply += `體感提醒：${getAdvice(weather)}`;
+  if (weather.sourceLabel) reply += `\n${weather.sourceLabel}`;
 
   return reply;
-}
-
-function logWeatherDebug(debug) {
-  logger.info(
-    [
-      `[weather:${debug.source}] raw="${debug.raw}"`,
-      `cleaned="${debug.cleaned}"`,
-      `normalized="${debug.normalized}"`,
-      `intent=${debug.isWeatherIntent}`,
-      `city="${debug.city || ''}"`,
-      `district="${debug.district || ''}"`,
-      `final="${debug.finalLocation || ''}"`,
-      `api="${debug.apiLocation || ''}"`,
-    ].join(' ')
-  );
 }
 
 async function getWeatherMentionReply(userText) {
@@ -67,11 +56,12 @@ async function getWeatherMentionReply(userText) {
     return null;
   }
 
-  logWeatherDebug(query.debug);
-
   if (query.ambiguous) {
     const examples = query.candidates?.slice(0, 4).join('、') || '臺北市大同區、新竹市東區、臺南市東區';
     return `這個地名有點模糊，你可以補上縣市嗎？例如：${examples}`;
+  }
+  if (query.invalid) {
+    return '找不到這個行政區，請輸入完整且正確的縣市與行政區名稱。';
   }
 
   if (!query.location) {
@@ -79,7 +69,7 @@ async function getWeatherMentionReply(userText) {
   }
 
   try {
-    const weather = await getWeather(query.apiLocation || query.location, query.time);
+    const weather = await getWeather(query.location, query.time);
 
     const timeLabels = {
       today: '今天',
@@ -92,20 +82,12 @@ async function getWeatherMentionReply(userText) {
 
     return formatWeatherReply(weather, timeStr, query.suggest);
   } catch (error) {
-    if (error instanceof WeatherError && error.code === 'missing_api_key') {
-      return '小吉有查詢天氣功能，但目前還沒設定 `OPENWEATHER_API_KEY`。請在 `.env` 補上後重新啟動小吉。';
-    }
-
-    if (error instanceof WeatherError && error.code === 'unauthorized') {
-      return '小吉有查詢天氣功能，但 OpenWeather API key 目前無效或尚未啟用。請確認 `.env` 的 `OPENWEATHER_API_KEY` 是正確 key，儲存後重新啟動小吉。';
-    }
-
     if (error instanceof WeatherError && error.code === 'city_not_found') {
       return '我找不到這個地名的天氣資料。請試著補上縣市與行政區，例如：臺北市大同區天氣。';
     }
 
-    logger.warn(`weather mention failed: ${error?.message || error}`);
-    return '我剛剛有抓到地點，但天氣資料查詢失敗。可能是 API 暫時沒有回應，請稍後再試。';
+    logger.warn(`weather mention failed: ${error?.code || 'unknown'}`);
+    return '天氣資料暫時無法查詢，請稍後再試。';
   }
 }
 

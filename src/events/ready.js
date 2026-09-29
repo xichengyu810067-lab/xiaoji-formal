@@ -12,6 +12,7 @@ const { startDailyDiscussionScheduler } = require('../services/dailyDiscussionSe
 const { startPublicStatusServer } = require('../services/publicStatusServer');
 const { startStatusSnapshotPublisher } = require('../services/statusSnapshotPublisher');
 const { startGameServer } = require('../services/gameServer');
+const { startReleaseAnnouncementScheduler } = require('../services/releaseAnnouncementService');
 const { resumePendingGameRewards } = require('../services/gameService');
 const {
   clearExpiredConversationHistory,
@@ -58,6 +59,7 @@ module.exports = {
     await runStartupTask('投票資料恢復', () => restoreActivePolls(client));
     await runStartupTask('提醒資料恢復', () => restoreActiveReminders(client));
     await runStartupTask('既有伺服器審核資料同步', () => syncExistingGuilds(client));
+    await runStartupTask('公開版本公告排程啟動', () => startReleaseAnnouncementScheduler(client));
     await runStartupTask('私有擴充啟動', () =>
       getClientExtensionHost(client).runHook('ready', { client, runStartupTask, scheduleStartupTask })
     );
