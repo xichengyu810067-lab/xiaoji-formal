@@ -145,10 +145,6 @@
     document.querySelector('[data-overall-label]').textContent = overall.label;
     document.querySelector('[data-overall-detail]').textContent = overall.detail;
     document.querySelector('[data-last-updated]').textContent = formatUpdatedAt(payload.updatedAt);
-    const latency = Number.isFinite(payload?.bot?.latencyMs) && payload.bot.latencyMs >= 0
-      ? `${Math.round(payload.bot.latencyMs)} ms`
-      : '—';
-    document.querySelector('[data-latency]').textContent = `延遲 ${latency}`;
 
     const navDot = document.querySelector('[data-nav-status-dot]');
     navDot.classList.remove('is-operational', 'is-degraded', 'is-outage');
@@ -165,7 +161,6 @@
     document.querySelector('[data-overall-label]').textContent = '狀態未知';
     document.querySelector('[data-overall-detail]').textContent = '暫時無法確認小吉的服務狀態';
     document.querySelector('[data-last-updated]').textContent = '尚未取得更新';
-    document.querySelector('[data-latency]').textContent = '延遲 —';
     document.querySelector('[data-status-unavailable]').hidden = false;
     const navDot = document.querySelector('[data-nav-status-dot]');
     navDot.classList.remove('is-operational', 'is-outage');

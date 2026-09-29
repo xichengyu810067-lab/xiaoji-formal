@@ -13,6 +13,37 @@ const { CoinCampaignError, applyOwnerCampaign, classifyOwnerCampaignHistoryRecor
   getOwnerCampaignHistoryReviewPlan, getOwnerCampaignPreview, importOwnerCampaignHistory,
   previewOwnerCampaign, reviewOwnerCampaignHistory } = require('../services/coinCampaignService');
 
+const campaignErrorReplies = Object.freeze({
+  OWNER_ONLY: '只有小吉擁有者可以管理活動發幣。',
+  INCOMPLETE_MEMBER_FETCH: '無法取得完整成員名單，活動已停止。',
+  INVALID_ARGUMENT: '活動資料不完整，請檢查輸入後重試。',
+  INVALID_AUDIENCE: '請確認發放對象與身分組設定。',
+  INVALID_AMOUNT: '發放金額不正確，請重新輸入。',
+  INVALID_REASON: '請填寫活動原因。',
+  INVALID_MEMBERS: '無法確認完整成員名單，活動已停止。',
+  MEMBER_NOT_FOUND: '指定成員不在完整名單中。',
+  INVALID_CONFIRM: '確認文字不正確，請依指令提示重新輸入。',
+  INVALID_PAGE: '查無此頁舊紀錄，請重新選擇頁數。',
+  INVALID_HISTORY: '歷史對帳資料不完整，請重新查看對帳預覽。',
+  CAMPAIGN_NOT_FOUND: '找不到活動預覽，請重新建立預覽。',
+  CAMPAIGN_CONFLICT: '活動識別與既有設定不符，請重新核對。',
+  CAMPAIGN_RECEIPT_CONFLICT: '活動收據與設定不符，請先核對帳務。',
+  CAMPAIGN_HISTORY_UNRECONCILED: '尚有歷史發款未完成核對，不能發幣。',
+  CAMPAIGN_HISTORY_CHANGED: '歷史發款來源已變更，請重新查看並核對。',
+  HISTORY_SOURCE_CHANGED: '歷史對帳來源已變更，請重新查看對帳預覽。',
+  HISTORY_SOURCE_UNRESOLVED: '歷史紀錄來源尚未核實，不能發幣。',
+  HISTORY_EVIDENCE_CONFLICT: '發放結果暫時無法確認，請先核對帳務。',
+  HISTORY_REVIEW_CONFLICT: '歷史發款核對結果有衝突，請先核對帳務。',
+  PREVIEW_CHANGED: '活動預覽已變更，請重新預覽。',
+  AMOUNT_OVERFLOW: '活動總金額超出可支援範圍。',
+});
+
+function campaignErrorReply(error) {
+  return Object.hasOwn(campaignErrorReplies, error.code)
+    ? campaignErrorReplies[error.code]
+    : '活動操作暫時無法完成，請稍後重試。';
+}
+
 async function fetchCompleteMembers(guild) {
   const members = await guild.members.fetch();
   if (!members || members.size < guild.memberCount) {
@@ -439,8 +470,9 @@ module.exports = {
       }
     } catch (error) {
       if (error instanceof CoinCampaignError) {
-        if (interaction.deferred && !interaction.replied) await interaction.editReply(error.message);
-        else await interaction.reply({ content: error.message, ephemeral: true });
+        const content = campaignErrorReply(error);
+        if (interaction.deferred && !interaction.replied) await interaction.editReply(content);
+        else await interaction.reply({ content, ephemeral: true });
         return;
       }
       await replyCoinError(interaction, error);

@@ -44,6 +44,9 @@ function assertAllowedPath(relativePath) {
   if (FORBIDDEN_FILE_NAMES.has(baseName) || isProtectedEnvironmentFile) {
     throw new Error(`Public export refuses protected file: ${normalized}`);
   }
+  if (baseName === 'agents.md' || /(?:^|[-_])(?:plan|planning|test[-_]report|local[-_]record|development[-_]log)(?:[-_.]|$)/i.test(baseName) && baseName.endsWith('.md')) {
+    throw new Error(`Public export refuses internal document: ${normalized}`);
+  }
   if (/private-control|internal-report|production-check|deploy-to-vps|smoke-login/i.test(normalized)) {
     throw new Error(`Public export refuses internal operation file: ${normalized}`);
   }

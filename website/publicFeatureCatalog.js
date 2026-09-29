@@ -43,7 +43,7 @@
     {
       name: '吉幣、工作與銀行',
       features: [
-        { name: '吉幣與台灣每日簽到', purpose: '查看跨伺服器帳號餘額、簽到、排行榜與經濟摘要。', howTo: '使用 /coins、/daily、/leaderboard 或 /economy leaderboard。', limitation: '每日簽到依台灣日期計算；每位玩家一天一次，於可使用小吉的伺服器間共用。全域吉幣增減、重置與 /coin-db status 僅限小吉擁有者；/coin-admin history、enable、disable 與 /economy overview、user、audit 僅限小吉擁有者或 Administrator；/economy leaderboard 可公開查看。' },
+        { name: '吉幣與台灣每日簽到', purpose: '查看跨伺服器帳號餘額、簽到、排行榜與經濟摘要。', howTo: '使用 /coins、/daily、/leaderboard 或 /economy leaderboard。', limitation: '每日簽到依台灣日期計算；每位玩家一天一次，於可使用小吉的伺服器間共用。一般使用者可查詢自己的餘額與公開排行榜；涉及他人帳務或設定的操作仍需適當權限。' },
         { name: '全域商店與背包', purpose: '瀏覽普通或精品商品、購買商品，並查看自己的背包與購買紀錄。', howTo: '使用 /shop list、/shop buy、/buy、/shop purchases、/inventory，或 /luxury list、/luxury buy、/luxury inventory、/luxury history。', limitation: '普通與精品商品、庫存、限購與背包在可使用小吉的伺服器間共用；購買紀錄會保留來源伺服器。新商品不能附 Discord 身分組；商品上架與調整僅限小吉擁有者。' },
         { name: '銀行與定存', purpose: '查看跨伺服器帳號的錢包、活存、定存與利率，並進行存提款及到期處理。', howTo: '使用 /bank balance、/bank deposit、/bank withdraw、/bank interest、/bank rate-list 或各項 fixed 子命令。', limitation: '帳務與利率依帳號全域共用，但操作仍受目前伺服器的吉幣功能狀態限制；一般使用者可查看自己的帳務與目前利率。查看他人或全體帳務、設定利率或查閱利率調整紀錄，僅限小吉擁有者或 Administrator。' },
         { name: '工作系統', purpose: '查看職業、選擇下一期唯一全域主職、提交產出、查看薪資與提出扣薪申訴。', howTo: '使用 /work list、/work start、/work status、/work submit、/work payroll 或 /work appeal。', limitation: '每個帳號同一時間只有一個全域主職；部分任務流程受伺服器權限與工作條件限制。' },
@@ -84,7 +84,7 @@
       name: '網站與公開資訊',
       features: [
         { name: '小吉官網', purpose: '提供公開產品介紹、功能分類與公開說明。', howTo: '直接瀏覽小吉官網，或在 Discord 使用 /about、/help。', limitation: '公開網站不顯示 Discord 個人或伺服器識別資料。' },
-        { name: '即時狀態網站', purpose: '顯示公開、去識別化的整體狀態；資料不足時會如實顯示未知。', howTo: '使用 /status、/ping 或開啟狀態網站。', limitation: '/ping 只顯示小吉回應與連線延遲，不能代表其他功能均正常；網站公開讀取。' },
+        { name: '即時狀態網站', purpose: '顯示公開、去識別化的整體狀態；資料不足時會如實顯示未知。', howTo: '使用 /status、/ping 或開啟狀態網站。', limitation: '/ping 只確認小吉有回應，不能代表其他功能均正常；網站公開讀取。' },
         { name: '公開版本資訊', purpose: '閱讀小吉的公開版本資訊與 Release。', howTo: '使用官網的「公開版本資訊」連結，前往 GitHub 上 xiaoji-formal 的 Release 頁閱讀。', limitation: '公開閱讀；不包含其他控制功能。' },
       ],
     },

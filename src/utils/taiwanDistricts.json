@@ -1,0 +1,2214 @@
+{
+  "source": "https://data.gov.tw/dataset/102011",
+  "retrievedAt": "2026-09-29",
+  "districts": [
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "松山區",
+      "districtCode": "63000010"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "信義區",
+      "districtCode": "63000020"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "大安區",
+      "districtCode": "63000030"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "中山區",
+      "districtCode": "63000040"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "中正區",
+      "districtCode": "63000050"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "大同區",
+      "districtCode": "63000060"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "萬華區",
+      "districtCode": "63000070"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "文山區",
+      "districtCode": "63000080"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "南港區",
+      "districtCode": "63000090"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "內湖區",
+      "districtCode": "63000100"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "士林區",
+      "districtCode": "63000110"
+    },
+    {
+      "county": "臺北市",
+      "countyCode": "A",
+      "district": "北投區",
+      "districtCode": "63000120"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "中區",
+      "districtCode": "66000010"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "東區",
+      "districtCode": "66000020"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "南區",
+      "districtCode": "66000030"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "西區",
+      "districtCode": "66000040"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "北區",
+      "districtCode": "66000050"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "西屯區",
+      "districtCode": "66000060"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "南屯區",
+      "districtCode": "66000070"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "北屯區",
+      "districtCode": "66000080"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "豐原區",
+      "districtCode": "66000090"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "東勢區",
+      "districtCode": "66000100"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "大甲區",
+      "districtCode": "66000110"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "清水區",
+      "districtCode": "66000120"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "沙鹿區",
+      "districtCode": "66000130"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "梧棲區",
+      "districtCode": "66000140"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "后里區",
+      "districtCode": "66000150"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "神岡區",
+      "districtCode": "66000160"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "潭子區",
+      "districtCode": "66000170"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "大雅區",
+      "districtCode": "66000180"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "新社區",
+      "districtCode": "66000190"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "石岡區",
+      "districtCode": "66000200"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "外埔區",
+      "districtCode": "66000210"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "大安區",
+      "districtCode": "66000220"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "烏日區",
+      "districtCode": "66000230"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "大肚區",
+      "districtCode": "66000240"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "龍井區",
+      "districtCode": "66000250"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "霧峰區",
+      "districtCode": "66000260"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "太平區",
+      "districtCode": "66000270"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "大里區",
+      "districtCode": "66000280"
+    },
+    {
+      "county": "臺中市",
+      "countyCode": "B",
+      "district": "和平區",
+      "districtCode": "66000290"
+    },
+    {
+      "county": "基隆市",
+      "countyCode": "C",
+      "district": "中正區",
+      "districtCode": "10017010"
+    },
+    {
+      "county": "基隆市",
+      "countyCode": "C",
+      "district": "七堵區",
+      "districtCode": "10017020"
+    },
+    {
+      "county": "基隆市",
+      "countyCode": "C",
+      "district": "暖暖區",
+      "districtCode": "10017030"
+    },
+    {
+      "county": "基隆市",
+      "countyCode": "C",
+      "district": "仁愛區",
+      "districtCode": "10017040"
+    },
+    {
+      "county": "基隆市",
+      "countyCode": "C",
+      "district": "中山區",
+      "districtCode": "10017050"
+    },
+    {
+      "county": "基隆市",
+      "countyCode": "C",
+      "district": "安樂區",
+      "districtCode": "10017060"
+    },
+    {
+      "county": "基隆市",
+      "countyCode": "C",
+      "district": "信義區",
+      "districtCode": "10017070"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "新營區",
+      "districtCode": "67000010"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "鹽水區",
+      "districtCode": "67000020"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "白河區",
+      "districtCode": "67000030"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "柳營區",
+      "districtCode": "67000040"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "後壁區",
+      "districtCode": "67000050"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "東山區",
+      "districtCode": "67000060"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "麻豆區",
+      "districtCode": "67000070"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "下營區",
+      "districtCode": "67000080"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "六甲區",
+      "districtCode": "67000090"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "官田區",
+      "districtCode": "67000100"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "大內區",
+      "districtCode": "67000110"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "佳里區",
+      "districtCode": "67000120"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "學甲區",
+      "districtCode": "67000130"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "西港區",
+      "districtCode": "67000140"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "七股區",
+      "districtCode": "67000150"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "將軍區",
+      "districtCode": "67000160"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "北門區",
+      "districtCode": "67000170"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "新化區",
+      "districtCode": "67000180"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "善化區",
+      "districtCode": "67000190"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "新市區",
+      "districtCode": "67000200"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "安定區",
+      "districtCode": "67000210"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "山上區",
+      "districtCode": "67000220"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "玉井區",
+      "districtCode": "67000230"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "楠西區",
+      "districtCode": "67000240"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "南化區",
+      "districtCode": "67000250"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "左鎮區",
+      "districtCode": "67000260"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "仁德區",
+      "districtCode": "67000270"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "歸仁區",
+      "districtCode": "67000280"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "關廟區",
+      "districtCode": "67000290"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "龍崎區",
+      "districtCode": "67000300"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "永康區",
+      "districtCode": "67000310"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "東區",
+      "districtCode": "67000320"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "南區",
+      "districtCode": "67000330"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "北區",
+      "districtCode": "67000340"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "安南區",
+      "districtCode": "67000350"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "安平區",
+      "districtCode": "67000360"
+    },
+    {
+      "county": "臺南市",
+      "countyCode": "D",
+      "district": "中西區",
+      "districtCode": "67000370"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "鹽埕區",
+      "districtCode": "64000010"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "鼓山區",
+      "districtCode": "64000020"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "左營區",
+      "districtCode": "64000030"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "楠梓區",
+      "districtCode": "64000040"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "三民區",
+      "districtCode": "64000050"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "新興區",
+      "districtCode": "64000060"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "前金區",
+      "districtCode": "64000070"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "苓雅區",
+      "districtCode": "64000080"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "前鎮區",
+      "districtCode": "64000090"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "旗津區",
+      "districtCode": "64000100"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "小港區",
+      "districtCode": "64000110"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "鳳山區",
+      "districtCode": "64000120"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "林園區",
+      "districtCode": "64000130"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "大寮區",
+      "districtCode": "64000140"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "大樹區",
+      "districtCode": "64000150"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "大社區",
+      "districtCode": "64000160"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "仁武區",
+      "districtCode": "64000170"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "鳥松區",
+      "districtCode": "64000180"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "岡山區",
+      "districtCode": "64000190"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "橋頭區",
+      "districtCode": "64000200"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "燕巢區",
+      "districtCode": "64000210"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "田寮區",
+      "districtCode": "64000220"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "阿蓮區",
+      "districtCode": "64000230"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "路竹區",
+      "districtCode": "64000240"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "湖內區",
+      "districtCode": "64000250"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "茄萣區",
+      "districtCode": "64000260"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "永安區",
+      "districtCode": "64000270"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "彌陀區",
+      "districtCode": "64000280"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "梓官區",
+      "districtCode": "64000290"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "旗山區",
+      "districtCode": "64000300"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "美濃區",
+      "districtCode": "64000310"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "六龜區",
+      "districtCode": "64000320"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "甲仙區",
+      "districtCode": "64000330"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "杉林區",
+      "districtCode": "64000340"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "內門區",
+      "districtCode": "64000350"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "茂林區",
+      "districtCode": "64000360"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "桃源區",
+      "districtCode": "64000370"
+    },
+    {
+      "county": "高雄市",
+      "countyCode": "E",
+      "district": "那瑪夏區",
+      "districtCode": "64000380"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "板橋區",
+      "districtCode": "65000010"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "三重區",
+      "districtCode": "65000020"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "中和區",
+      "districtCode": "65000030"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "永和區",
+      "districtCode": "65000040"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "新莊區",
+      "districtCode": "65000050"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "新店區",
+      "districtCode": "65000060"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "樹林區",
+      "districtCode": "65000070"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "鶯歌區",
+      "districtCode": "65000080"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "三峽區",
+      "districtCode": "65000090"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "淡水區",
+      "districtCode": "65000100"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "汐止區",
+      "districtCode": "65000110"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "瑞芳區",
+      "districtCode": "65000120"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "土城區",
+      "districtCode": "65000130"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "蘆洲區",
+      "districtCode": "65000140"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "五股區",
+      "districtCode": "65000150"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "泰山區",
+      "districtCode": "65000160"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "林口區",
+      "districtCode": "65000170"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "深坑區",
+      "districtCode": "65000180"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "石碇區",
+      "districtCode": "65000190"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "坪林區",
+      "districtCode": "65000200"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "三芝區",
+      "districtCode": "65000210"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "石門區",
+      "districtCode": "65000220"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "八里區",
+      "districtCode": "65000230"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "平溪區",
+      "districtCode": "65000240"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "雙溪區",
+      "districtCode": "65000250"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "貢寮區",
+      "districtCode": "65000260"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "金山區",
+      "districtCode": "65000270"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "萬里區",
+      "districtCode": "65000280"
+    },
+    {
+      "county": "新北市",
+      "countyCode": "F",
+      "district": "烏來區",
+      "districtCode": "65000290"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "宜蘭市",
+      "districtCode": "10002010"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "羅東鎮",
+      "districtCode": "10002020"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "蘇澳鎮",
+      "districtCode": "10002030"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "頭城鎮",
+      "districtCode": "10002040"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "礁溪鄉",
+      "districtCode": "10002050"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "壯圍鄉",
+      "districtCode": "10002060"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "員山鄉",
+      "districtCode": "10002070"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "冬山鄉",
+      "districtCode": "10002080"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "五結鄉",
+      "districtCode": "10002090"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "三星鄉",
+      "districtCode": "10002100"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "大同鄉",
+      "districtCode": "10002110"
+    },
+    {
+      "county": "宜蘭縣",
+      "countyCode": "G",
+      "district": "南澳鄉",
+      "districtCode": "10002120"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "桃園區",
+      "districtCode": "68000010"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "中壢區",
+      "districtCode": "68000020"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "大溪區",
+      "districtCode": "68000030"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "楊梅區",
+      "districtCode": "68000040"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "蘆竹區",
+      "districtCode": "68000050"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "大園區",
+      "districtCode": "68000060"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "龜山區",
+      "districtCode": "68000070"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "八德區",
+      "districtCode": "68000080"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "龍潭區",
+      "districtCode": "68000090"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "平鎮區",
+      "districtCode": "68000100"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "新屋區",
+      "districtCode": "68000110"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "觀音區",
+      "districtCode": "68000120"
+    },
+    {
+      "county": "桃園市",
+      "countyCode": "H",
+      "district": "復興區",
+      "districtCode": "68000130"
+    },
+    {
+      "county": "嘉義市",
+      "countyCode": "I",
+      "district": "東區",
+      "districtCode": "10020010"
+    },
+    {
+      "county": "嘉義市",
+      "countyCode": "I",
+      "district": "西區",
+      "districtCode": "10020020"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "竹北市",
+      "districtCode": "10004010"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "竹東鎮",
+      "districtCode": "10004020"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "新埔鎮",
+      "districtCode": "10004030"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "關西鎮",
+      "districtCode": "10004040"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "湖口鄉",
+      "districtCode": "10004050"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "新豐鄉",
+      "districtCode": "10004060"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "芎林鄉",
+      "districtCode": "10004070"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "橫山鄉",
+      "districtCode": "10004080"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "北埔鄉",
+      "districtCode": "10004090"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "寶山鄉",
+      "districtCode": "10004100"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "峨眉鄉",
+      "districtCode": "10004110"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "尖石鄉",
+      "districtCode": "10004120"
+    },
+    {
+      "county": "新竹縣",
+      "countyCode": "J",
+      "district": "五峰鄉",
+      "districtCode": "10004130"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "苗栗市",
+      "districtCode": "10005010"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "苑裡鎮",
+      "districtCode": "10005020"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "通霄鎮",
+      "districtCode": "10005030"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "竹南鎮",
+      "districtCode": "10005040"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "頭份市",
+      "districtCode": "10005050"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "後龍鎮",
+      "districtCode": "10005060"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "卓蘭鎮",
+      "districtCode": "10005070"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "大湖鄉",
+      "districtCode": "10005080"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "公館鄉",
+      "districtCode": "10005090"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "銅鑼鄉",
+      "districtCode": "10005100"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "南庄鄉",
+      "districtCode": "10005110"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "頭屋鄉",
+      "districtCode": "10005120"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "三義鄉",
+      "districtCode": "10005130"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "西湖鄉",
+      "districtCode": "10005140"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "造橋鄉",
+      "districtCode": "10005150"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "三灣鄉",
+      "districtCode": "10005160"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "獅潭鄉",
+      "districtCode": "10005170"
+    },
+    {
+      "county": "苗栗縣",
+      "countyCode": "K",
+      "district": "泰安鄉",
+      "districtCode": "10005180"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "南投市",
+      "districtCode": "10008010"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "埔里鎮",
+      "districtCode": "10008020"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "草屯鎮",
+      "districtCode": "10008030"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "竹山鎮",
+      "districtCode": "10008040"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "集集鎮",
+      "districtCode": "10008050"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "名間鄉",
+      "districtCode": "10008060"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "鹿谷鄉",
+      "districtCode": "10008070"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "中寮鄉",
+      "districtCode": "10008080"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "魚池鄉",
+      "districtCode": "10008090"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "國姓鄉",
+      "districtCode": "10008100"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "水里鄉",
+      "districtCode": "10008110"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "信義鄉",
+      "districtCode": "10008120"
+    },
+    {
+      "county": "南投縣",
+      "countyCode": "M",
+      "district": "仁愛鄉",
+      "districtCode": "10008130"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "彰化市",
+      "districtCode": "10007010"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "鹿港鎮",
+      "districtCode": "10007020"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "和美鎮",
+      "districtCode": "10007030"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "線西鄉",
+      "districtCode": "10007040"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "伸港鄉",
+      "districtCode": "10007050"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "福興鄉",
+      "districtCode": "10007060"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "秀水鄉",
+      "districtCode": "10007070"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "花壇鄉",
+      "districtCode": "10007080"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "芬園鄉",
+      "districtCode": "10007090"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "員林市",
+      "districtCode": "10007100"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "溪湖鎮",
+      "districtCode": "10007110"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "田中鎮",
+      "districtCode": "10007120"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "大村鄉",
+      "districtCode": "10007130"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "埔鹽鄉",
+      "districtCode": "10007140"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "埔心鄉",
+      "districtCode": "10007150"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "永靖鄉",
+      "districtCode": "10007160"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "社頭鄉",
+      "districtCode": "10007170"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "二水鄉",
+      "districtCode": "10007180"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "北斗鎮",
+      "districtCode": "10007190"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "二林鎮",
+      "districtCode": "10007200"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "田尾鄉",
+      "districtCode": "10007210"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "埤頭鄉",
+      "districtCode": "10007220"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "芳苑鄉",
+      "districtCode": "10007230"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "大城鄉",
+      "districtCode": "10007240"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "竹塘鄉",
+      "districtCode": "10007250"
+    },
+    {
+      "county": "彰化縣",
+      "countyCode": "N",
+      "district": "溪州鄉",
+      "districtCode": "10007260"
+    },
+    {
+      "county": "新竹市",
+      "countyCode": "O",
+      "district": "東區",
+      "districtCode": "10018010"
+    },
+    {
+      "county": "新竹市",
+      "countyCode": "O",
+      "district": "北區",
+      "districtCode": "10018020"
+    },
+    {
+      "county": "新竹市",
+      "countyCode": "O",
+      "district": "香山區",
+      "districtCode": "10018030"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "斗六市",
+      "districtCode": "10009010"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "斗南鎮",
+      "districtCode": "10009020"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "虎尾鎮",
+      "districtCode": "10009030"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "西螺鎮",
+      "districtCode": "10009040"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "土庫鎮",
+      "districtCode": "10009050"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "北港鎮",
+      "districtCode": "10009060"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "古坑鄉",
+      "districtCode": "10009070"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "大埤鄉",
+      "districtCode": "10009080"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "莿桐鄉",
+      "districtCode": "10009090"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "林內鄉",
+      "districtCode": "10009100"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "二崙鄉",
+      "districtCode": "10009110"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "崙背鄉",
+      "districtCode": "10009120"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "麥寮鄉",
+      "districtCode": "10009130"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "東勢鄉",
+      "districtCode": "10009140"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "褒忠鄉",
+      "districtCode": "10009150"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "臺西鄉",
+      "districtCode": "10009160"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "元長鄉",
+      "districtCode": "10009170"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "四湖鄉",
+      "districtCode": "10009180"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "口湖鄉",
+      "districtCode": "10009190"
+    },
+    {
+      "county": "雲林縣",
+      "countyCode": "P",
+      "district": "水林鄉",
+      "districtCode": "10009200"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "太保市",
+      "districtCode": "10010010"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "朴子市",
+      "districtCode": "10010020"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "布袋鎮",
+      "districtCode": "10010030"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "大林鎮",
+      "districtCode": "10010040"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "民雄鄉",
+      "districtCode": "10010050"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "溪口鄉",
+      "districtCode": "10010060"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "新港鄉",
+      "districtCode": "10010070"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "六腳鄉",
+      "districtCode": "10010080"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "東石鄉",
+      "districtCode": "10010090"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "義竹鄉",
+      "districtCode": "10010100"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "鹿草鄉",
+      "districtCode": "10010110"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "水上鄉",
+      "districtCode": "10010120"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "中埔鄉",
+      "districtCode": "10010130"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "竹崎鄉",
+      "districtCode": "10010140"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "梅山鄉",
+      "districtCode": "10010150"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "番路鄉",
+      "districtCode": "10010160"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "大埔鄉",
+      "districtCode": "10010170"
+    },
+    {
+      "county": "嘉義縣",
+      "countyCode": "Q",
+      "district": "阿里山鄉",
+      "districtCode": "10010180"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "屏東市",
+      "districtCode": "10013010"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "潮州鎮",
+      "districtCode": "10013020"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "東港鎮",
+      "districtCode": "10013030"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "恆春鎮",
+      "districtCode": "10013040"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "萬丹鄉",
+      "districtCode": "10013050"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "長治鄉",
+      "districtCode": "10013060"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "麟洛鄉",
+      "districtCode": "10013070"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "九如鄉",
+      "districtCode": "10013080"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "里港鄉",
+      "districtCode": "10013090"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "鹽埔鄉",
+      "districtCode": "10013100"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "高樹鄉",
+      "districtCode": "10013110"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "萬巒鄉",
+      "districtCode": "10013120"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "內埔鄉",
+      "districtCode": "10013130"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "竹田鄉",
+      "districtCode": "10013140"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "新埤鄉",
+      "districtCode": "10013150"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "枋寮鄉",
+      "districtCode": "10013160"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "新園鄉",
+      "districtCode": "10013170"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "崁頂鄉",
+      "districtCode": "10013180"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "林邊鄉",
+      "districtCode": "10013190"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "南州鄉",
+      "districtCode": "10013200"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "佳冬鄉",
+      "districtCode": "10013210"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "琉球鄉",
+      "districtCode": "10013220"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "車城鄉",
+      "districtCode": "10013230"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "滿州鄉",
+      "districtCode": "10013240"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "枋山鄉",
+      "districtCode": "10013250"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "三地門鄉",
+      "districtCode": "10013260"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "霧臺鄉",
+      "districtCode": "10013270"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "瑪家鄉",
+      "districtCode": "10013280"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "泰武鄉",
+      "districtCode": "10013290"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "來義鄉",
+      "districtCode": "10013300"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "春日鄉",
+      "districtCode": "10013310"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "獅子鄉",
+      "districtCode": "10013320"
+    },
+    {
+      "county": "屏東縣",
+      "countyCode": "T",
+      "district": "牡丹鄉",
+      "districtCode": "10013330"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "花蓮市",
+      "districtCode": "10015010"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "鳳林鎮",
+      "districtCode": "10015020"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "玉里鎮",
+      "districtCode": "10015030"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "新城鄉",
+      "districtCode": "10015040"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "吉安鄉",
+      "districtCode": "10015050"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "壽豐鄉",
+      "districtCode": "10015060"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "光復鄉",
+      "districtCode": "10015070"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "豐濱鄉",
+      "districtCode": "10015080"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "瑞穗鄉",
+      "districtCode": "10015090"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "富里鄉",
+      "districtCode": "10015100"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "秀林鄉",
+      "districtCode": "10015110"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "萬榮鄉",
+      "districtCode": "10015120"
+    },
+    {
+      "county": "花蓮縣",
+      "countyCode": "U",
+      "district": "卓溪鄉",
+      "districtCode": "10015130"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "臺東市",
+      "districtCode": "10014010"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "成功鎮",
+      "districtCode": "10014020"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "關山鎮",
+      "districtCode": "10014030"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "卑南鄉",
+      "districtCode": "10014040"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "鹿野鄉",
+      "districtCode": "10014050"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "池上鄉",
+      "districtCode": "10014060"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "東河鄉",
+      "districtCode": "10014070"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "長濱鄉",
+      "districtCode": "10014080"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "太麻里鄉",
+      "districtCode": "10014090"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "大武鄉",
+      "districtCode": "10014100"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "綠島鄉",
+      "districtCode": "10014110"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "海端鄉",
+      "districtCode": "10014120"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "延平鄉",
+      "districtCode": "10014130"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "金峰鄉",
+      "districtCode": "10014140"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "達仁鄉",
+      "districtCode": "10014150"
+    },
+    {
+      "county": "臺東縣",
+      "countyCode": "V",
+      "district": "蘭嶼鄉",
+      "districtCode": "10014160"
+    },
+    {
+      "county": "金門縣",
+      "countyCode": "W",
+      "district": "金城鎮",
+      "districtCode": "09020010"
+    },
+    {
+      "county": "金門縣",
+      "countyCode": "W",
+      "district": "金沙鎮",
+      "districtCode": "09020020"
+    },
+    {
+      "county": "金門縣",
+      "countyCode": "W",
+      "district": "金湖鎮",
+      "districtCode": "09020030"
+    },
+    {
+      "county": "金門縣",
+      "countyCode": "W",
+      "district": "金寧鄉",
+      "districtCode": "09020040"
+    },
+    {
+      "county": "金門縣",
+      "countyCode": "W",
+      "district": "烈嶼鄉",
+      "districtCode": "09020050"
+    },
+    {
+      "county": "金門縣",
+      "countyCode": "W",
+      "district": "烏坵鄉",
+      "districtCode": "09020060"
+    },
+    {
+      "county": "澎湖縣",
+      "countyCode": "X",
+      "district": "馬公市",
+      "districtCode": "10016010"
+    },
+    {
+      "county": "澎湖縣",
+      "countyCode": "X",
+      "district": "湖西鄉",
+      "districtCode": "10016020"
+    },
+    {
+      "county": "澎湖縣",
+      "countyCode": "X",
+      "district": "白沙鄉",
+      "districtCode": "10016030"
+    },
+    {
+      "county": "澎湖縣",
+      "countyCode": "X",
+      "district": "西嶼鄉",
+      "districtCode": "10016040"
+    },
+    {
+      "county": "澎湖縣",
+      "countyCode": "X",
+      "district": "望安鄉",
+      "districtCode": "10016050"
+    },
+    {
+      "county": "澎湖縣",
+      "countyCode": "X",
+      "district": "七美鄉",
+      "districtCode": "10016060"
+    },
+    {
+      "county": "連江縣",
+      "countyCode": "Z",
+      "district": "南竿鄉",
+      "districtCode": "09007010"
+    },
+    {
+      "county": "連江縣",
+      "countyCode": "Z",
+      "district": "北竿鄉",
+      "districtCode": "09007020"
+    },
+    {
+      "county": "連江縣",
+      "countyCode": "Z",
+      "district": "莒光鄉",
+      "districtCode": "09007030"
+    },
+    {
+      "county": "連江縣",
+      "countyCode": "Z",
+      "district": "東引鄉",
+      "districtCode": "09007040"
+    }
+  ]
+}

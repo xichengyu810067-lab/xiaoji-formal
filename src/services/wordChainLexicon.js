@@ -1,9 +1,14 @@
-// Project-curated Traditional Chinese word corpus.  It is deliberately closed:
-// message validation never asks an external service or generative model to judge a word.
-const corpusVersion = '2026.09.03-1';
-const source = 'project-curated';
+// Both corpora are closed: no external service or generative model judges a move.
+// Existing sessions without a stored version belong to the original curated corpus.
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const words = Object.freeze([
+const legacyCorpusVersion = '2026.09.03-1';
+const corpusVersion = 'moe-revised-2015_20260625+project-curated-2026.09.03-1';
+const source = 'MOE revised dictionary original headwords + separately sourced project-curated words';
+
+const legacyWords = Object.freeze([
   '安靜', '安全', '安心', '安慰', '愛心', '愛好', '愛情', '白天', '白雲', '白紙',
   '班級', '幫忙', '報告', '寶貝', '保護', '北方', '本來', '本人', '筆記', '變化',
   '表情', '標準', '冰箱', '餅乾', '病人', '播放', '博物館', '不安', '不錯', '不怕',
@@ -38,21 +43,62 @@ const words = Object.freeze([
   '自己', '自然', '足球', '昨天', '作業', '座位', '尊重', '最近', '最後', '做事',
 ]);
 
+const assetDirectory = path.resolve(__dirname, '../../assets/word-chain');
+const metadata = require('../../assets/word-chain/moe-revised-source.json');
+const indexFile = 'moe-revised-2015_20260625.txt';
+const usageFile = 'MOE-usage-revised.pdf';
+if (metadata.indexFile !== indexFile || metadata.usageInstructionsFile !== usageFile) {
+  throw new Error('MOE word-chain corpus metadata names do not match the published assets.');
+}
+const indexBytes = fs.readFileSync(path.join(assetDirectory, indexFile));
+const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
+if (
+  metadata.sourceVersion !== '2015_20260625' ||
+  hash(indexBytes) !== metadata.indexSha256 ||
+  hash(fs.readFileSync(path.join(assetDirectory, usageFile))) !== metadata.usageInstructionsSha256
+) {
+  throw new Error('MOE word-chain corpus or its required usage instructions failed integrity verification.');
+}
+const moeWords = Object.freeze(indexBytes.toString('utf8').trimEnd().split('\n'));
+const legacyWordSet = new Set(legacyWords);
+const words = Object.freeze([...legacyWords, ...moeWords.filter((word) => !legacyWordSet.has(word))]);
 const wordSet = new Set(words);
 
-function graphemes(value) {
-  return Array.from(new Intl.Segmenter('zh-Hant', { granularity: 'grapheme' }).segment(value), ({ segment }) => segment);
+function createCorpusIndex(corpusWords) {
+  const byInitial = new Map();
+  for (const word of corpusWords) {
+    const initial = Array.from(word)[0];
+    if (!byInitial.has(initial)) byInitial.set(initial, []);
+    byInitial.get(initial).push(word);
+  }
+  for (const successors of byInitial.values()) Object.freeze(successors);
+  return { words: corpusWords, wordSet: new Set(corpusWords), byInitial };
 }
 
-function getSuccessors(word) {
-  const segments = graphemes(word);
-  const requiredInitial = segments.at(-1);
-  return words.filter((candidate) => graphemes(candidate)[0] === requiredInitial);
+const corpora = new Map([
+  [legacyCorpusVersion, createCorpusIndex(legacyWords)],
+  [corpusVersion, createCorpusIndex(words)],
+]);
+
+function getCorpus(version = corpusVersion) {
+  const corpus = corpora.get(version);
+  if (!corpus) throw new Error(`Unknown word-chain corpus version: ${version}`);
+  return corpus;
+}
+
+function getSuccessors(word, version = corpusVersion) {
+  const requiredInitial = Array.from(word).at(-1);
+  return getCorpus(version).byInitial.get(requiredInitial) || [];
 }
 
 function assertCorpusInvariant() {
-  if (words.length < 150 || wordSet.size !== words.length || !words.every((word) => /^\p{Script=Han}{2,6}$/u.test(word))) {
-    throw new Error('Project-curated word-chain corpus invariant failed.');
+  if (
+    legacyWords.length < 150 || legacyWordSet.size !== legacyWords.length ||
+    moeWords.length !== metadata.uniqueHeadwords || new Set(moeWords).size !== moeWords.length ||
+    wordSet.size !== words.length ||
+    !words.every((word) => /^\p{Script=Han}{2,6}$/u.test(word))
+  ) {
+    throw new Error('Word-chain corpus invariant failed.');
   }
 }
 
@@ -61,7 +107,13 @@ assertCorpusInvariant();
 module.exports = {
   assertCorpusInvariant,
   corpusVersion,
+  createCorpusIndex,
+  getCorpus,
   getSuccessors,
+  legacyCorpusVersion,
+  legacyWords,
+  metadata,
+  moeWords,
   source,
   words,
   wordSet,

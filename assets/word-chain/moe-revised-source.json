@@ -1,0 +1,15 @@
+{
+  "source": "中華民國教育部《重編國語辭典修訂本》",
+  "sourceVersion": "2015_20260625",
+  "sourceUrl": "https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/download/dict_revised_2015_20260625.zip",
+  "sourceArchiveSha256": "64003a98fcc7097940e5a536c999bc08ba7c07e2c1be66448f01bf1ae10a53fc",
+  "sourceXlsxSha256": "df94ae4384ae3f33f573ded5c2f142041ea7530d381a285163593d6252ea4a9a",
+  "usageInstructionsUrl": "https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/reviseddict_10312.pdf",
+  "usageInstructionsFile": "MOE-usage-revised.pdf",
+  "usageInstructionsSha256": "0854656a196d3f2583f1e931c3cb4f2d0d7821dacb2d6b80ee5fc9d0563b86b9",
+  "license": "CC BY-ND 3.0 TW",
+  "eligibleSourceRows": 148434,
+  "uniqueHeadwords": 147794,
+  "indexFile": "moe-revised-2015_20260625.txt",
+  "indexSha256": "433c3e1181d4ff11ed9c8671500c1c6a9a04eacc640cd21628026654e5cde06a"
+}

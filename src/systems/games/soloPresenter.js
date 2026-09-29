@@ -107,6 +107,7 @@ function buildSoloMessagePayload(session, { renderPng = renderSoloPng } = {}) {
   const moveVerb = { tetris: 'move.t', 'number-match': 'move.n', sudoku: 'move.s' }[session.gameType];
   const controls = active ? [{ type: 1, components: [
     { type: 2, custom_id: buildSoloCustomId({ sessionId: session.id, revision: session.revision, verb: moveVerb }), label: '輸入一步', style: 1 },
+    ...(session.gameType === 'sudoku' ? [{ type: 2, custom_id: buildSoloCustomId({ sessionId: session.id, revision: session.revision, verb: 'move.sb' }), label: '批次填答', style: 1 }] : []),
     { type: 2, custom_id: buildSoloCustomId({ sessionId: session.id, revision: session.revision, verb: 'refresh' }), label: '重新整理', style: 2 },
   ] }] : [];
   return {
