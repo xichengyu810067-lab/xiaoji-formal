@@ -244,6 +244,16 @@ function publicOverview(snapshot) {
   return overview;
 }
 
+function publicStatusView(snapshot) {
+  return {
+    ...snapshot,
+    bot: { status: snapshot.bot.status, version: snapshot.bot.version, latencyMs: null },
+    guilds: { adoptedCount: null },
+    usage: { date: snapshot.usage.date, todayInteractions: null, available: false },
+    features: snapshot.features.map(({ key, status }) => ({ key, status })),
+  };
+}
+
 async function handlePublish(request, env) {
   if (request.method !== 'POST') return jsonResponse({ error: 'not_found' }, 404);
   if (!request.headers.get('Content-Type')?.toLowerCase().startsWith('application/json')) {
@@ -286,7 +296,7 @@ async function handlePublicRead(request, env, pathname) {
   if (request.method === 'OPTIONS') return cors ? emptyResponse(204, { cors: true }) : jsonResponse({ error: 'not_found' }, 404);
   if (!['GET', 'HEAD'].includes(request.method)) return jsonResponse({ error: 'not_found' }, 404, { headOnly: request.method === 'HEAD', cors });
   try {
-    const snapshot = await loadSnapshot(env);
+    const snapshot = publicStatusView(await loadSnapshot(env));
     return jsonResponse(pathname.endsWith('/overview') ? publicOverview(snapshot) : snapshot, 200, {
       headOnly: request.method === 'HEAD', cors,
     });

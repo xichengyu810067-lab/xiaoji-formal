@@ -1238,11 +1238,24 @@ CREATE TABLE IF NOT EXISTS release_announcement_deliveries (
   FOREIGN KEY (release_id) REFERENCES github_releases(release_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS release_announcement_state (
+  repository TEXT PRIMARY KEY NOT NULL,
+  baseline_release_id TEXT NOT NULL,
+  baseline_published_at TEXT NOT NULL,
+  cursor_release_id TEXT NOT NULL,
+  cursor_published_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (baseline_release_id) REFERENCES github_releases(release_id),
+  FOREIGN KEY (cursor_release_id) REFERENCES github_releases(release_id)
+);
+
 CREATE TABLE IF NOT EXISTS text_chain_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id TEXT NOT NULL,
   channel_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped', 'completed')),
+  corpus_version TEXT NOT NULL DEFAULT '2026.09.03-1',
   current_word TEXT NOT NULL,
   last_word TEXT NOT NULL,
   last_user_id TEXT,
@@ -1698,6 +1711,13 @@ function verifyFeaturePlatformSchema(db) {
     primaryKeyPosition,
   });
   const tableContracts = {
+    release_announcement_state: {
+      columns: {
+        repository: text(true, null, 1), baseline_release_id: text(true), baseline_published_at: text(true),
+        cursor_release_id: text(true), cursor_published_at: text(true), created_at: text(true), updated_at: text(true),
+      },
+      checks: [],
+    },
     feature_guild_settings: {
       columns: {
         guild_id: text(true, null, 1),
@@ -1845,6 +1865,7 @@ function verifyFeaturePlatformSchema(db) {
         guild_id: text(true),
         channel_id: text(true),
         status: text(true, "'active'"),
+        corpus_version: text(true, "'2026.09.03-1'"),
         current_word: text(true),
         last_word: text(true),
         last_user_id: text(),
@@ -2000,6 +2021,12 @@ function verifyFeaturePlatformSchema(db) {
   const releaseForeignKey = getRows(db, 'PRAGMA foreign_key_list(release_announcement_deliveries)')
     .find((row) => row.table === 'github_releases' && row.from === 'release_id' && row.to === 'release_id' && String(row.on_delete).toUpperCase() === 'CASCADE');
   if (!releaseForeignKey) throw new Error('release_announcement_deliveries is missing its release foreign key');
+  const announcementStateForeignKeys = getRows(db, 'PRAGMA foreign_key_list(release_announcement_state)');
+  for (const column of ['baseline_release_id', 'cursor_release_id']) {
+    if (!announcementStateForeignKeys.some((row) => row.table === 'github_releases' && row.from === column && row.to === 'release_id')) {
+      throw new Error(`release_announcement_state is missing its ${column} foreign key`);
+    }
+  }
 
   for (const [tableName, columns] of [
     ['feature_guild_settings', ['guild_id', 'feature_key']],
@@ -3909,6 +3936,8 @@ async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
 
   try {
     migrateWordChainV12Contract(db);
+    // Rows created before corpus pinning keep the original 313-word rules.
+    addColumnIfMissing(db, 'text_chain_sessions', 'corpus_version', "TEXT NOT NULL DEFAULT '2026.09.03-1'");
     reconcileWordChainActiveSessions(db);
     // Recreate v12 indexes after a legacy session-table rebuild only after
     // multiple legacy active sessions have been deterministically reconciled.

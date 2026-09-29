@@ -2,22 +2,6 @@ const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const { WeatherError, getWeather } = require('../services/weatherService');
 const { getGuildConfig } = require('../utils/guildConfig');
 const { normalizeWeatherCommandLocation } = require('../utils/weatherNLP');
-const logger = require('../utils/logger');
-
-function logWeatherDebug(debug) {
-  logger.info(
-    [
-      `[weather:${debug.source}] raw="${debug.raw}"`,
-      `cleaned="${debug.cleaned}"`,
-      `normalized="${debug.normalized}"`,
-      `intent=${debug.isWeatherIntent}`,
-      `city="${debug.city || ''}"`,
-      `district="${debug.district || ''}"`,
-      `final="${debug.finalLocation || ''}"`,
-      `api="${debug.apiLocation || ''}"`,
-    ].join(' ')
-  );
-}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -58,20 +42,23 @@ module.exports = {
 
     try {
       const resolved = normalizeWeatherCommandLocation(city);
-      logWeatherDebug(resolved.debug);
 
       if (resolved.ambiguous) {
         const examples = resolved.candidates?.slice(0, 4).join('、') || '臺北市大同區、新竹市東區、臺南市東區';
         await interaction.editReply(`這個地名有點模糊，你可以補上縣市嗎？例如：${examples}`);
         return;
       }
+      if (resolved.invalid) {
+        await interaction.editReply('找不到這個行政區，請輸入完整且正確的縣市與行政區名稱。');
+        return;
+      }
 
-      const weather = await getWeather(resolved.apiLocation || resolved.location || city, timeType);
+      const weather = await getWeather(resolved.location || city, timeType);
       
       let titleSuffix = '';
-      if (timeType === 'today') titleSuffix = '今天天氣';
-      else if (timeType === 'tomorrow') titleSuffix = '明天天氣';
-      else if (timeType === 'week') titleSuffix = '一週天氣';
+      if (timeType === 'today') titleSuffix = weather.sourceLabel ? '今日預報' : '今天天氣';
+      else if (timeType === 'tomorrow') titleSuffix = '明日預報';
+      else if (timeType === 'week') titleSuffix = `${weather.forecastDays || 7}日預報`;
 
       const embed = new EmbedBuilder()
         .setColor(0x38bdf8)
@@ -88,10 +75,15 @@ module.exports = {
           { name: '濕度', value: weather.humidity, inline: true },
           { name: '風速', value: weather.windSpeed, inline: true }
         );
+        if (weather.windDirection) {
+          embed.addFields({ name: '風向', value: weather.windDirection, inline: true });
+        }
         if (weather.pop) {
           embed.addFields({ name: '降雨機率', value: weather.pop, inline: true });
         }
       }
+      if (weather.forecastPeriod) embed.addFields({ name: '預報日期', value: weather.forecastPeriod });
+      if (weather.sourceLabel) embed.setFooter({ text: weather.sourceLabel });
 
       await interaction.editReply({ embeds: [embed] });
     } catch (error) {

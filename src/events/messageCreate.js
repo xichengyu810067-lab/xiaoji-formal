@@ -7,6 +7,7 @@ const { isBotOwner } = require('../utils/ownerOnly');
 const { recordPublicInteraction } = require('../services/publicStatusService');
 const logger = require('../utils/logger');
 const { getClientExtensionHost } = require('../extensions/extensionHost');
+const { captureIngressVisibility } = require('../systems/conversation/publicVisibility');
 
 module.exports = {
   name: Events.MessageCreate,
@@ -21,6 +22,9 @@ module.exports = {
     ) {
       return;
     }
+
+    // 在任何 await 前固定來源可見性；未知或私人狀態不可事後升級。
+    captureIngressVisibility(message);
 
     // Audit Check
     if (message.guildId && !isBotOwner(message.author.id)) {

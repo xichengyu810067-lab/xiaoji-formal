@@ -41,13 +41,15 @@ function modalForMove(customId, verb) {
     'move.t': { title: '俄羅斯方塊：落下一塊', fields: [['column', '欄位（1–10）'], ['rotation', '旋轉（0–3）']] },
     'move.n': { title: '數字配對：選兩格', fields: [['first', '第一格（例：A1）'], ['second', '第二格（例：B1）']] },
     'move.s': { title: '數獨：填入格子', fields: [['cell', '欄 A–I＋列 1–9（例：A1）'], ['value', '數字（1–9；0 清除）']] },
+    'move.sb': { title: '數獨：批次填答', fields: [['cells', '空格分隔，例如 A1=5 B2=3 C9=8']] },
   };
   const definition = definitions[verb];
   if (!definition) throw new GameError('INVALID_CUSTOM_ID', 'Unsupported game move.');
   const modal = new ModalBuilder().setCustomId(customId).setTitle(definition.title);
   for (const [id, label] of definition.fields) {
     modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder()
-      .setCustomId(id).setLabel(label).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(16)));
+      .setCustomId(id).setLabel(label).setStyle(verb === 'move.sb' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+      .setRequired(true).setMaxLength(verb === 'move.sb' ? 700 : 16)));
   }
   return modal;
 }
@@ -61,7 +63,7 @@ function coordinate(text, rows, columns) {
   return { row, column, index: row * columns + column };
 }
 
-function parseMove(interaction, session) {
+function parseMove(interaction, session, verb = 'move.s') {
   const value = (name) => String(interaction.fields.getTextInputValue(name) || '').trim();
   const wholeNumber = (name) => {
     const text = value(name);
@@ -81,6 +83,21 @@ function parseMove(interaction, session) {
     const second = coordinate(value('second'), session.state.rows, session.state.columns);
     return { type: 'pair', first: first.index, second: second.index };
   }
+  if (verb === 'move.sb') {
+    const tokens = value('cells').split(/\s+/u).filter(Boolean);
+    if (tokens.length < 1 || tokens.length > 81) throw new GameError('INVALID_ACTION', '請輸入 1–81 格答案。');
+    const seen = new Set();
+    const cells = tokens.map((token) => {
+      const match = /^([A-Ia-i][1-9])=([0-9])$/u.exec(token);
+      if (!match) throw new GameError('INVALID_ACTION', `格式不正確：${token.slice(0, 20)}。請用 A1=5 B2=3。`);
+      const cell = coordinate(match[1], 9, 9);
+      const label = match[1].toUpperCase();
+      if (seen.has(label)) throw new GameError('INVALID_ACTION', `座標 ${label} 重複。`);
+      seen.add(label);
+      return { row: cell.row, column: cell.column, value: Number(match[2]) };
+    });
+    return { type: 'set_batch', cells };
+  }
   const cell = coordinate(value('cell'), 9, 9);
   const number = wholeNumber('value');
   if (!Number.isInteger(number) || number < 0 || number > 9) throw new GameError('INVALID_ACTION', '數字須為 0–9。');
@@ -94,7 +111,8 @@ function friendlyError(error) {
     SESSION_EXPIRED: '這局已逾時，請開始新遊戲。', SESSION_NOT_ACTIVE: '這局已結束。',
     ACTION_LIMIT_REACHED: '這局已達操作次數上限。',
     SESSION_NOT_FOUND: '找不到這局。', INVALID_ACTION: error?.message || '這一步不符合規則。',
-    GIVEN_LOCKED: '數獨題目原有的數字不能修改。',
+    GIVEN_LOCKED: error?.message || '數獨題目原有的數字不能修改。',
+    WRONG_SUDOKU_ENTRY: error?.message || '答案錯誤，棋盤未更新。',
     GUILD_NOT_APPROVED: '小吉在這個伺服器尚未通過機器人擁有者的審核，暫時無法提供服務。',
   };
   return messages[error?.code] || '遊戲目前無法處理，請稍後再試。';
@@ -243,7 +261,7 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
       let result;
       if (interaction.isModalSubmit() && decoded.verb.startsWith('move.')) {
         const current = await service.get(scope);
-        const expectedGame = { 'move.t': 'tetris', 'move.n': 'number-match', 'move.s': 'sudoku' }[decoded.verb];
+        const expectedGame = { 'move.t': 'tetris', 'move.n': 'number-match', 'move.s': 'sudoku', 'move.sb': 'sudoku' }[decoded.verb];
         if (current.gameType !== expectedGame) throw new GameError('INVALID_CUSTOM_ID', 'Game type mismatch.');
         if (current.status === 'expired') {
           try { await editPanel(current); } catch (error) { runtimeLogger?.error?.('solo game expired panel edit failed', error); }
@@ -252,7 +270,7 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
           return true;
         }
         result = await service.apply({ ...scope, expectedRevision: decoded.revision,
-          interactionId: interaction.id, action: parseMove(interaction, current) });
+          interactionId: interaction.id, action: parseMove(interaction, current, decoded.verb) });
       } else if (interaction.isButton() && decoded.verb === 'refresh') result = await service.get(scope);
       else throw new GameError('INVALID_CUSTOM_ID', 'Unsupported game control.');
       let message = resultMessage(result);

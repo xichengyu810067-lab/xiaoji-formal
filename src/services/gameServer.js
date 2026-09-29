@@ -82,7 +82,7 @@ function createGameRequestHandler({ allowedOrigins = new Set(), secret, exchange
       else payload = await submit({ sessionId: body.sessionId, accessToken: body.accessToken, expectedIndex: body.expectedIndex, action: body.action, secret, now: current });
       writeJson(response, 200, payload);
     } catch (error) {
-      const status = error?.code === 'BODY_TOO_LARGE' ? 413 : error?.code === 'BAD_JSON' || error?.code === 'INVALID_ACTION' || error?.code === 'INVALID_REQUEST' ? 400 : error?.code === 'TOKEN_INVALID' ? 401 : error?.code === 'SESSION_EXPIRED' ? 410 : error?.code === 'REPLAY_MISMATCH' || error?.code === 'SESSION_NOT_ACTIVE' ? 409 : 503;
+      const status = error?.code === 'BODY_TOO_LARGE' ? 413 : error?.code === 'BAD_JSON' || error?.code === 'INVALID_ACTION' || error?.code === 'INVALID_REQUEST' || error?.code === 'WRONG_SUDOKU_ENTRY' ? 400 : error?.code === 'TOKEN_INVALID' ? 401 : error?.code === 'SESSION_EXPIRED' ? 410 : error?.code === 'REPLAY_MISMATCH' || error?.code === 'SESSION_NOT_ACTIVE' ? 409 : 503;
       if (status === 503) loggerImpl.warn('[GAME_SERVER] Request failed with a fixed internal error.');
       writeJson(response, status, { error: status === 503 ? 'game_unavailable' : String(error.code || 'bad_request').toLowerCase() });
     }

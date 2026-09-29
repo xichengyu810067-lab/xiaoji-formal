@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const logger = require('../utils/logger');
+const { captureProofFor, hasPublicCaptureProof, isCurrentPublicChannel } = require('../systems/conversation/publicVisibility');
 
 const DEFAULT_HISTORY_PATH = path.join(__dirname, '..', '..', 'data', 'aiConversationHistory.json');
 const DEFAULT_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -167,22 +168,27 @@ function enqueueMutation(mutator) {
   return operation;
 }
 
-function getRecentConversationTurns(identity) {
+function getRecentConversationTurns(identity, { requirePublicCapture = false } = {}) {
   const state = pruneState(cloneState(loadState()));
   const key = getConversationKey(identity);
-  return (state.conversations[key]?.turns || []).map(({ user, assistant }) => ({ user, assistant }));
+  return (state.conversations[key]?.turns || [])
+    .filter((turn) => !requirePublicCapture || hasPublicCaptureProof(turn))
+    .map(({ user, assistant }) => ({ user, assistant }));
 }
 
 function truncateText(value) {
   return String(value || '').trim().slice(0, getLimits().maxTextLength);
 }
 
-function rememberConversationTurn(identity, userText, assistantText, now = new Date()) {
+function rememberConversationTurn(identity, userText, assistantText, now = new Date(), { captureMessage = null } = {}) {
   const guildId = String(identity.guildId || 'dm');
   const channelId = String(identity.channelId || 'unknown-channel');
   const userId = String(identity.userId || identity.username || 'unknown-user');
   const key = getConversationKey({ guildId, channelId, userId });
   const timestamp = now.toISOString();
+  const captureProof = guildId !== 'dm' && captureMessage?.guildId === guildId &&
+    captureMessage.channelId === channelId && isCurrentPublicChannel(captureMessage)
+    ? captureProofFor(captureMessage) : null;
 
   return enqueueMutation((state) => {
     const conversation = state.conversations[key] || {
@@ -193,11 +199,13 @@ function rememberConversationTurn(identity, userText, assistantText, now = new D
       turns: [],
     };
     conversation.updatedAt = timestamp;
-    conversation.turns.push({
+    const turn = {
       user: truncateText(userText),
       assistant: truncateText(assistantText),
       createdAt: timestamp,
-    });
+    };
+    if (guildId !== 'dm' && hasPublicCaptureProof({ captureProof })) turn.captureProof = captureProof;
+    conversation.turns.push(turn);
     state.conversations[key] = conversation;
     return state;
   });

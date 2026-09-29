@@ -18,6 +18,7 @@ const logger = require('./utils/logger');
 const { stopPublicStatusServer } = require('./services/publicStatusServer');
 const { stopStatusSnapshotPublisher } = require('./services/statusSnapshotPublisher');
 const { stopGameServer } = require('./services/gameServer');
+const { stopReleaseAnnouncementScheduler } = require('./services/releaseAnnouncementService');
 
 configureArchivePathResolver(resolveDataPath);
 
@@ -65,6 +66,7 @@ async function shutdown(signal) {
   shutdownStarted = true;
   logger.info(`收到 ${signal}，正在關閉小吉。`);
   await boardRuntime.stopLifecycle();
+  await stopReleaseAnnouncementScheduler();
   await extensionHost.runHook('shutdown', { client, signal });
   await stopGameServer().catch(() => {
     logger.warn('[GAME_SERVER] Server shutdown failed.');
