@@ -25,6 +25,8 @@ const {
   validateChatInput,
 } = require('../../services/conversationModeService');
 const { answerMemoryQuery, recordPrivateInteraction } = require('./projection');
+const { resolveMemberFacts } = require('./memberFacts');
+const { INTERNAL_REPLY, requestsInternalDetails, containsInternalDisclosure } = require('./disclosurePolicy');
 const { ARCHIVE_UNAVAILABLE_REPLY, archiveInteraction, confirmArchiveInteraction,
   markArchivePartialDelivery, preflightArchive } = require('../../services/aiArchiveService');
 const { rememberConversationTurn } = require('../../services/conversationHistoryService');
@@ -231,7 +233,7 @@ async function replyInChunks(message, content, { onChunkDelivered } = {}) {
   try {
     await message.reply({
       content: firstChunk,
-      allowedMentions: { repliedUser: false },
+      allowedMentions: { parse: [], repliedUser: false },
     });
   } catch (error) {
     const referenceErrors = error?.rawError?.errors?.message_reference?._errors;
@@ -334,41 +336,49 @@ async function handleMentionMessage(message, { generateChatReplyImpl = generateC
     resolveUserRomancePreference(message.author.id),
   ]);
 
-  const memoryReply = answerMemoryQuery({ text: userText, message });
-
   const sendSavedReply = async (content, { rememberPrompt = false } = {}) => {
-    const saved = await archiveInteraction(message, { userText, assistantText: content });
+    const safeContent = containsInternalDisclosure(content) ? INTERNAL_REPLY : content;
+    const saved = await archiveInteraction(message, { userText, assistantText: safeContent });
     if (!saved) {
       await replyInChunks(message, ARCHIVE_UNAVAILABLE_REPLY);
       return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
     }
     let deliveredChunks = 0;
     try {
-      await replyInChunks(message, content, { onChunkDelivered: () => { deliveredChunks += 1; } });
+      await replyInChunks(message, safeContent, { onChunkDelivered: () => { deliveredChunks += 1; } });
     } catch (error) {
       if (deliveredChunks > 0) await markArchivePartialDelivery(message);
       throw error;
     }
-    if (!await confirmArchiveInteraction(message, { userText, assistantText: content })) {
+    if (!await confirmArchiveInteraction(message, { userText, assistantText: safeContent })) {
       return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
     }
-    if (rememberPrompt) {
+    if (rememberPrompt && safeContent !== INTERNAL_REPLY) {
       const persistence = await rememberConversationTurn({
         userId: message.author.id, guildId: message.guildId, channelId: message.channelId,
-      }, userText || '', content);
+      }, userText || '', safeContent, new Date(), { captureMessage: message });
       if (!persistence.persisted) logger.warn(`[NORMAL_CHAT] Prompt projection was not persisted: ${persistence.reason}`);
     }
     await recordConversationInteraction();
-    recordPrivateInteraction({
-      guildId: message.guildId,
-      channelId: message.channelId,
-      userId: message.author.id,
-      displayName,
-      userText,
-      assistantText: content,
-    });
+    if (safeContent !== INTERNAL_REPLY) {
+      recordPrivateInteraction({
+        guildId: message.guildId,
+        channelId: message.channelId,
+        userId: message.author.id,
+        displayName,
+        userText,
+        assistantText: safeContent,
+      });
+    }
     return undefined;
   };
+
+  if (requestsInternalDetails(userText)) return sendSavedReply(INTERNAL_REPLY);
+
+  const memberResult = await resolveMemberFacts(message, userText);
+  if (memberResult.reply) return sendSavedReply(memberResult.reply);
+
+  const memoryReply = answerMemoryQuery({ text: userText, message });
 
   if (memoryReply) {
     const finalMemoryReply = finalizeConversationalInformationReply(
@@ -405,6 +415,8 @@ async function handleMentionMessage(message, { generateChatReplyImpl = generateC
       guildId: message.guildId,
       chatStyle: chatPreference.style,
       romanceEnabled: romancePreference.enabled,
+      memberFacts: memberResult.facts,
+      message,
     }, { persistConversation: false });
   } catch (error) {
     if (isProviderRateLimitError(error)) {

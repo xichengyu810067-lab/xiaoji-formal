@@ -6,7 +6,7 @@ const {
   markFeatureOutboxDelivered,
   retryFeatureOutbox,
 } = require('./featurePlatformService');
-const { corpusVersion, getSuccessors, wordSet } = require('./wordChainLexicon');
+const { corpusVersion, getCorpus, getSuccessors, legacyCorpusVersion } = require('./wordChainLexicon');
 const logger = require('../utils/logger');
 
 const FEATURE_KEY = 'word_chain';
@@ -38,21 +38,28 @@ function graphemes(value) {
   return Array.from(new Intl.Segmenter('zh-Hant', { granularity: 'grapheme' }).segment(value), ({ segment }) => segment);
 }
 
-function validateWord(input) {
+function validateWord(input, version = corpusVersion) {
   const normalized = String(input ?? '').normalize('NFC').trim();
   const segments = graphemes(normalized);
 
-  if (segments.length < 1 || segments.length > 6) {
-    return { ok: false, code: 'INVALID_LENGTH', message: '請輸入 1 到 6 個中文字。' };
+  if (segments.length < 2 || segments.length > 6) {
+    return { ok: false, code: 'INVALID_LENGTH', message: '請輸入 2 到 6 個中文字。' };
   }
   if (!/^\p{Script=Han}+$/u.test(normalized)) {
     return { ok: false, code: 'INVALID_CHARACTERS', message: '文字接龍只接受純中文詞彙喔。' };
   }
-  if (!wordSet.has(normalized)) {
+  if (!getCorpus(version).wordSet.has(normalized)) {
     return { ok: false, code: 'UNKNOWN_WORD', message: '這不是小吉詞庫中的完整常用詞，請換一個 2 到 6 字的詞。' };
   }
 
   return { ok: true, word: normalized, graphemes: segments };
+}
+
+function requireSessionCorpusVersion(version) {
+  if (version !== corpusVersion && version !== legacyCorpusVersion) {
+    throw new WordChainError('INVALID_CORPUS_VERSION', '這局文字接龍的詞庫版本異常，暫時無法繼續。');
+  }
+  return version;
 }
 
 function mapSession(row) {
@@ -62,6 +69,7 @@ function mapSession(row) {
     guildId: row.guild_id,
     channelId: row.channel_id,
     status: row.status,
+    corpusVersion: requireSessionCorpusVersion(row.corpus_version),
     currentWord: row.current_word,
     lastWord: row.last_word,
     lastUserId: row.last_user_id || null,
@@ -126,7 +134,12 @@ async function startWordChain({ guildId, channelId, actorId, seed = DEFAULT_SEED
     }
     const existing = selectActiveSession(api, normalizedGuildId);
     if (existing?.channel_id === normalizedChannelId) {
-      setWordChainFeatureSetting(api, normalizedGuildId, { enabled: true, channelId: normalizedChannelId, now: timestamp });
+      // Do not relabel a pre-upgrade session with the new corpus.
+      api.run(
+        `UPDATE feature_guild_settings SET enabled = 1, channel_id = ?, updated_at = ?
+         WHERE guild_id = ? AND feature_key = ?`,
+        [normalizedChannelId, timestamp, normalizedGuildId, FEATURE_KEY]
+      );
       return { alreadyActive: true, stoppedSession: null, session: mapSession(existing) };
     }
     if (existing) {
@@ -140,9 +153,9 @@ async function startWordChain({ guildId, channelId, actorId, seed = DEFAULT_SEED
 
     api.run(
       `INSERT INTO text_chain_sessions
-       (guild_id, channel_id, status, current_word, last_word, last_user_id, revision, started_by, created_at, updated_at)
-       VALUES (?, ?, 'active', ?, ?, NULL, 0, ?, ?, ?)`,
-      [normalizedGuildId, normalizedChannelId, checkedSeed.word, checkedSeed.word, normalizedActorId, timestamp, timestamp]
+       (guild_id, channel_id, status, corpus_version, current_word, last_word, last_user_id, revision, started_by, created_at, updated_at)
+       VALUES (?, ?, 'active', ?, ?, ?, NULL, 0, ?, ?, ?)`,
+      [normalizedGuildId, normalizedChannelId, corpusVersion, checkedSeed.word, checkedSeed.word, normalizedActorId, timestamp, timestamp]
     );
     const session = mapSession(api.get('SELECT * FROM text_chain_sessions WHERE id = last_insert_rowid()'));
     setWordChainFeatureSetting(api, normalizedGuildId, { enabled: true, channelId: normalizedChannelId, now: timestamp });
@@ -186,7 +199,6 @@ async function acceptWordChainMessage({ guildId, channelId, messageId, userId, c
   const normalizedMessageId = requireId(messageId, 'messageId');
   const normalizedUserId = requireId(userId, 'userId');
   const normalizedExpectedChannelId = requireId(expectedChannelId, 'expectedChannelId');
-  const checkedWord = validateWord(content);
   const timestamp = new Date(now).toISOString();
 
   return withCoinTransaction((api) => {
@@ -207,6 +219,8 @@ async function acceptWordChainMessage({ guildId, channelId, messageId, userId, c
         message: anotherSession ? '這一局文字接龍不在這個頻道進行喔。' : '目前沒有進行中的文字接龍。',
       };
     }
+    const sessionVersion = requireSessionCorpusVersion(session.corpus_version);
+    const checkedWord = validateWord(content, sessionVersion);
     if (!checkedWord.ok) return checkedWord;
     if (session.last_user_id === normalizedUserId) {
       return { ok: false, code: 'SAME_USER', message: '要輪到其他人接詞才行喔。' };
@@ -227,7 +241,7 @@ async function acceptWordChainMessage({ guildId, channelId, messageId, userId, c
     const usedWords = new Set(
       api.all('SELECT word FROM text_chain_entries WHERE session_id = ?', [session.id]).map((entry) => entry.word)
     );
-    const completed = !getSuccessors(checkedWord.word).some((candidate) => !usedWords.has(candidate));
+    const completed = !getSuccessors(checkedWord.word, sessionVersion).some((candidate) => !usedWords.has(candidate));
     api.run(
       `UPDATE text_chain_sessions
        SET current_word = ?, last_word = ?, last_user_id = ?, revision = revision + 1, updated_at = ?,

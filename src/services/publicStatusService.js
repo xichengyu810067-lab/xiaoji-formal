@@ -169,8 +169,6 @@ async function buildPublicStatusSnapshot(client, { now = new Date(), healthReade
     databaseAvailable: data.healthAvailable && data.usageAvailable,
     now: safeNow,
   });
-  const ping = Number(client?.ws?.ping);
-
   return {
     schemaVersion: PUBLIC_STATUS_SCHEMA_VERSION,
     updatedAt: safeNow.toISOString(),
@@ -178,17 +176,15 @@ async function buildPublicStatusSnapshot(client, { now = new Date(), healthReade
     bot: {
       status: getOverallBotStatus(client, features),
       version: packageJson.version,
-      latencyMs: Number.isFinite(ping) && ping >= 0 ? Math.round(ping) : null,
+      latencyMs: null,
     },
     guilds: {
-      adoptedCount: Number.isSafeInteger(client?.guilds?.cache?.size) && client.guilds.cache.size >= 0
-        ? client.guilds.cache.size
-        : null,
+      adoptedCount: null,
     },
     usage: {
       date: data.usageDate,
-      todayInteractions: data.usageAvailable ? getTodayInteractionCount(data.usageRows) : null,
-      available: data.usageAvailable,
+      todayInteractions: null,
+      available: false,
     },
     summary: summarizeFeatures(features),
     features,

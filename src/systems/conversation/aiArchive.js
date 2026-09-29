@@ -429,9 +429,18 @@ function openArchive({ filePath = getArchivePath(), initialize = null } = {}) {
     return { rows: page, nextCursor: rows.length > size ? Number(page.at(-1).id) : null };
   }
 
-  function listRecentSummaries(userId, limit = 12) {
+  function listRecentSummaries(userId, limit = 12, scope = null) {
     const owner = requiredText(userId, 'userId');
     if (!Number.isInteger(limit) || limit < 1 || limit > 30) throw new Error('Invalid summary limit.');
+    if (scope) {
+      const channelId = requiredText(scope.channelId, 'channelId');
+      if (scope.guildId) {
+        return db.prepare(`SELECT * FROM private_summaries WHERE user_id = ? AND guild_id = ? AND channel_id = ?
+          ORDER BY happened_at DESC, id DESC LIMIT ?`).all(owner, requiredText(scope.guildId, 'guildId'), channelId, limit);
+      }
+      return db.prepare(`SELECT * FROM private_summaries WHERE user_id = ? AND guild_id IS NULL AND channel_id = ?
+        ORDER BY happened_at DESC, id DESC LIMIT ?`).all(owner, channelId, limit);
+    }
     return db.prepare(`SELECT * FROM private_summaries WHERE user_id = ?
       ORDER BY happened_at DESC, id DESC LIMIT ?`).all(owner, limit);
   }

@@ -16,15 +16,6 @@
     return configured.replace(/\/$/, '');
   }
 
-  function safeInteger(value) {
-    return Number.isSafeInteger(value) && value >= 0 ? value : null;
-  }
-
-  function formatCount(value) {
-    const safe = safeInteger(value);
-    return safe === null ? '—' : new Intl.NumberFormat('zh-TW').format(safe);
-  }
-
   function normalizeStatus(value) {
     return Object.hasOwn(STATUS_COPY, value) ? value : 'unknown';
   }
@@ -38,8 +29,7 @@
   }
 
   function renderOverview(payload) {
-    const guilds = document.querySelector('[data-metric="guilds"]');
-    const interactions = document.querySelector('[data-metric="interactions"]');
+    const version = document.querySelector('[data-metric="version"]');
     const statusLabel = document.querySelector('[data-metric="status"]');
     const statusDetail = document.querySelector('[data-metric="status-detail"]');
     const freshness = document.querySelector('[data-freshness]');
@@ -48,8 +38,8 @@
 
     const status = normalizeStatus(payload?.bot?.status);
     const copy = STATUS_COPY[status];
-    guilds.textContent = formatCount(payload?.guilds?.adoptedCount);
-    interactions.textContent = formatCount(payload?.usage?.todayInteractions);
+    version.textContent = typeof payload?.bot?.version === 'string' && /^\d+\.\d+\.\d+$/u.test(payload.bot.version)
+      ? `v${payload.bot.version}` : '—';
     statusLabel.textContent = copy.label;
     statusDetail.textContent = copy.detail;
     setStatusClass(statusLabel, status);

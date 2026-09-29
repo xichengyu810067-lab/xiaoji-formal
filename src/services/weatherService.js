@@ -1,5 +1,21 @@
 const OPENWEATHER_URL = 'https://api.openweathermap.org/data/2.5/weather';
 const FORECAST_URL = 'https://api.openweathermap.org/data/2.5/forecast';
+const { resolveWeatherLocation, normalizeTaiwanName, TAIWAN_DISTRICTS } = require('../utils/weatherNLP');
+
+// CWA's official county-level seven-day forecast datasets.
+// https://opendata.cwa.gov.tw/dist/opendata-swagger.html
+const CWA_WEEK_DATASETS = {
+  宜蘭縣: 'F-D0047-003', 桃園市: 'F-D0047-007', 新竹縣: 'F-D0047-011',
+  苗栗縣: 'F-D0047-015', 彰化縣: 'F-D0047-019', 南投縣: 'F-D0047-023',
+  雲林縣: 'F-D0047-027', 嘉義縣: 'F-D0047-031', 屏東縣: 'F-D0047-035',
+  臺東縣: 'F-D0047-039', 花蓮縣: 'F-D0047-043', 澎湖縣: 'F-D0047-047',
+  基隆市: 'F-D0047-051', 新竹市: 'F-D0047-055', 嘉義市: 'F-D0047-059',
+  臺北市: 'F-D0047-063', 高雄市: 'F-D0047-067', 新北市: 'F-D0047-071',
+  臺中市: 'F-D0047-075', 臺南市: 'F-D0047-079', 連江縣: 'F-D0047-083',
+  金門縣: 'F-D0047-087',
+};
+const CWA_ALL_COUNTIES_WEEK = 'F-D0047-091';
+const cwaCache = new Map();
 
 class WeatherError extends Error {
   constructor(message, code) {
@@ -13,7 +29,7 @@ function requireWeatherApiKey() {
   const apiKey = process.env.OPENWEATHER_API_KEY;
 
   if (!apiKey) {
-    throw new WeatherError('尚未設定 OPENWEATHER_API_KEY。', 'missing_api_key');
+    throw new WeatherError('天氣資料暫時無法查詢，請稍後再試。', 'missing_api_key');
   }
 
   return apiKey;
@@ -21,6 +37,200 @@ function requireWeatherApiKey() {
 
 function formatTemperature(value) {
   return `${Math.round(value)}°C`;
+}
+
+function formatOptionalTemperature(value) {
+  return value === null ? '無資料' : formatTemperature(value);
+}
+
+function numericValue(value) {
+  if (value === '' || value == null || value === '-') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function firstValue(time) {
+  const item = Array.isArray(time?.elementValue) ? time.elementValue[0] : time?.elementValue;
+  return item?.value ?? null;
+}
+
+function windValues(time) {
+  const values = Array.isArray(time?.elementValue) ? time.elementValue : [];
+  let direction = null;
+  let speed = null;
+  for (const item of values) {
+    const value = String(item?.value || '').trim();
+    const unit = String(item?.measures || '').toLowerCase();
+    if (!value || value === '-') continue;
+    if (/公尺\/秒|m\/s/.test(unit)) speed = numericValue(value);
+    else if (/風向|方位/.test(unit)) direction = value;
+  }
+  // Some responses omit measures; a numeric value is speed, text is direction.
+  if (direction === null && speed === null) {
+    for (const item of values) {
+      const value = String(item?.value || '').trim();
+      if (!value || value === '-') continue;
+      const numeric = numericValue(value);
+      if (numeric !== null && speed === null) speed = numeric;
+      else if (numeric === null && direction === null) direction = value;
+    }
+  }
+  return { direction, speed };
+}
+
+function parseCwaTime(value) {
+  if (value instanceof Date) return value;
+  const text = String(value || '');
+  // CWA JSON may omit the offset while still expressing Taiwan local time.
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) {
+    return new Date(`${text.replace(' ', 'T')}+08:00`);
+  }
+  return new Date(text);
+}
+
+function dayKey(value) {
+  const date = parseCwaTime(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const field = (name) => parts.find((part) => part.type === name)?.value;
+  return `${field('year')}-${field('month')}-${field('day')}`;
+}
+
+function elementIntervals(location, names) {
+  const element = location.weatherElement?.find((item) => names.includes(item.elementName));
+  return Array.isArray(element?.time) ? element.time : [];
+}
+
+function dailyCwaForecast(location) {
+  const byDay = new Map();
+  const fields = [
+    ['description', ['Wx', '天氣現象', 'WeatherDescription', '天氣預報綜合描述']],
+    ['min', ['MinT', '最低溫度']],
+    ['max', ['MaxT', '最高溫度']],
+    ['apparent', ['MaxAT', '最高體感溫度', 'AT', '體感溫度']],
+    ['humidity', ['RH', '相對濕度']],
+    ['wind', ['Wind', '風向風速']],
+    ['pop', ['PoP', 'PoP12h', '降雨機率']],
+  ];
+  for (const [field, names] of fields) {
+    for (const interval of elementIntervals(location, names)) {
+      const key = dayKey(interval.startTime || interval.dataTime);
+      if (!key) continue;
+      const item = byDay.get(key) || { date: key, min: null, max: null, pop: null };
+      const value = firstValue(interval);
+      if (field === 'wind') {
+        const wind = windValues(interval);
+        if (wind.direction && !item.windDirection) item.windDirection = wind.direction;
+        if (wind.speed !== null && item.windSpeed == null) item.windSpeed = wind.speed;
+      } else if (['min', 'max', 'apparent', 'humidity', 'pop'].includes(field)) {
+        const number = numericValue(value);
+        if (number !== null) {
+          if (field === 'min') item.min = item.min === null ? number : Math.min(item.min, number);
+          else if (field === 'max') item.max = item.max === null ? number : Math.max(item.max, number);
+          else if (field === 'pop') item.pop = item.pop === null ? number : Math.max(item.pop, number);
+          else item[field] = number;
+        }
+      } else if (value && value !== '-' && !item[field]) {
+        item[field] = String(value);
+      }
+      byDay.set(key, item);
+    }
+  }
+  return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 7);
+}
+
+async function fetchCwaDataset(datasetId) {
+  const cached = cwaCache.get(datasetId);
+  if (cached && cached.expires > Date.now()) return cached.data;
+  const key = process.env.CWA_API_KEY;
+  if (!key) throw new WeatherError('臺灣天氣資料暫時無法查詢，請稍後再試。', 'missing_api_key');
+  const url = new URL(`https://opendata.cwa.gov.tw/api/v1/rest/datastore/${datasetId}`);
+  url.searchParams.set('format', 'JSON');
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: key },
+      signal: AbortSignal.timeout(15000),
+      redirect: 'error',
+    });
+  } catch {
+    throw new WeatherError('臺灣天氣資料暫時無法查詢，請稍後再試。', 'provider_error');
+  }
+  if (!response.ok) {
+    throw new WeatherError('臺灣天氣資料暫時無法查詢，請稍後再試。', 'provider_error');
+  }
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new WeatherError('臺灣天氣資料暫時無法查詢，請稍後再試。', 'provider_error');
+  }
+  if (String(data.success).toLowerCase() === 'false' || !Array.isArray(data.records?.locations)) {
+    throw new WeatherError('臺灣天氣資料暫時無法查詢，請稍後再試。', 'provider_error');
+  }
+  cwaCache.set(datasetId, { data, expires: Date.now() + 15 * 60 * 1000 });
+  return data;
+}
+
+async function getTaiwanWeather(resolved, time) {
+  const datasetId = resolved.district
+    ? CWA_WEEK_DATASETS[resolved.city]
+    : CWA_ALL_COUNTIES_WEEK;
+  const data = await fetchCwaDataset(datasetId);
+  const groups = data.records.locations;
+  const targetName = resolved.district || resolved.city;
+  const matchesName = (actual, expected) => normalizeTaiwanName(actual) === expected;
+  const districtCode = resolved.district
+    ? TAIWAN_DISTRICTS.find((entry) => entry.county === resolved.city && entry.district === resolved.district)?.districtCode
+    : null;
+  const matchesLocation = (item) => (
+    (districtCode && String(item.geocode || '') === districtCode)
+    || matchesName(item.locationName, targetName)
+  );
+  const group = groups.find((entry) => matchesName(entry.locationsName, resolved.city))
+    || groups.find((entry) => entry.location?.some(matchesLocation))
+    || (resolved.district && groups.length === 1 ? groups[0] : null);
+  const location = group?.location?.find(matchesLocation);
+  if (!location) {
+    throw new WeatherError('目前查不到這個地點的天氣資料，請稍後再試。', 'provider_error');
+  }
+  const days = dailyCwaForecast(location);
+  if (!days.length) throw new WeatherError('目前查不到這個地點的天氣資料，請稍後再試。', 'provider_error');
+  const issuedAt = group.datasetInfo?.issueTime || data.records.datasetInfo?.issueTime || null;
+  const issueDate = issuedAt ? parseCwaTime(issuedAt) : null;
+  const sourceLabel = issueDate && !Number.isNaN(issueDate.getTime())
+    ? `中央氣象署預報，發布於 ${issueDate.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}（台灣時間）`
+    : '中央氣象署預報（發布時間未提供）';
+  if (time === 'week') {
+    return {
+      city: resolved.location, isWeek: true, forecastDays: days.length,
+      sourceLabel,
+      weekSummary: days.map((day) => {
+        const rain = day.pop === null ? '降雨機率無資料' : `降雨機率 ${day.pop}%`;
+        return `${day.date.slice(5).replace('-', '/')}：${day.description || '天氣狀況無資料'}，${formatOptionalTemperature(day.min)}～${formatOptionalTemperature(day.max)}，${rain}`;
+      }).join('\n'),
+    };
+  }
+  const offset = time === 'tomorrow' ? 1 : time === 'day_after_tomorrow' ? 2 : 0;
+  const today = dayKey(new Date());
+  const target = dayKey(new Date(new Date(today + 'T00:00:00+08:00').getTime() + offset * 86400000));
+  const day = days.find((entry) => entry.date === target);
+  if (!day) throw new WeatherError('該日期目前沒有可用的預報。', 'forecast_unavailable');
+  return {
+    city: resolved.location, description: day.description || '天氣狀況無資料',
+    temperature: formatOptionalTemperature(day.max),
+    tempMin: formatOptionalTemperature(day.min),
+    tempMax: formatOptionalTemperature(day.max),
+    feelsLike: formatOptionalTemperature(day.apparent ?? null),
+    humidity: day.humidity == null ? '無資料' : `${day.humidity}%`,
+    windSpeed: day.windSpeed == null ? '無資料' : `${day.windSpeed} m/s`,
+    windDirection: day.windDirection || null,
+    pop: day.pop == null ? null : `${day.pop}%`,
+    tempMinRaw: day.min, tempMaxRaw: day.max, popRaw: day.pop,
+    forecastPeriod: day.date, sourceLabel,
+  };
 }
 
 function getApiLocationMapping() {
@@ -67,7 +277,7 @@ async function fetchWeatherApi(url, city) {
 
   if (response.status === 401) {
     throw new WeatherError(
-      'OpenWeather API key 無效或尚未啟用。請確認 .env 的 OPENWEATHER_API_KEY 是有效 key，儲存後重新啟動小吉；新 key 有時需要等待幾分鐘才會生效。',
+      '天氣資料暫時無法查詢，請稍後再試。',
       'unauthorized'
     );
   }
@@ -77,7 +287,7 @@ async function fetchWeatherApi(url, city) {
   }
 
   if (!response.ok) {
-    throw new WeatherError(`OpenWeather 回應錯誤：HTTP ${response.status}`, 'provider_error');
+    throw new WeatherError('天氣資料暫時無法查詢，請稍後再試。', 'provider_error');
   }
 
   return await response.json();
@@ -153,7 +363,7 @@ async function getForecastWeather(city, time) {
     pop: `${Math.round(popRaw * 100)}%`,
     tempMinRaw,
     tempMaxRaw,
-    popRaw,
+    popRaw: popRaw * 100,
   };
 }
 
@@ -190,11 +400,17 @@ async function getWeekWeather(city) {
   return {
     city: `${data.city.name}${data.city.country ? `, ${data.city.country}` : ''}`,
     isWeek: true,
+    forecastDays: days.length,
     weekSummary: days.join('\n'),
   };
 }
 
 async function getWeather(city, time = 'today') {
+  const resolved = resolveWeatherLocation(city);
+  if (resolved.invalid || resolved.ambiguous) {
+    throw new WeatherError('請提供正確的縣市及行政區名稱。', 'city_not_found');
+  }
+  if (resolved.city) return getTaiwanWeather(resolved, time);
   if (time === 'week') {
     return getWeekWeather(city);
   }
@@ -208,4 +424,6 @@ module.exports = {
   WeatherError,
   getCurrentWeather,
   getWeather,
+  dailyCwaForecast,
+  CWA_WEEK_DATASETS,
 };

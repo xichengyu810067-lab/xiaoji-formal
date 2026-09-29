@@ -4,7 +4,7 @@ const commandGroups = [
   {
     title: '一般與個人化',
     commands: [
-      ['/ping', '查看小吉延遲'],
+      ['/ping', '確認小吉目前在線'],
       ['/fortune', '抽一則小吉籤'],
       ['/roll sides count', '擲骰子'],
       ['/weather city', '查詢城市或臺灣縣市行政區天氣'],
@@ -15,7 +15,7 @@ const commandGroups = [
       ['/status', '查看小吉狀態'],
       ['/chat-style current/set', '查看或永久變更跨伺服器對話風格'],
       ['/romance start/stop/status', '開啟、關閉或查看跨伺服器文字戀愛模式'],
-      ['/about', '查看專案資訊'],
+      ['/about', '查看小吉的公開資訊'],
       ['/help', '顯示指令說明'],
     ],
   },

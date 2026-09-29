@@ -3,6 +3,7 @@ const path = require('node:path');
 const { getGuildConfig } = require('../../utils/guildConfig');
 const logger = require('../../utils/logger');
 const { archivePublicMessage, getArchive, isArchiveCaptureEnabled } = require('../../services/aiArchiveService');
+const { captureProofFor, everyoneCanRead, hasPublicCaptureProof, isCurrentPublicChannel } = require('./publicVisibility');
 
 const defaultMemoryPath = path.join(__dirname, '..', '..', '..', 'data', 'xiaojiMemory.json');
 const MAX_PRIVATE_RECORDS_PER_USER = 100;
@@ -126,6 +127,8 @@ function recordPublicMessage(message) {
   if (!message.guildId || !message.channelId || message.author?.bot) {
     return null;
   }
+  const captureProof = captureProofFor(message);
+  if (!captureProof || !isCurrentPublicChannel(message)) return null;
 
   const content = normalizeText(message.content);
 
@@ -144,6 +147,7 @@ function recordPublicMessage(message) {
     timestamp: new Date(message.createdTimestamp || Date.now()).toISOString(),
     visibility: 'public',
     source: 'public_channel',
+    captureProof,
   };
 
   if (!archivePublicMessage(message, message.content)) {
@@ -216,23 +220,28 @@ function boundedInteger(value, fallback, min, max) {
 function getPrivateMemoryContext(
   userId,
   {
+    guildId = null,
+    channelId = null,
     maxRecords = DEFAULT_AI_PRIVATE_CONTEXT_RECORDS,
     maxCharacters = DEFAULT_AI_PRIVATE_CONTEXT_CHARACTERS,
   } = {}
 ) {
-  if (!userId) {
+  // Guild 頻道可能由私人改為公開；舊摘要沒有擷取時的可見性證據。
+  if (!userId || !channelId || guildId) {
     return '';
   }
 
   const recordLimit = boundedInteger(maxRecords, DEFAULT_AI_PRIVATE_CONTEXT_RECORDS, 1, 30);
   const characterLimit = boundedInteger(maxCharacters, DEFAULT_AI_PRIVATE_CONTEXT_CHARACTERS, 200, 6000);
   const records = isArchiveCaptureEnabled()
-    ? getArchive().listRecentSummaries(userId, recordLimit).map((record) => ({
+    ? getArchive().listRecentSummaries(userId, recordLimit, { guildId, channelId }).map((record) => ({
       displayName: '這位使用者',
       userContentSummary: record.user_summary,
       assistantContentSummary: record.assistant_summary,
     })).reverse()
-    : getPrivateRecords(userId).slice(0, recordLimit).reverse();
+    : getPrivateRecords(userId).filter((record) =>
+      (record.guildId || null) === (guildId || null) && record.channelId === channelId
+    ).slice(0, recordLimit).reverse();
   const formatted = records
     .map((record) => {
       const userSummary = summarizeContent(record.userContentSummary, 180);
@@ -430,8 +439,10 @@ function findPrivateOtherMemory({ requesterId, targetUserId, targetText, keyword
   });
 }
 
-function findPublicMemory({ guildId, channelId, targetUserId, targetText, keyword, includeGuildWide }) {
+function findPublicMemory({ guildId, channelId, targetUserId, targetText, keyword, includeGuildWide,
+  canReadRecord = () => false }) {
   return getPublicRecords({ guildId, channelId, includeGuildWide }).find((record) => {
+    if (!canReadRecord(record)) return false;
     if (targetUserId || targetText) {
       if (!matchesTarget(record, targetText, targetUserId)) {
         return false;
@@ -445,6 +456,16 @@ function findPublicMemory({ guildId, channelId, targetUserId, targetText, keywor
 function formatPublicFound(record, keyword) {
   const what = keyword ? `說過${keyword}` : `說過「${record.contentSummary}」`;
   return `有喔，${record.displayName} 剛剛在${record.channelId ? '這個頻道' : '伺服器'}${what}。`;
+}
+
+function canDisclosePublicRecord(record, message) {
+  if (record.visibility !== 'public' || record.source !== 'public_channel' ||
+    !hasPublicCaptureProof(record) || !record.channelId || record.guildId !== message.guildId) return false;
+  const everyone = message.guild?.roles?.everyone;
+  if (!everyoneCanRead(message.channel, everyone)) return false;
+  const source = record.channelId === message.channelId
+    ? message.channel : message.guild?.channels?.cache?.get?.(record.channelId);
+  return everyoneCanRead(source, everyone);
 }
 
 function formatPrivateFound(record, keyword) {
@@ -463,6 +484,7 @@ function answerMemoryQuery({ text, message }) {
   const mentionedUserId = getMentionedUserId(text);
   const keyword = extractKeyword(text);
   const targetText = extractTargetText(text, keyword);
+  const canReadRecord = (record) => canDisclosePublicRecord(record, message);
   const isSelf = asksSelf(text) && !mentionedUserId && !targetText;
   const wholeChannel = asksWholeChannel(text) && !mentionedUserId && !targetText && !isSelf;
 
@@ -470,19 +492,18 @@ function answerMemoryQuery({ text, message }) {
     return '這可能屬於他跟我的私人對話，我不能直接公開喔。';
   }
 
+  if (/(?:私下|私人|私訊|dm|DM)/.test(text)) {
+    return '私人對話紀錄不能在一般聊天頻道查閱。';
+  }
+
   if (isSelf) {
-    const privateRecord = findPrivateSelfMemory({ userId: requesterId, keyword });
-
-    if (privateRecord) {
-      return formatPrivateFound(privateRecord, keyword);
-    }
-
     const publicRecord = findPublicMemory({
       guildId,
       channelId,
       targetUserId: requesterId,
       keyword,
       includeGuildWide: false,
+      canReadRecord,
     });
 
     if (publicRecord) {
@@ -493,7 +514,7 @@ function answerMemoryQuery({ text, message }) {
   }
 
   if (wholeChannel) {
-    const publicRecord = findPublicMemory({ guildId, channelId, keyword, includeGuildWide: false });
+    const publicRecord = findPublicMemory({ guildId, channelId, keyword, includeGuildWide: false, canReadRecord });
 
     if (publicRecord) {
       return formatPublicFound(publicRecord, keyword);
@@ -513,6 +534,7 @@ function answerMemoryQuery({ text, message }) {
       targetText: target,
       keyword,
       includeGuildWide: false,
+      canReadRecord,
     });
 
     if (sameChannelRecord) {
@@ -527,15 +549,12 @@ function answerMemoryQuery({ text, message }) {
         targetText: target,
         keyword,
         includeGuildWide: true,
+        canReadRecord,
       });
 
       if (guildRecord) {
         return formatPublicFound(guildRecord, keyword);
       }
-    }
-
-    if (findPrivateOtherMemory({ requesterId, targetUserId, targetText: target, keyword })) {
-      return '這可能屬於他跟我的私人對話，我不能直接公開喔。';
     }
 
     return '我目前沒有在可查的公開紀錄中找到，不代表真的沒有發生喔。';

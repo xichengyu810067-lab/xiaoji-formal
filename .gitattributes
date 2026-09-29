@@ -15,6 +15,10 @@
 src/data/.gitkeep text eol=lf
 src/games/assets/fonts/Cubic_11-OFL.txt text eol=lf
 src/games/assets/fonts/NotoSansSymbols-OFL.txt text eol=lf
+assets/word-chain/*.txt text eol=lf
+assets/word-chain/*.pdf binary
+scripts/build-word-chain-lexicon.py text eol=lf
+scripts/requirements-word-chain.txt text eol=lf
 
 *.png binary
 *.jpg binary

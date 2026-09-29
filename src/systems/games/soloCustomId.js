@@ -2,7 +2,7 @@ const { GameError } = require('./soloGameError');
 
 const PREFIX = 'solo|1|';
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
-const VERBS = new Set(['move.t', 'move.n', 'move.s', 'refresh']);
+const VERBS = new Set(['move.t', 'move.n', 'move.s', 'move.sb', 'refresh']);
 
 function buildSoloCustomId({ sessionId, revision, verb }) {
   if (!ID_PATTERN.test(String(sessionId || '')) || !Number.isSafeInteger(revision) || revision < 0 ||
