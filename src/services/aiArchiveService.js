@@ -159,6 +159,7 @@ module.exports = {
   closeArchiveForTests,
   configureArchivePathResolver,
   getArchive,
+  getArchivePath,
   isArchiveCaptureEnabled,
   markArchivePartialDelivery,
   preflightArchive,
