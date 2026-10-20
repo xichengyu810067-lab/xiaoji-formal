@@ -156,7 +156,7 @@ test('status reads registrations and ledgers and changes nothing at all', async 
   assert.deepEqual(tree(env.dataRoot), before);
 });
 
-// The answers the README upgrade steps (升級與資料位置) rely on.
+// The answers the operations guide upgrade steps (升級與資料位置) rely on.
 test('status before the first start: eight absent purposes beside the coin database; inside the program folder refused',
   async (t) => {
     const env = await environment(t, 'status-upgrade');
@@ -192,10 +192,10 @@ test('status before the first start: eight absent purposes beside the coin datab
     assert.deepEqual(tree(env.root), before);
   });
 
-// The README upgrade steps never let the old and the new version run together: every branch
+// The operations guide upgrade steps never let the old and the new version run together: every branch
 // that goes on to the start stops the bot first.
-test('the README upgrade steps stop the bot before every start', () => {
-  const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8').replace(/\r\n/gu, '\n');
+test('the operations guide upgrade steps stop the bot before every start', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '..', 'docs', 'OPERATIONS.md'), 'utf8').replace(/\r\n/gu, '\n');
   const start = readme.indexOf('\n### 升級與資料位置\n');
   assert.ok(start >= 0);
   const lines = readme.slice(start, readme.indexOf('\n### ', start + 1)).split('\n');

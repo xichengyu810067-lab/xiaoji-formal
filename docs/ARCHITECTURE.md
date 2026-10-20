@@ -526,13 +526,13 @@ node scripts/check-boundaries.js --rule R6    # 只跑一條規則（可重複�
 1. 建立 `src/commands/<指令名>.js`，匯出 `data`（`SlashCommandBuilder`）與 `execute`；需要自動完成再加 `autocomplete`。`src/loadCommands.js` 會自動載入這個目錄下所有 `.js`；指令名不可重複，也不可和私有擴充的指令同名。
 2. 在 `website/commandCatalog.js` 的指令表加一列：名稱、說明（必須和 builder 的 description 一字不差）、群組（`general`、`economy`、`community`）、對象（`public`、`admin`、`owner`）、子指令清單、是否列在 `/help`。已經移除的指令名稱放在同一個檔案的 `REMOVED_COMMANDS`，不能再被使用。
 3. 重新產生 `docs/COMMANDS.md`：`node scripts/render-command-docs.js`。這個檔案由程式產生，不要手動編輯。
-4. 若指令列在 `/help`，`README.md` 的「公開指令」一節也要提到它；`npm run check` 會檢查每個 `/help` 列出的指令都在那一節出現。
+4. 若指令列在 `/help`，`docs/OPERATIONS.md` 的「公開指令」一節也要提到它；`npm run check` 會檢查每個 `/help` 列出的指令都在那一節出現。
 5. 需要權限的指令（`admin`、`owner`）要設預設權限，並在 `execute` 內再檢查一次。公開核心不含擁有者專用的整個指令；這類管理指令由可選擴充提供，只部署到擁有者伺服器（`XIAOJI_OWNER_GUILD_ID`），見 [MANAGEMENT_ISOLATION.md](MANAGEMENT_ISOLATION.md)。對應的測試是 `test/commandDefaultPermissions.test.js` 與 `test/subcommandAccess.test.js`。
 6. 邏輯放進對應的系統，指令檔只做「讀參數、檢查權限、呼叫、回覆」（R1）。
 7. 回覆如果會把多筆儲存的資料串成一則，用 `fitListText`（第 2.5 節），並在 `test/support/longListFixtures.js` 的 `SITES` 補一筆、在 `test/fixtures/longListReplies.golden.json` 補它排得下時的標準回覆，`test/longListReplies.test.js` 才會檢查它。
 8. 全指令掃描測試 `test/allSlashCommandsSweep.test.js` 會自動涵蓋新指令（見第 9.1 節）：它列出的路徑必須剛好等於指令目錄，並用擁有者、一般成員與私訊各跑一遍。新指令離線時跑不起來，要在那個檔案的 `EXCLUDED_PATHS` 登記並寫理由；會連網的指令列在 `NETWORK_COMMANDS`；結果和指令目錄的權限不同的執行，列在 `RUN_EXCEPTIONS` 並寫理由；要特定選項值才走得到的路徑，補 `PATH_OPTION_OVERRIDES`。
 9. 新增測試檔並登記匯出清單。
-10. 驗證：`npm run check`，以及 `node --test test/commandCatalog.test.js test/commandDocs.test.js test/allSlashCommandsSweep.test.js` 和你自己的測試。要讓 Discord 看到新指令，還需要用 `npm run deploy` 部署（步驟見 README 的「部署與驗證」）。
+10. 驗證：`npm run check`，以及 `node --test test/commandCatalog.test.js test/commandDocs.test.js test/allSlashCommandsSweep.test.js` 和你自己的測試。要讓 Discord 看到新指令，還需要用 `npm run deploy` 部署（步驟見 docs/OPERATIONS.md 的「部署與驗證」）。
 
 文件與目錄的同步：`docs/USER_GUIDE.md`、官網文字與 AI 對話的公開指令清單，都只能提到目錄裡存在的指令；`test/commandDocs.test.js` 與 `test/aiPublicCommandList.test.js` 會檢查。
 
@@ -587,7 +587,7 @@ node scripts/check-boundaries.js --rule R6    # 只跑一條規則（可重複�
 
 ## 7. 受保護的安全副作用
 
-帳本用途（目前 8 個，重算：counts）都會在 Discord 上留下無法收回的結果。小吉替每個用途各保留一份安全帳本，記下每個事件是否已開始送出與送出的結果，所以當機、重新啟動或網路中斷之後既不重送，也不會把沒送出的事件當成已送出。運作原則、檔案位置、備份與異常處理都寫在 `README.md` 的「受保護的副作用與安全帳本」一節，這裡不重複。
+帳本用途（目前 8 個，重算：counts）都會在 Discord 上留下無法收回的結果。小吉替每個用途各保留一份安全帳本，記下每個事件是否已開始送出與送出的結果，所以當機、重新啟動或網路中斷之後既不重送，也不會把沒送出的事件當成已送出。運作原則、檔案位置、備份與異常處理都寫在 `docs/OPERATIONS.md` 的「受保護的副作用與安全帳本」一節，這裡不重複。
 
 | 副作用 | 帳本用途 | 執行器 | 事件從哪裡送進來 | 起算點（cutover） |
 | --- | --- | --- | --- | --- |
@@ -596,7 +596,7 @@ node scripts/check-boundaries.js --rule R6    # 只跑一條規則（可重複�
 | 扣薪通知 | `work.penalty.announce` | `PublicSideEffectRuntime`；來源證明 `workPenaltySource.js` | `src/systems/work/workService.js` | 帳本建立的時間 |
 | 提醒私訊 | `work.reminder.dm.prepare`、`work.reminder.dm.send` | `PublicSideEffectRuntime`；來源證明 `workReminderSource.js` | `src/systems/work/workService.js`（記帳在 `workReminderAccounting.js`） | 帳本建立的時間 |
 | 自動離群（休眠） | `audit.guild.leave` | `PublicSideEffectRuntime` | 沒有：小吉不再審核伺服器，沒有任何程式為這個用途簽發授權；用途與帳本保留 | 沒有起算點；執行環境裡的上限（每小時最多 3 個、每 24 小時最多 10 個）休眠中不會被用到 |
-| 擁有者私訊 | `owner-safety` | `OwnerSafetyNotifier`（`ownerSafetyNotifier.js`）；訊息只能來自固定目錄 `src/platform/safetyEventCatalog.js` | 對話的安全事件（`src/systems/conversation/safetyEvents.js`）、帳本警示（`ledgerAlerts.js`），以及四個擁有者事件代碼 `OWNER_EVENT_SECURITY_ALERT`（安全警示：`reportSecurityAlert`，由對話流程、輸出清理、防洗頻、管理與擁有者指令的權限檢查、管理員查詢非成員、出口防護層擋下請求等地方發出，見 README「安全警示」）、`OWNER_EVENT_MEMBER_LEFT`（`src/events/guildMemberRemove.js`，只限擁有者伺服器）、`OWNER_EVENT_GUILD_JOINED`（`src/events/guildCreate.js`，小吉加入任何新伺服器時只通知、不審核）、`OWNER_EVENT_RECOVERED`（經 `safetyEventCatalog.js` 送入；生產者是 `src/systems/safety/outageNotice.js`，見本節末的「突發停運恢復後的通知」） | 沒有起算點 |
+| 擁有者私訊 | `owner-safety` | `OwnerSafetyNotifier`（`ownerSafetyNotifier.js`）；訊息只能來自固定目錄 `src/platform/safetyEventCatalog.js` | 對話的安全事件（`src/systems/conversation/safetyEvents.js`）、帳本警示（`ledgerAlerts.js`），以及四個擁有者事件代碼 `OWNER_EVENT_SECURITY_ALERT`（安全警示：`reportSecurityAlert`，由對話流程、輸出清理、防洗頻、管理與擁有者指令的權限檢查、管理員查詢非成員、出口防護層擋下請求等地方發出，見 docs/OPERATIONS.md「安全警示」）、`OWNER_EVENT_MEMBER_LEFT`（`src/events/guildMemberRemove.js`，只限擁有者伺服器）、`OWNER_EVENT_GUILD_JOINED`（`src/events/guildCreate.js`，小吉加入任何新伺服器時只通知、不審核）、`OWNER_EVENT_RECOVERED`（經 `safetyEventCatalog.js` 送入；生產者是 `src/systems/safety/outageNotice.js`，見本節末的「突發停運恢復後的通知」） | 沒有起算點 |
 
 幾個結構上的重點：
 
@@ -606,11 +606,11 @@ node scripts/check-boundaries.js --rule R6    # 只跑一條規則（可重複�
 - 需要送出的服務不載入執行器，而是經由 `src/platform/publicEffectAdapter.js` 取得這個行程的執行器與簽發者；授權由 `src/platform/publicEffectGrant.js` 管。這是為了讓服務不必載入安全系統。
 - 帳本放在資料根底下的 `safety/` 與 `safety-witness/`，位置的決定方式見第 10 節。
 
-動到帳本用途時會碰到的地方：用途 id 寫在 `src/systems/safety/ledgerLayout.js` 的 `SAFETY_LEDGER_PURPOSES` 與 `src/systems/safety/sideEffectLedger.js` 的 `PUBLIC_PURPOSES`；公開用途送出的請求內容寫在 `publicSideEffectRuntime.js` 的 `PURPOSES`；來源證明模組、`publicEffectGrant.js` 的授權、`README.md` 的用途表與 `.env.example` 的說明都要同步。這會改變資料根裡的檔案配置與啟動時的三方核對，動手前先讀 README 對應章節。
+動到帳本用途時會碰到的地方：用途 id 寫在 `src/systems/safety/ledgerLayout.js` 的 `SAFETY_LEDGER_PURPOSES` 與 `src/systems/safety/sideEffectLedger.js` 的 `PUBLIC_PURPOSES`；公開用途送出的請求內容寫在 `publicSideEffectRuntime.js` 的 `PURPOSES`；來源證明模組、`publicEffectGrant.js` 的授權、`docs/OPERATIONS.md` 的用途表與 `.env.example` 的說明都要同步。這會改變資料根裡的檔案配置與啟動時的三方核對，動手前先讀 docs/OPERATIONS.md 對應章節。
 
 ### 突發停運恢復後的通知（不是帳本用途）
 
-小吉因為意外停運（被強制結束、崩潰、主機斷線）達 10 分鐘以上，恢復並穩定之後，每個伺服器公告一則固定文字，並私訊擁有者一則。它**不新增帳本用途**，也不改帳本結構；做法是「沒有帳本的先宣告、再送、再記結果」，先例是 `ledgerAlerts.js` 的緊急私訊（戳記先寫、才送）與 `reminderSystem` 的 sending 狀態。行為與門檻的完整說明在 `README.md` 的「突發停運恢復後的通知」。
+小吉因為意外停運（被強制結束、崩潰、主機斷線）達 10 分鐘以上，恢復並穩定之後，每個伺服器公告一則固定文字，並私訊擁有者一則。它**不新增帳本用途**，也不改帳本結構；做法是「沒有帳本的先宣告、再送、再記結果」，先例是 `ledgerAlerts.js` 的緊急私訊（戳記先寫、才送）與 `reminderSystem` 的 sending 狀態。行為與門檻的完整說明在 `docs/OPERATIONS.md` 的「突發停運恢復後的通知」。
 
 | 檔案 | 責任 |
 | --- | --- |
@@ -695,16 +695,16 @@ node scripts/check-boundaries.js --rule R6    # 只跑一條規則（可重複�
 | `node scripts/create-public-export.js --dry-run` | 列出公開匯出會包含的檔案，並警告尚未被 git 追蹤的檔案。 |
 | `node scripts/render-command-docs.js` | 依指令目錄重新產生 `docs/COMMANDS.md`。 |
 | `npm run site:check` | 官網公開頁面的版本、功能與未知狀態檢查。 |
-| `npm run safety:ledger -- status` | 安全帳本的唯讀狀態檢查（維運用，見 README）。 |
+| `npm run safety:ledger -- status` | 安全帳本的唯讀狀態檢查（維運用，見 docs/OPERATIONS.md）。 |
 
 測試與檢查都使用合成案例，不會登入 Discord，也不會啟動正式的 bot。
 
 ## 10. 資料路徑與環境變數
 
-完整說明在 `README.md` 的「安裝」「受保護的副作用與安全帳本」兩節與 `.env.example`。維護時要記得的重點：
+完整說明在 `docs/OPERATIONS.md` 的「安裝」「受保護的副作用與安全帳本」兩節與 `.env.example`。維護時要記得的重點：
 
 - **吉幣資料庫**：`COIN_DB_PATH` 必須是專案外的絕對路徑。安全帳本預設放在同一個資料夾的 `safety/` 與 `safety-witness/`，所以這個資料夾必須在本機磁碟上。
-- **不要新設 `XIAOJI_DATA_ROOT`。** 這個變數不只決定安全帳本的位置，也決定個人提醒與個人行事曆的位置。已經在使用中的小吉新設它之後，程式會改從那個資料夾讀取提醒與行事曆；資料沒搬過去，或缺少對應的 provenance SHA-256 時，小吉會拒絕登入。`.env.example` 也要求這個變數留空。理由與搬遷步驟見 README 的「升級與資料位置」。
+- **不要新設 `XIAOJI_DATA_ROOT`。** 這個變數不只決定安全帳本的位置，也決定個人提醒與個人行事曆的位置。已經在使用中的小吉新設它之後，程式會改從那個資料夾讀取提醒與行事曆；資料沒搬過去，或缺少對應的 provenance SHA-256 時，小吉會拒絕登入。`.env.example` 也要求這個變數留空。理由與搬遷步驟見 docs/OPERATIONS.md 的「升級與資料位置」。
 - **每一類資料各有決定位置的模組**：吉幣資料庫是 `src/services/coinDatabase.js`（`COIN_DB_PATH`）；安全帳本是 `src/systems/safety/ledgerLayout.js`（Owner 私訊啟動保護的 `owner-dm-start-guard.json` 與停運存活紀錄 `outage-state.json` 也放在它決定的資料根，各自由 `ownerDmStartGuard.js` 與 `outageMonitor.js` 寫入）；個人提醒與行事曆是 `src/platform/personalDataPaths.js`；`src/data/` 底下的其他 JSON 是 `src/platform/retainedDataSource.js`（`welcomedMembers.json` 與 `leaveNotices.json` 也在這裡，不放進 `guildConfig.json`，由 `src/platform/retainedJsonFile.js` 寫入）；對話封存資料庫經由 `src/platform/dataPaths.js` 的 `resolveDataPath`（依序為明確的環境變數、資料根、舊位置）。新增資料檔案時請沿用同類的模組，不要在功能程式裡自己組路徑。
 - **對話封存資料庫**：`XIAOJI_ARCHIVE_DB_PATH`，不能和 `COIN_DB_PATH`、`AI_CONVERSATION_PATH`、`XIAOJI_MEMORY_PATH` 指向同一個檔案。
 - **舊版審核資料**：`XIAOJI_AUDIT_DATA_PATH` 與 `XIAOJI_INVITER_WHITELIST_PATH`，兩個要是不同、位於專案外的絕對路徑。小吉不再審核伺服器，檔案只保留供查閱、不被改寫，啟動預檢仍確認它們可讀。

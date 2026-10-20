@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { assertPublicCommandCatalog, loadCommandData, loadCommands } = require('../src/loadCommands');
-const { findCommandDocsIssues, findReadmeIssues, findWebsiteIssues } = require('./command-doc-checks');
+const { findCommandDocsIssues, findOperationsIssues, findWebsiteIssues } = require('./command-doc-checks');
 const { buildPublicExportPlan } = require('./create-public-export');
 const { findPublicTextIssues } = require('./check-public-text');
 
@@ -10,6 +10,7 @@ const requiredFiles = [
   '.env.example',
   '.gitignore',
   'README.md',
+  'docs/OPERATIONS.md',
   'deploy-commands.js',
   'src/index.js',
   'src/loadCommands.js',
@@ -54,11 +55,11 @@ function findMissingPublicDependencies(exportFiles) {
   return missing;
 }
 
-// readmePath, commandDocsPath and websiteRoot let tests point the document checks at copies; they
-// default to the real README.md, docs/COMMANDS.md and website/.
+// operationsPath, commandDocsPath and websiteRoot let tests point the document checks at copies; they
+// default to the real docs/OPERATIONS.md, docs/COMMANDS.md and website/.
 function checkProject({
   commandCatalog,
-  readmePath = path.join(projectRoot, 'README.md'),
+  operationsPath = path.join(projectRoot, 'docs', 'OPERATIONS.md'),
   commandDocsPath,
   websiteRoot = path.join(projectRoot, 'website'),
 } = {}) {
@@ -78,18 +79,18 @@ function checkProject({
     failures.push(error.message);
   }
 
-  // The generated command document, the README command section and the website text follow the same
+  // The generated command document, the operations guide command section and the website text follow the same
   // catalog. They are only read here: regenerate a stale docs/COMMANDS.md with
   // `node scripts/render-command-docs.js`.
   failures.push(...findCommandDocsIssues({ docsPath: commandDocsPath, catalog: commandCatalog }));
   try {
-    const readme = fs.readFileSync(readmePath, 'utf8').replace(/\r\n/gu, '\n');
-    const readmeIssues = findReadmeIssues(readme, commandCatalog);
+    const readme = fs.readFileSync(operationsPath, 'utf8').replace(/\r\n/gu, '\n');
+    const readmeIssues = findOperationsIssues(readme, commandCatalog);
     if (readmeIssues.length > 0) {
-      failures.push(`README.md does not match the command catalog:\n${readmeIssues.map((issue) => `- ${issue}`).join('\n')}`);
+      failures.push(`docs/OPERATIONS.md does not match the command catalog:\n${readmeIssues.map((issue) => `- ${issue}`).join('\n')}`);
     }
   } catch (error) {
-    failures.push(`README.md could not be checked against the command catalog: ${error.message}`);
+    failures.push(`docs/OPERATIONS.md could not be checked against the command catalog: ${error.message}`);
   }
   try {
     const websiteIssues = findWebsiteIssues({ websiteRoot, catalog: commandCatalog });
