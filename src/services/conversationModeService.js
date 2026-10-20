@@ -1,3 +1,6 @@
+const { aiSpamGuard, turtleSoupSpamGuard } = require('../systems/conversation/aiSpamGuard');
+const { refusalNoticeCap } = require('../systems/conversation/refusalNoticeCap');
+
 const DEFAULT_TTL_MS = 4 * 60 * 1000;
 const DEFAULT_COOLDOWN_MS = 3000;
 const DEFAULT_SILENCE_MS = 60 * 1000;
@@ -173,10 +176,15 @@ function checkCooldown(message, now = Date.now()) {
   return { ok: true };
 }
 
+// Also forgets the AI anti-spam gates' counts and the per-member cap on refusal notices, which are
+// conversation state too.
 function clearConversationStateForTests() {
   activeConversations.clear();
   cooldowns.clear();
   silenceUntil.clear();
+  aiSpamGuard.resetForTests();
+  turtleSoupSpamGuard.resetForTests();
+  refusalNoticeCap.resetForTests();
 }
 
 module.exports = {

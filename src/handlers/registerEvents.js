@@ -1,5 +1,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  captureDiscordEventContext,
+  runWithHostOperationContext,
+} = require('../platform/hostOperationContext');
 
 function getEventFiles(eventsPath = path.join(__dirname, '..', 'events')) {
   if (!fs.existsSync(eventsPath)) {
@@ -12,7 +16,7 @@ function getEventFiles(eventsPath = path.join(__dirname, '..', 'events')) {
     .map((file) => path.join(eventsPath, file));
 }
 
-function registerEvents(client, eventsPath) {
+function registerEvents(client, eventsPath, { publicEffectAuthority = null } = {}) {
   for (const filePath of getEventFiles(eventsPath)) {
     const event = require(filePath);
 
@@ -20,11 +24,13 @@ function registerEvents(client, eventsPath) {
       throw new Error(`Invalid event module: ${filePath}`);
     }
 
-    if (event.once) {
-      client.once(event.name, (...args) => event.execute(...args));
-    } else {
-      client.on(event.name, (...args) => event.execute(...args));
-    }
+    const listener = (...args) => runWithHostOperationContext(
+      captureDiscordEventContext(event.name, args, { publicEffectAuthority }),
+      () => event.execute(...args)
+    );
+
+    if (event.once) client.once(event.name, listener);
+    else client.on(event.name, listener);
   }
 }
 

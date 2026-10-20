@@ -38,6 +38,11 @@ function retainedDataFile(name) {
   if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9-]*\.json$/u.test(name)) {
     throw new Error('Retained data filename must be a plain JSON filename.');
   }
+  if (process.env.XIAOJI_RUNTIME_MODE === 'test-control') {
+    const testRoot = String(process.env.XIAOJI_TEST_DATA_ROOT || '').trim();
+    if (!path.isAbsolute(testRoot)) throw new Error('Test-control data root must be absolute.');
+    return path.join(testRoot, name);
+  }
   return path.join(getRetainedDataSourceRoot(), 'src', 'data', name);
 }
 

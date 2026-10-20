@@ -1,7 +1,9 @@
 const crypto = require('node:crypto');
 const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
 const { getWalletPlayerWithApi, mutateWalletWithApi } = require('./coinWalletService');
+const { ensureGuildEconomyRowWithApi, readGuildEconomyEnabledWithApi } = require('./coinService');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
+const { featureRewardReason } = require('../systems/economy/transactionReasons');
 
 const FEATURE_KEYS = Object.freeze([
   'word_chain',
@@ -228,10 +230,8 @@ function grantRewardOnceV2WithApi(api, input) {
   const transactionGuildId = sourceGuildId || '__global__';
   if (sourceGuildId && kind !== 'work-settlement') {
     const timestamp = new Date().toISOString();
-    api.run(`INSERT INTO coin_guild_settings (guild_id, created_at, updated_at)
-      VALUES (?, ?, ?) ON CONFLICT(guild_id) DO NOTHING`, [sourceGuildId, timestamp, timestamp]);
-    const setting = api.get('SELECT enabled FROM coin_guild_settings WHERE guild_id = ?', [sourceGuildId]);
-    if (Number(setting?.enabled) !== 1) {
+    ensureGuildEconomyRowWithApi(api, sourceGuildId, timestamp);
+    if (Number(readGuildEconomyEnabledWithApi(api, sourceGuildId)) !== 1) {
       throw new FeaturePlatformError('COIN_DISABLED', 'The source guild coin system is disabled.');
     }
   }
@@ -285,6 +285,70 @@ async function getRewardReceiptV2({ rewardKey = null, operationId = null } = {})
   )));
 }
 
+// Reward ledger transaction ports for other systems. Each one runs on
+// the api of the caller's withCoinDatabase or withCoinTransaction and never opens, commits
+// or rolls back a transaction. Read ports return stored rows unchanged (snake_case
+// columns; null when there is no row) so each caller keeps its own rules. The SQL text was
+// moved here unchanged from coinCampaignService and soloSessionService.
+
+function getRewardReceiptByKeyWithApi(api, rewardKey) {
+  return api.get('SELECT * FROM reward_grants_v2 WHERE reward_key = ?', [rewardKey]);
+}
+
+// Only the debt split of one receipt: { debt_offset, net_amount } or null.
+function getRewardReceiptDebtSplitByKeyWithApi(api, rewardKey) {
+  return api.get('SELECT debt_offset, net_amount FROM reward_grants_v2 WHERE reward_key = ?', [rewardKey]);
+}
+
+// Records the receipt of an owner-campaign payment that was made before the ledger knew
+// about it (an imported history record); nothing is paid. The statement fixes the kind to
+// 'owner-campaign' and the reward kind to 'campaign', and the reward key is also the
+// operation id. The caller supplies every value, including the time.
+function importOwnerCampaignReceiptWithApi(api, receipt) {
+  api.run(`INSERT INTO reward_grants_v2
+        (reward_key, operation_id, kind, canonical_source_id, reward_kind, user_id,
+         source_guild_id, amount, payload_hash, metadata_json, debt_offset, net_amount,
+         transaction_id, created_at)
+        VALUES (?, ?, 'owner-campaign', ?, 'campaign', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [receipt.rewardKey, receipt.rewardKey, receipt.canonicalSourceId, receipt.userId, receipt.sourceGuildId,
+    receipt.amount, receipt.payloadHash, receipt.metadataJson, receipt.debtOffset, receipt.netAmount,
+    receipt.transactionId, receipt.createdAt]);
+}
+
+// Owner-campaign receipts, found by campaign and recipient.
+function getOwnerCampaignReceiptWithApi(api, campaignId, userId) {
+  return api.get(`SELECT * FROM reward_grants_v2 WHERE kind = 'owner-campaign'
+        AND canonical_source_id = ? AND reward_kind = 'campaign' AND user_id = ?`,
+  [campaignId, userId]);
+}
+
+// Only the payment link of the receipt: { transaction_id, metadata_json } or null.
+function getOwnerCampaignReceiptTransactionWithApi(api, campaignId, userId) {
+  return api.get(`SELECT transaction_id, metadata_json FROM reward_grants_v2
+      WHERE kind = 'owner-campaign' AND canonical_source_id = ?
+        AND reward_kind = 'campaign' AND user_id = ?`, [campaignId, userId]);
+}
+
+// Answers only whether the receipt exists (true or false).
+function hasOwnerCampaignReceiptWithApi(api, campaignId, userId) {
+  return Boolean(api.get(`SELECT 1 FROM reward_grants_v2 WHERE kind = 'owner-campaign'
+        AND canonical_source_id = ? AND reward_kind = 'campaign' AND user_id = ?`,
+  [campaignId, userId]));
+}
+
+// Every receipt of one campaign as [{ user_id, amount }]. Campaign preview and apply used
+// this same statement with different line breaks; both now share this one text.
+function listOwnerCampaignReceiptAmountsWithApi(api, campaignId) {
+  return api.all(`SELECT user_id, amount FROM reward_grants_v2
+      WHERE kind = 'owner-campaign' AND canonical_source_id = ? AND reward_kind = 'campaign'`,
+  [campaignId]);
+}
+
+// Legacy (v1) reward grants of one user, oldest first.
+function listLegacyRewardGrantsByUserWithApi(api, userId) {
+  return api.all('SELECT * FROM reward_grants WHERE user_id = ? ORDER BY id', [userId]);
+}
+
 async function getGuildFeatureSetting(guildId, featureKey) {
   const normalizedGuildId = requireText(guildId, 'guildId', 80);
   const normalizedFeatureKey = requireFeatureKey(featureKey);
@@ -316,7 +380,7 @@ async function setGuildFeatureSetting(guildId, featureKey, changes = {}) {
   const normalizedGuildId = requireText(guildId, 'guildId', 80);
   const normalizedFeatureKey = requireFeatureKey(featureKey);
 
-  return withCoinTransaction((api) => {
+  const transactionResult = await withCoinTransaction((api) => {
     const current = api.get('SELECT * FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?', [
       normalizedGuildId,
       normalizedFeatureKey,
@@ -333,9 +397,73 @@ async function setGuildFeatureSetting(guildId, featureKey, changes = {}) {
         ? null
         : requireText(changes.channelId, 'channelId', 80)
       : current?.channel_id || null;
-    const configJson = Object.prototype.hasOwnProperty.call(changes, 'config')
-      ? serializeJson(changes.config, 'config')
-      : current?.config_json || '{}';
+    const chainFeature = normalizedFeatureKey === 'word_chain' || normalizedFeatureKey === 'number_chain';
+    const explicitDisable = Object.prototype.hasOwnProperty.call(changes, 'enabled') && changes.enabled === false;
+    const explicitEnable = Object.prototype.hasOwnProperty.call(changes, 'enabled') && changes.enabled === true;
+    let effectiveEnabled = enabled;
+    let effectiveChannelId = channelId;
+    let fenceOpenFailed = false;
+    let currentConfig;
+    if (chainFeature) {
+      const { closeFence, readChainConfig } = require('../systems/safety/chainReactionFence');
+      const parsed = readChainConfig(current?.config_json || '{}');
+      if (!parsed.valid) {
+        if (!explicitDisable) {
+          throw new FeaturePlatformError('CORRUPT_DATA', 'feature_guild_settings.config_json contains invalid chain configuration.');
+        }
+        currentConfig = {};
+        closeFence({ featureKey: normalizedFeatureKey, guildId: normalizedGuildId });
+      } else {
+        currentConfig = parsed.config;
+      }
+    } else {
+      currentConfig = parseJson(current?.config_json || '{}', 'feature_guild_settings.config_json');
+    }
+    let nextConfig = Object.prototype.hasOwnProperty.call(changes, 'config') ? changes.config : currentConfig;
+    if (chainFeature) {
+      const { closeFence, openFence, preserveReservedConfig, readChainConfig, revokeMetadata } = require('../systems/safety/chainReactionFence');
+      if (Object.prototype.hasOwnProperty.call(changes, 'config')) {
+        const replacement = readChainConfig(changes.config);
+        if (!replacement.valid) throw new FeaturePlatformError('INVALID_JSON', 'config must be a JSON object.');
+        nextConfig = replacement.config;
+      }
+      nextConfig = preserveReservedConfig(currentConfig, nextConfig);
+      const versionKey = normalizedFeatureKey === 'word_chain' ? 'corpusVersion' : 'parserVersion';
+      if (currentConfig[versionKey] !== undefined && nextConfig[versionKey] === undefined) {
+        nextConfig[versionKey] = currentConfig[versionKey];
+      }
+      const previousEnabled = Number(current?.enabled || 0) === 1;
+      const previousChannelId = current?.channel_id || null;
+      const shouldRevoke = (previousEnabled && !enabled) ||
+        (previousChannelId && channelId && previousChannelId !== channelId);
+      if (shouldRevoke) {
+        const metadata = currentConfig._chainReaction;
+        const closed = closeFence({ featureKey: normalizedFeatureKey, guildId: normalizedGuildId,
+          channelId: previousChannelId, generation: metadata?.generation });
+        if (closed.kind === 'failed') nextConfig._chainReaction = revokeMetadata(metadata);
+        else if (metadata) nextConfig._chainReaction = revokeMetadata(metadata);
+      }
+      if (enabled && (explicitEnable || !previousEnabled || previousChannelId !== channelId)) {
+        const table = normalizedFeatureKey === 'word_chain' ? 'text_chain_sessions' : 'number_chain_sessions';
+        const session = api.get(`SELECT id, channel_id, created_at FROM ${table}
+          WHERE guild_id = ? AND channel_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1`,
+          [normalizedGuildId, channelId]);
+        if (session) {
+          const opened = openFence({ featureKey: normalizedFeatureKey, guildId: normalizedGuildId,
+            channelId, sessionId: Number(session.id), sessionCreatedAt: session.created_at });
+          if (opened.metadata) nextConfig._chainReaction = opened.metadata;
+          else fenceOpenFailed = true;
+        } else {
+          fenceOpenFailed = true;
+        }
+        if (fenceOpenFailed) {
+          effectiveEnabled = false;
+          effectiveChannelId = null;
+          delete nextConfig._chainReaction;
+        }
+      }
+    }
+    const configJson = serializeJson(nextConfig, 'config');
     const timestamp = toIso(changes.now || new Date(), 'now');
 
     api.run(
@@ -347,16 +475,21 @@ async function setGuildFeatureSetting(guildId, featureKey, changes = {}) {
          channel_id = excluded.channel_id,
          config_json = excluded.config_json,
          updated_at = excluded.updated_at`,
-      [normalizedGuildId, normalizedFeatureKey, enabled ? 1 : 0, channelId, configJson, current?.created_at || timestamp, timestamp]
+      [normalizedGuildId, normalizedFeatureKey, effectiveEnabled ? 1 : 0, effectiveChannelId,
+        configJson, current?.created_at || timestamp, timestamp]
     );
 
-    return mapGuildSetting(
+    return { fenceOpenFailed, setting: mapGuildSetting(
       api.get('SELECT * FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?', [
         normalizedGuildId,
         normalizedFeatureKey,
       ])
-    );
+    ) };
   });
+  if (transactionResult.fenceOpenFailed) {
+    throw new FeaturePlatformError('REACTION_FENCE_OPEN_FAILED', 'Chain reaction safety state could not be opened; the feature remains disabled.');
+  }
+  return transactionResult.setting;
 }
 
 async function grantRewardOnce(guildId, userId, sourceType, sourceId, rewardKind, amount, metadata = {}) {
@@ -390,15 +523,9 @@ async function grantRewardOnce(guildId, userId, sourceType, sourceId, rewardKind
       };
     }
 
-    api.run(
-      `INSERT INTO coin_guild_settings (guild_id, created_at, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(guild_id) DO NOTHING`,
-      [normalizedGuildId, timestamp, timestamp]
-    );
-    const settings = api.get('SELECT enabled FROM coin_guild_settings WHERE guild_id = ?', [normalizedGuildId]);
+    ensureGuildEconomyRowWithApi(api, normalizedGuildId, timestamp);
 
-    if (Number(settings?.enabled) !== 1) {
+    if (Number(readGuildEconomyEnabledWithApi(api, normalizedGuildId)) !== 1) {
       throw new FeaturePlatformError('COIN_DISABLED', 'The guild coin system is disabled.');
     }
 
@@ -451,7 +578,7 @@ async function grantRewardOnce(guildId, userId, sourceType, sourceId, rewardKind
       balanceDelta: amount,
       totalEarnedDelta: amount,
       operatorId: null,
-      reason: `feature reward: ${normalizedRewardKind}`,
+      reason: featureRewardReason(normalizedRewardKind),
       metadata: {
         rewardGrantId: Number(grant.id),
         sourceType: normalizedSourceType,
@@ -473,7 +600,7 @@ async function grantRewardOnce(guildId, userId, sourceType, sourceId, rewardKind
   });
 }
 
-async function enqueueFeatureOutbox({
+function enqueueFeatureOutboxWithApi(api, {
   guildId,
   featureKey,
   eventType,
@@ -490,8 +617,7 @@ async function enqueueFeatureOutbox({
   const availableAtIso = toIso(availableAt, 'availableAt');
   const timestamp = toIso(now, 'now');
 
-  return withCoinTransaction((api) => {
-    api.run(
+  api.run(
       `INSERT INTO feature_outbox
         (guild_id, feature_key, event_type, dedupe_key, payload_json, available_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -506,20 +632,24 @@ async function enqueueFeatureOutbox({
         timestamp,
         timestamp,
       ]
-    );
-    const inserted = Number(api.get('SELECT changes() AS count')?.count || 0) === 1;
-    const row = api.get(
+  );
+  const inserted = Number(api.get('SELECT changes() AS count')?.count || 0) === 1;
+  const row = api.get(
       `SELECT * FROM feature_outbox
        WHERE guild_id = ? AND feature_key = ? AND event_type = ? AND dedupe_key = ?`,
       [normalizedGuildId, normalizedFeatureKey, normalizedEventType, normalizedDedupeKey]
-    );
-    return { alreadyEnqueued: !inserted, event: mapOutbox(row) };
-  });
+  );
+  return { alreadyEnqueued: !inserted, event: mapOutbox(row) };
 }
 
-async function claimFeatureOutbox({ workerId, eventType = null, limit = 25, leaseMs = 60_000, now = new Date() }) {
+async function enqueueFeatureOutbox(input) {
+  return withCoinTransaction((api) => enqueueFeatureOutboxWithApi(api, input));
+}
+
+async function claimFeatureOutbox({ workerId, eventType = null, featureKey = null, limit = 25, leaseMs = 60_000, now = new Date() }) {
   const normalizedWorkerId = requireText(workerId, 'workerId', 120);
   const normalizedEventType = eventType == null ? null : requireText(eventType, 'eventType', 80);
+  const normalizedFeatureKey = featureKey == null ? null : requireFeatureKey(featureKey);
 
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_OUTBOX_CLAIM_LIMIT) {
     throw new FeaturePlatformError('INVALID_CLAIM_LIMIT', `limit must be from 1 to ${MAX_OUTBOX_CLAIM_LIMIT}.`);
@@ -537,15 +667,20 @@ async function claimFeatureOutbox({ workerId, eventType = null, limit = 25, leas
     api.run(
       `UPDATE feature_outbox
        SET status = 'pending', claimed_by = NULL, claimed_at = NULL, lease_until = NULL, updated_at = ?
-       WHERE status = 'processing' AND lease_until <= ?`,
-      [claimedAtIso, claimedAtIso]
+       WHERE status = 'processing' AND lease_until <= ?${normalizedFeatureKey ? ' AND feature_key = ?' : ''}`,
+      normalizedFeatureKey ? [claimedAtIso, claimedAtIso, normalizedFeatureKey] : [claimedAtIso, claimedAtIso]
     );
+    const filters = [];
+    const filterParams = [claimedAtIso];
+    if (normalizedEventType) { filters.push('event_type = ?'); filterParams.push(normalizedEventType); }
+    if (normalizedFeatureKey) { filters.push('feature_key = ?'); filterParams.push(normalizedFeatureKey); }
+    filterParams.push(limit);
     const candidates = api.all(
       `SELECT id FROM feature_outbox
-       WHERE status = 'pending' AND available_at <= ?${normalizedEventType ? ' AND event_type = ?' : ''}
+       WHERE status = 'pending' AND available_at <= ?${filters.length ? ` AND ${filters.join(' AND ')}` : ''}
        ORDER BY available_at ASC, id ASC
        LIMIT ?`,
-      normalizedEventType ? [claimedAtIso, normalizedEventType, limit] : [claimedAtIso, limit]
+      filterParams
     );
 
     for (const candidate of candidates) {
@@ -591,7 +726,29 @@ async function markFeatureOutboxDelivered(id, { workerId, now = new Date() }) {
   });
 }
 
-async function retryFeatureOutbox(id, { workerId, error, delayMs = 0, now = new Date() }) {
+async function markFeatureOutboxDeliveredByDedupe({ guildId, featureKey, eventType, dedupeKey, now = new Date() }) {
+  const normalizedGuildId = requireText(guildId, 'guildId', 80);
+  const normalizedFeatureKey = requireFeatureKey(featureKey);
+  const normalizedEventType = requireText(eventType, 'eventType', 80);
+  const normalizedDedupeKey = requireText(dedupeKey, 'dedupeKey', 200);
+  const timestamp = toIso(now, 'now');
+  return withCoinTransaction((api) => {
+    api.run(
+      `UPDATE feature_outbox
+       SET status = 'delivered', delivered_at = ?, claimed_by = NULL, claimed_at = NULL,
+           lease_until = NULL, last_error = NULL, updated_at = ?
+       WHERE guild_id = ? AND feature_key = ? AND event_type = ? AND dedupe_key = ?
+         AND status = 'pending'`,
+      [timestamp, timestamp, normalizedGuildId, normalizedFeatureKey, normalizedEventType, normalizedDedupeKey]
+    );
+    return { updated: Number(api.get('SELECT changes() AS count')?.count || 0) === 1 };
+  });
+}
+
+// uncounted: the attempt this claim added is given back (the event was not tried, for
+// example because its feature was unavailable), so it never moves the event toward its
+// attempt limit.
+async function retryFeatureOutbox(id, { workerId, error, delayMs = 0, now = new Date(), uncounted = false }) {
   const eventId = Number(id);
   const normalizedWorkerId = requireText(workerId, 'workerId', 120);
   const retryAt = requireDate(now, 'now');
@@ -604,6 +761,10 @@ async function retryFeatureOutbox(id, { workerId, error, delayMs = 0, now = new 
     throw new FeaturePlatformError('INVALID_RETRY_DELAY', 'delayMs must be from 0 to 604800000.');
   }
 
+  if (typeof uncounted !== 'boolean') {
+    throw new FeaturePlatformError('INVALID_RETRY_COUNT', 'uncounted must be a boolean.');
+  }
+
   const timestamp = retryAt.toISOString();
   const availableAt = new Date(retryAt.getTime() + delayMs).toISOString();
   const lastError = String(error instanceof Error ? error.message : error || 'delivery failed').slice(0, 500);
@@ -612,16 +773,19 @@ async function retryFeatureOutbox(id, { workerId, error, delayMs = 0, now = new 
     api.run(
       `UPDATE feature_outbox
        SET status = 'pending', available_at = ?, claimed_by = NULL, claimed_at = NULL,
-           lease_until = NULL, last_error = ?, updated_at = ?
+           lease_until = NULL, last_error = ?, updated_at = ?,
+           attempt_count = CASE WHEN ? = 1 AND attempt_count > 0 THEN attempt_count - 1 ELSE attempt_count END
        WHERE id = ? AND status = 'processing' AND claimed_by = ? AND lease_until > ?`,
-      [availableAt, lastError, timestamp, eventId, normalizedWorkerId, timestamp]
+      [availableAt, lastError, timestamp, uncounted ? 1 : 0, eventId, normalizedWorkerId, timestamp]
     );
     const updated = Number(api.get('SELECT changes() AS count')?.count || 0) === 1;
     return { updated, event: mapOutbox(api.get('SELECT * FROM feature_outbox WHERE id = ?', [eventId])) };
   });
 }
 
-async function deadLetterFeatureOutbox(id, { workerId, error, reason, now = new Date() }) {
+// affectsHealth: false closes the event without marking its feature broken (an event that
+// only aged out says nothing about the feature).
+async function deadLetterFeatureOutbox(id, { workerId, error, reason, now = new Date(), affectsHealth = true }) {
   const eventId = Number(id);
   const normalizedWorkerId = requireText(workerId, 'workerId', 120);
   const timestamp = toIso(now, 'now');
@@ -630,6 +794,10 @@ async function deadLetterFeatureOutbox(id, { workerId, error, reason, now = new 
 
   if (!Number.isSafeInteger(eventId) || eventId < 1) {
     throw new FeaturePlatformError('INVALID_OUTBOX_ID', 'id must be a positive integer.');
+  }
+
+  if (typeof affectsHealth !== 'boolean') {
+    throw new FeaturePlatformError('INVALID_DEAD_LETTER_HEALTH', 'affectsHealth must be a boolean.');
   }
 
   return withCoinTransaction((api) => {
@@ -661,14 +829,71 @@ async function deadLetterFeatureOutbox(id, { workerId, error, reason, now = new 
     const inserted = Number(api.get('SELECT changes() AS count')?.count || 0) === 1;
     if (!inserted) return { updated: false, event: mapOutbox(event) };
 
-    api.run(
-      `INSERT INTO feature_health (feature_key, status, detail, updated_at)
-       VALUES (?, 'broken', ?, ?)
-       ON CONFLICT(feature_key) DO UPDATE SET status = excluded.status, detail = excluded.detail, updated_at = excluded.updated_at`,
-      [event.feature_key, `outbox dead letter: ${deadLetterReason}`.slice(0, 500), timestamp]
-    );
+    if (affectsHealth) {
+      api.run(
+        `INSERT INTO feature_health (feature_key, status, detail, updated_at)
+         VALUES (?, 'broken', ?, ?)
+         ON CONFLICT(feature_key) DO UPDATE SET status = excluded.status, detail = excluded.detail, updated_at = excluded.updated_at`,
+        [event.feature_key, `outbox dead letter: ${deadLetterReason}`.slice(0, 500), timestamp]
+      );
+    }
     api.run('DELETE FROM feature_outbox WHERE id = ?', [eventId]);
     return { updated: true, event: mapOutbox(event) };
+  });
+}
+
+// Closes, as dead letters, the waiting events of one feature and event type that were
+// created at or before createdBefore (wall clock): pending events, and claims whose lease
+// has run out. Oldest first, at most `limit` per call; the feature's health is not changed.
+// For a feature that cannot judge its events on its own clock right now (for example while
+// its ✅ ledger is unavailable), so its events do not pile up without end.
+async function expireFeatureOutbox({ featureKey, eventType, createdBefore, reason = 'expired', error = null,
+  limit = 25, now = new Date() }) {
+  const normalizedFeatureKey = requireFeatureKey(featureKey);
+  const normalizedEventType = requireText(eventType, 'eventType', 80);
+  const cutoff = toIso(createdBefore, 'createdBefore');
+  const deadLetterReason = requireText(reason, 'reason', 120);
+  const timestamp = toIso(now, 'now');
+  const lastError = String(error instanceof Error ? error.message : error || deadLetterReason).slice(0, 500);
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_OUTBOX_CLAIM_LIMIT) {
+    throw new FeaturePlatformError('INVALID_EXPIRE_LIMIT', `limit must be from 1 to ${MAX_OUTBOX_CLAIM_LIMIT}.`);
+  }
+
+  return withCoinTransaction((api) => {
+    const events = api.all(
+      `SELECT * FROM feature_outbox
+       WHERE feature_key = ? AND event_type = ? AND created_at <= ?
+         AND (status = 'pending' OR (status = 'processing' AND lease_until <= ?))
+       ORDER BY created_at ASC, id ASC
+       LIMIT ?`,
+      [normalizedFeatureKey, normalizedEventType, cutoff, timestamp, limit]
+    );
+    let expired = 0;
+    for (const event of events) {
+      api.run(
+        `INSERT INTO feature_outbox_dead_letters
+          (original_event_id, guild_id, feature_key, event_type, dedupe_key, payload_json, attempt_count, last_error, dead_letter_reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(original_event_id) DO NOTHING`,
+        [
+          event.id,
+          event.guild_id,
+          event.feature_key,
+          event.event_type,
+          event.dedupe_key,
+          event.payload_json,
+          event.attempt_count,
+          lastError,
+          deadLetterReason,
+          timestamp,
+        ]
+      );
+      if (Number(api.get('SELECT changes() AS count')?.count || 0) !== 1) continue;
+      api.run('DELETE FROM feature_outbox WHERE id = ?', [event.id]);
+      expired += 1;
+    }
+    return { expired };
   });
 }
 
@@ -785,16 +1010,27 @@ module.exports = {
   claimFeatureOutbox,
   deadLetterFeatureOutbox,
   enqueueFeatureOutbox,
+  enqueueFeatureOutboxWithApi,
+  expireFeatureOutbox,
   getGuildFeatureSetting,
   grantRewardOnce,
   grantRewardOnceV2,
   grantRewardOnceV2WithApi,
   getRewardReceiptV2,
+  getRewardReceiptByKeyWithApi,
+  getRewardReceiptDebtSplitByKeyWithApi,
+  importOwnerCampaignReceiptWithApi,
+  getOwnerCampaignReceiptWithApi,
+  getOwnerCampaignReceiptTransactionWithApi,
+  hasOwnerCampaignReceiptWithApi,
+  listOwnerCampaignReceiptAmountsWithApi,
+  listLegacyRewardGrantsByUserWithApi,
   makeRewardKey,
   listFeatureHealth,
   listFeatureUsageForDate,
   listGuildFeatureSettings,
   markFeatureOutboxDelivered,
+  markFeatureOutboxDeliveredByDedupe,
   recordFeatureUsage,
   retryFeatureOutbox,
   setFeatureHealth,

@@ -151,6 +151,58 @@ function getWalletPlayerWithApi(api, guildId, userId, { ensure = true, timestamp
   return mapWalletPlayer(row);
 }
 
+// Read-only: one user's global wallet and bank balances. A user without a wallet or bank row has zero
+// balances and nothing is created. getWalletPlayerWithApi cannot serve a read that must not write: it starts
+// from the guild presence row and, when asked to ensure it, creates the whole wallet context.
+function readWalletBalancesWithApi(api, userId) {
+  const normalizedUserId = requireId(userId, 'userId');
+  const wallet = api.get('SELECT balance FROM coin_wallets WHERE user_id = ?', [normalizedUserId]);
+  const bank = api.get('SELECT balance FROM coin_bank_accounts_global WHERE user_id = ?', [normalizedUserId]);
+  return {
+    walletBalance: Number(wallet?.balance || 0),
+    bankBalance: Number(bank?.balance || 0),
+  };
+}
+
+// Read-only: one user's global wallet figures in the shape getWalletPlayerWithApi gives, for looking at somebody
+// else. A user without a wallet reads as zeros and nothing is created, so the user is not filed under the guild
+// and does not appear on its boards. The figures are global, so the guild only names the answer.
+function readWalletPlayerWithApi(api, guildId, userId) {
+  const normalizedGuildId = requireId(guildId, 'guildId');
+  const normalizedUserId = requireId(userId, 'userId');
+  const wallet = api.get(
+    `SELECT balance, total_earned, total_spent, revision, created_at, updated_at
+     FROM coin_wallets WHERE user_id = ?`,
+    [normalizedUserId]
+  );
+  const bank = api.get(
+    `SELECT balance, interest_accrued, last_interest_date
+     FROM coin_bank_accounts_global WHERE user_id = ?`,
+    [normalizedUserId]
+  );
+  const daily = api.get(
+    'SELECT last_checkin_date, streak FROM coin_daily_state WHERE user_id = ?',
+    [normalizedUserId]
+  );
+
+  return mapWalletPlayer({
+    guild_id: normalizedGuildId,
+    user_id: normalizedUserId,
+    balance: wallet?.balance ?? 0,
+    total_earned: wallet?.total_earned ?? 0,
+    total_spent: wallet?.total_spent ?? 0,
+    revision: wallet?.revision ?? 0,
+    debt_amount: getDebtWithApi(api, normalizedUserId),
+    bank_balance: bank?.balance ?? 0,
+    bank_interest_accrued: bank?.interest_accrued ?? 0,
+    last_interest_date: bank?.last_interest_date ?? null,
+    global_last_daily_date: daily?.last_checkin_date ?? null,
+    global_daily_streak: daily?.streak ?? 0,
+    wallet_created_at: wallet?.created_at ?? null,
+    wallet_updated_at: wallet?.updated_at ?? null,
+  });
+}
+
 function mutateWalletWithApi(api, input) {
   const timestamp = input.createdAt || new Date().toISOString();
   const player = getWalletPlayerWithApi(api, input.guildId, input.userId, { timestamp });
@@ -240,5 +292,7 @@ module.exports = {
   getWalletPlayerWithApi,
   mapWalletPlayer,
   mutateWalletWithApi,
+  readWalletBalancesWithApi,
+  readWalletPlayerWithApi,
   setDebtWithApi,
 };

@@ -1,4 +1,4 @@
-const { BoardCoreError, cloneJson } = require('../../../../games/contracts');
+const { BoardCoreError, cloneJson } = require('../core/contracts');
 const { buildBoardCustomId } = require('./boardCustomId');
 const { GAME_LABELS } = require('../renderer/svgBoardRenderer');
 

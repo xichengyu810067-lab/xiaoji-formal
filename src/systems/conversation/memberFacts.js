@@ -1,5 +1,8 @@
+const { sanitizeUntrustedText } = require('./disclosurePolicy');
+
+// Invisible format characters (bidirectional overrides, zero-width and tag characters) are dropped from names.
 function safeName(value) {
-  return String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/[<>`]/g, '')
+  return sanitizeUntrustedText(value).replace(/\p{Cf}/gu, '').replace(/\p{Cc}/gu, ' ').replace(/[<>`]/g, '')
     .replace(/@/g, '＠')
     .replace(/\s+/g, ' ').trim().slice(0, 80);
 }

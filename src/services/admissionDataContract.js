@@ -56,12 +56,37 @@ function validateAuditData(data) {
     throw new AdmissionDataError('AUDIT_INVALID_ROOT', 'Guild audit data must be a JSON object.');
   }
 
-  for (const record of Object.values(data)) {
+  for (const [guildId, record] of Object.entries(data)) {
     if (!isPlainObject(record) || !AUDIT_STATUSES.has(record.status)) {
       throw new AdmissionDataError(
         'AUDIT_INVALID_RECORD',
         'Every guild audit record must contain a supported status.'
       );
+    }
+    if (record.joinLineage != null) {
+      const lineage = record.joinLineage;
+      const joinedAtMs = Date.parse(lineage?.joinedAt);
+      const digestInput = {
+        botId: lineage?.botId,
+        guildId: lineage?.guildId,
+        joinedAt: lineage?.joinedAt,
+        joinedTimestamp: lineage?.joinedTimestamp,
+        schemaVersion: lineage?.schemaVersion,
+        sourceNamespace: lineage?.sourceNamespace,
+      };
+      const expectedDigest = crypto.createHash('sha256').update(JSON.stringify(digestInput)).digest('hex');
+      if (!isPlainObject(lineage) || lineage.schemaVersion !== 1 ||
+          !['discord.guildCreate', 'discord.ready'].includes(lineage.sourceNamespace) ||
+          !/^\d{17,20}$/u.test(lineage.botId || '') || !/^\d{17,20}$/u.test(lineage.guildId || '') ||
+          lineage.guildId !== guildId || record.guildId !== guildId ||
+          !Number.isSafeInteger(lineage.joinedTimestamp) || joinedAtMs !== lineage.joinedTimestamp ||
+          lineage.sourceEventId !== `${guildId}.${lineage.joinedTimestamp}` ||
+          lineage.lineageDigest !== expectedDigest) {
+        throw new AdmissionDataError(
+          'AUDIT_INVALID_LINEAGE',
+          'Guild audit join lineage is malformed or inconsistent.'
+        );
+      }
     }
   }
   return data;

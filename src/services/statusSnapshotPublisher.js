@@ -1,5 +1,6 @@
 const { createHmac } = require('node:crypto');
 const { buildPublicStatusSnapshot } = require('./publicStatusService');
+const { runWithBackgroundContext } = require('../platform/hostOperationContext');
 const { getEnv } = require('../utils/env');
 const logger = require('../utils/logger');
 
@@ -117,8 +118,10 @@ function createStatusSnapshotPublisher(client, {
       loggerImpl.warn('[STATUS_PUBLISHER] Disabled: set STATUS_SNAPSHOT_PUBLISHER_URL, STATUS_SNAPSHOT_PUBLISHER_KEY_ID, and STATUS_SNAPSHOT_PUBLISHER_SECRET.');
       return { started: false, reason: 'missing_or_invalid_configuration' };
     }
-    void publish();
-    timer = setIntervalImpl(() => void publish(), intervalMs);
+    // Each scheduled publish is its own background job run.
+    const publishInBackground = () => runWithBackgroundContext('status-snapshot.publish', publish);
+    void publishInBackground();
+    timer = setIntervalImpl(() => void publishInBackground(), intervalMs);
     timer.unref?.();
     return { started: true };
   }

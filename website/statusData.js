@@ -1,12 +1,24 @@
 (function exposeStatusData(root, factory) {
-  const api = factory();
+  const gameCatalog = typeof module === 'object' && module.exports
+    ? require('./gameCatalog')
+    : root.XiaojiGameCatalog;
+  const api = factory(gameCatalog);
   if (typeof module === 'object' && module.exports) {
     module.exports = api;
   } else {
     root.XiaojiStatusData = api;
   }
-})(typeof globalThis === 'object' ? globalThis : this, function createStatusDataApi() {
+})(typeof globalThis === 'object' ? globalThis : this, function createStatusDataApi(gameCatalog) {
   'use strict';
+
+  const gameStatusFeatures = (gameCatalog?.GAME_CATALOG || [])
+    .filter((game) => game.publicFeatureKey)
+    .map((game) => Object.freeze({
+      key: game.publicFeatureKey,
+      name: game.name.replace(/（.*$/u, ''),
+      category: game.launcher === 'daily-riddle' ? '每日活動'
+        : ['word-chain', 'number-chain'].includes(game.launcher) ? '社群互動' : '吉幣與遊戲',
+    }));
 
   // This is intentionally limited to public labels and categories. It is used
   // when the live status API cannot be reached, so visitors can still see what
@@ -19,15 +31,11 @@
     { key: 'poll', name: '投票', category: '社群互動' },
     { key: 'weather', name: '天氣查詢', category: '實用工具' },
     { key: 'economy', name: '吉幣系統', category: '吉幣與遊戲' },
-    { key: 'word_chain', name: '文字接龍', category: '社群互動' },
-    { key: 'number_chain', name: '數字接龍', category: '社群互動' },
-    { key: 'daily_riddle', name: '每日猜謎', category: '每日活動' },
+    ...gameStatusFeatures.filter((feature) => ['word_chain', 'number_chain', 'daily_riddle'].includes(feature.key)),
     { key: 'daily_discussion', name: '每日議題', category: '每日活動' },
     { key: 'chat_style', name: '對話風格', category: '聊天個人化' },
     { key: 'romance', name: '情侶模式', category: '聊天個人化' },
-    { key: 'tetris', name: '俄羅斯方塊', category: '吉幣與遊戲' },
-    { key: 'number_match', name: '數字配對', category: '吉幣與遊戲' },
-    { key: 'sudoku', name: '數獨', category: '吉幣與遊戲' },
+    ...gameStatusFeatures.filter((feature) => ['tetris', 'number_match', 'sudoku'].includes(feature.key)),
     { key: 'official_website', name: '小吉官網', category: '網站服務' },
     { key: 'status_website', name: '即時狀態網站', category: '網站服務' },
   ].map((feature) => Object.freeze(feature)));

@@ -1,4 +1,4 @@
-const { BoardCoreError, cloneJson, stableJson } = require('../../../../games/contracts');
+const { BoardCoreError, cloneJson, stableJson } = require('../core/contracts');
 const coinDatabase = require('../../../../services/coinDatabase');
 const { installBoardSchema } = require('./boardSchema');
 

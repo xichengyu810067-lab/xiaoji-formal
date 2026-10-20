@@ -1,5 +1,6 @@
 const logger = require('./logger');
 const { getBotOwnerId } = require('./env');
+const { reportInteractionSecurityAlert } = require('./securityAlert');
 
 const OWNER_DENIED_MESSAGE = '你沒有權限使用這個指令。';
 
@@ -17,6 +18,7 @@ async function ensureBotOwner(interaction) {
   }
 
   logger.warn(`[PERMISSION_BLOCK] User ${interaction.user.tag} (${interaction.user.id}) denied access to owner-only command /${interaction.commandName}`);
+  reportInteractionSecurityAlert('permission-denied', interaction);
   const payload = { content: OWNER_DENIED_MESSAGE, ephemeral: true };
 
   if (interaction.replied || interaction.deferred) {

@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const { getCoinDatabaseInfo, withCoinDatabase, withCoinTransaction } = require('../../services/coinDatabase');
-const { getWalletPlayerWithApi, mutateWalletWithApi } = require('./coinWalletService');
+const { getWalletPlayerWithApi, mutateWalletWithApi, readWalletPlayerWithApi } = require('./coinWalletService');
+const { describeTransactionReason } = require('./transactionReasons');
 
 const MAX_COIN_AMOUNT = 9_000_000_000;
 const DEFAULT_PAGE_SIZE = 10;
@@ -295,14 +296,58 @@ function ensureGuildSettings(api, guildId) {
   return mapSettings(api.get('SELECT * FROM coin_guild_settings WHERE guild_id = ?', [guildId]));
 }
 
+// Transaction ports for the per-guild economy switch (coin_guild_settings).
+// Systems outside the economy must not read or write that table themselves; they call
+// these ports inside their own withCoinTransaction callback and pass that callback's
+// `api`. The ports never open, commit or roll back a transaction.
+
+// Creates the guild's default settings row when it does not exist yet. An existing row
+// is left untouched, including a disabled switch. The caller supplies `timestamp`, so
+// every caller keeps its own time source.
+function ensureGuildEconomyRowWithApi(api, guildId, timestamp) {
+  api.run(
+    `INSERT INTO coin_guild_settings (guild_id, created_at, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(guild_id) DO NOTHING`,
+    [guildId, timestamp, timestamp]
+  );
+}
+
+// Returns the stored `enabled` column (1 or 0), or undefined when the guild has no
+// settings row. The raw value is returned on purpose: callers that ensure the row first
+// test `Number(value) === 1`, while the solo game flow reads `value ?? 1` so that a
+// guild without a row counts as enabled.
+function readGuildEconomyEnabledWithApi(api, guildId) {
+  return api.get('SELECT enabled FROM coin_guild_settings WHERE guild_id = ?', [guildId])?.enabled;
+}
+
 function ensurePlayer(api, guildId, userId) {
   requireGuildId(guildId);
   requireUserId(userId);
   return getWalletPlayerWithApi(api, guildId, userId);
 }
 
+// Read-only counterpart of ensurePlayer, for looking at somebody else. It creates no wallet, bank or guild player
+// row: a user the economy has not seen reads as zeros and stays off the guild's boards.
+function readPlayer(api, guildId, userId) {
+  requireGuildId(guildId);
+  requireUserId(userId);
+  return readWalletPlayerWithApi(api, guildId, userId);
+}
+
 function assertEconomyEnabled(settings) {
   if (!settings.enabled) {
+    throw new CoinServiceError('COIN_DISABLED', '這個伺服器的吉幣系統目前停用。');
+  }
+}
+
+// Read-only counterpart of ensureGuildSettings followed by assertEconomyEnabled. A guild without a settings row
+// counts as enabled, which is the state ensureGuildSettings would give it, and no row is written for it.
+function assertEconomyEnabledReadOnly(api, guildId) {
+  requireGuildId(guildId);
+  const enabled = readGuildEconomyEnabledWithApi(api, guildId);
+
+  if (enabled !== undefined && !enabled) {
     throw new CoinServiceError('COIN_DISABLED', '這個伺服器的吉幣系統目前停用。');
   }
 }
@@ -365,6 +410,21 @@ async function getPlayerBalance(guildId, userId, { allowDisabled = false } = {})
     }
 
     return ensurePlayer(api, guildId, userId);
+  });
+}
+
+// Read-only counterpart of getPlayerBalance, for looking at somebody else's balance. Looking at a person must
+// not file them under this guild, or they would show up on its leaderboard; the person's own balance lookup
+// (getPlayerBalance) is what files them. Nothing is written, not even the guild's settings row.
+async function readPlayerBalance(guildId, userId, { allowDisabled = false } = {}) {
+  return withCoinDatabase((api) => {
+    requireGuildId(guildId);
+
+    if (!allowDisabled) {
+      assertEconomyEnabledReadOnly(api, guildId);
+    }
+
+    return readPlayer(api, guildId, userId);
   });
 }
 
@@ -468,84 +528,89 @@ async function getLeaderboard(guildId, { page = 1, limit = DEFAULT_PAGE_SIZE } =
   });
 }
 
-async function adjustPlayerBalance(guildId, userId, { action, amount, operatorId, reason, allowNegative = false, operationId = null }) {
+function adjustPlayerBalanceWithApi(api, guildId, userId,
+  { action, amount, operatorId, reason, allowNegative = false, operationId = null }) {
   const stableOperationId = String(operationId || crypto.randomUUID());
   const payloadHash = crypto.createHash('sha256')
     .update(JSON.stringify([guildId, userId, action, amount, operatorId, reason, allowNegative])).digest('hex');
+  const receipt = api.get('SELECT * FROM coin_operation_receipts WHERE operation_id = ?', [stableOperationId]);
+  if (receipt) {
+    if (receipt.kind !== 'manual-adjustment' || receipt.payload_hash !== payloadHash) {
+      throw new CoinServiceError('OPERATION_CONFLICT', '同一操作識別碼對應不同調整內容。');
+    }
+    const previous = api.get('SELECT * FROM coin_transactions WHERE id = ?', [receipt.transaction_id]);
+    if (!previous) throw new CoinServiceError('RECEIPT_CORRUPT', '調整收據缺少交易紀錄。');
+    return { before: Number(previous.balance_before), amount: Number(previous.amount),
+      after: Number(previous.balance_after), alreadyApplied: true,
+      player: getWalletPlayerWithApi(api, guildId, userId) };
+  }
+  ensureGuildSettings(api, guildId);
+  const player = ensurePlayer(api, guildId, userId);
+  const timestamp = nowIso();
+  let delta;
+  let type;
+  let newBalance;
+
+  if (action === 'add') {
+    delta = normalizePositiveInteger(amount, '加幣數量');
+    type = TransactionType.ADMIN_ADD;
+    newBalance = player.balance + delta;
+  } else if (action === 'remove') {
+    delta = -normalizePositiveInteger(amount, '扣幣數量');
+    type = TransactionType.ADMIN_REMOVE;
+    newBalance = player.balance + delta;
+  } else if (action === 'set') {
+    newBalance = normalizeNonNegativeInteger(amount, '設定餘額');
+    delta = newBalance - player.balance;
+    type = TransactionType.ADMIN_SET;
+  } else {
+    throw new CoinServiceError('INVALID_ACTION', '未知的管理操作。');
+  }
+
+  if (!allowNegative && newBalance < 0) {
+    throw new CoinServiceError('NEGATIVE_BALANCE', '吉幣餘額不可低於 0。', {
+      balance: player.balance,
+      requestedAmount: amount,
+    });
+  }
+
+  const mutation = mutateWalletWithApi(api, {
+    guildId,
+    userId,
+    type,
+    balanceTarget: newBalance,
+    totalEarnedDelta: Math.max(delta, 0),
+    totalSpentDelta: Math.max(-delta, 0),
+    operatorId,
+    reason,
+    createdAt: timestamp,
+  });
+  insertAdminLog(api, {
+    guildId,
+    operatorId: operatorId || 'unknown',
+    targetUserId: userId,
+    action: `coin_admin:${action}`,
+    reason,
+    details: { before: player.balance, amount: delta, after: newBalance },
+    createdAt: timestamp,
+  });
+  api.run(`INSERT INTO coin_operation_receipts
+    (operation_id, kind, user_id, source_guild_id, payload_hash, transaction_id, created_at)
+    VALUES (?, 'manual-adjustment', ?, ?, ?, ?, ?)`,
+  [stableOperationId, userId, guildId, payloadHash, mutation.transactionId, timestamp]);
+
+  return {
+    before: player.balance,
+    amount: delta,
+    after: newBalance,
+    alreadyApplied: false,
+    player: mutation.after,
+  };
+}
+
+async function adjustPlayerBalance(guildId, userId, input) {
   return withCoinTransaction((api) => {
-    const receipt = api.get('SELECT * FROM coin_operation_receipts WHERE operation_id = ?', [stableOperationId]);
-    if (receipt) {
-      if (receipt.kind !== 'manual-adjustment' || receipt.payload_hash !== payloadHash) {
-        throw new CoinServiceError('OPERATION_CONFLICT', '同一操作識別碼對應不同調整內容。');
-      }
-      const previous = api.get('SELECT * FROM coin_transactions WHERE id = ?', [receipt.transaction_id]);
-      if (!previous) throw new CoinServiceError('RECEIPT_CORRUPT', '調整收據缺少交易紀錄。');
-      return { before: Number(previous.balance_before), amount: Number(previous.amount),
-        after: Number(previous.balance_after), alreadyApplied: true,
-        player: getWalletPlayerWithApi(api, guildId, userId) };
-    }
-    ensureGuildSettings(api, guildId);
-    const player = ensurePlayer(api, guildId, userId);
-    const timestamp = nowIso();
-    let delta;
-    let type;
-    let newBalance;
-
-    if (action === 'add') {
-      delta = normalizePositiveInteger(amount, '加幣數量');
-      type = TransactionType.ADMIN_ADD;
-      newBalance = player.balance + delta;
-    } else if (action === 'remove') {
-      delta = -normalizePositiveInteger(amount, '扣幣數量');
-      type = TransactionType.ADMIN_REMOVE;
-      newBalance = player.balance + delta;
-    } else if (action === 'set') {
-      newBalance = normalizeNonNegativeInteger(amount, '設定餘額');
-      delta = newBalance - player.balance;
-      type = TransactionType.ADMIN_SET;
-    } else {
-      throw new CoinServiceError('INVALID_ACTION', '未知的管理操作。');
-    }
-
-    if (!allowNegative && newBalance < 0) {
-      throw new CoinServiceError('NEGATIVE_BALANCE', '吉幣餘額不可低於 0。', {
-        balance: player.balance,
-        requestedAmount: amount,
-      });
-    }
-
-    const mutation = mutateWalletWithApi(api, {
-      guildId,
-      userId,
-      type,
-      balanceTarget: newBalance,
-      totalEarnedDelta: Math.max(delta, 0),
-      totalSpentDelta: Math.max(-delta, 0),
-      operatorId,
-      reason,
-      createdAt: timestamp,
-    });
-    insertAdminLog(api, {
-      guildId,
-      operatorId: operatorId || 'unknown',
-      targetUserId: userId,
-      action: `coin_admin:${action}`,
-      reason,
-      details: { before: player.balance, amount: delta, after: newBalance },
-      createdAt: timestamp,
-    });
-    api.run(`INSERT INTO coin_operation_receipts
-      (operation_id, kind, user_id, source_guild_id, payload_hash, transaction_id, created_at)
-      VALUES (?, 'manual-adjustment', ?, ?, ?, ?, ?)`,
-    [stableOperationId, userId, guildId, payloadHash, mutation.transactionId, timestamp]);
-
-    return {
-      before: player.balance,
-      amount: delta,
-      after: newBalance,
-      alreadyApplied: false,
-      player: mutation.after,
-    };
+    return adjustPlayerBalanceWithApi(api, guildId, userId, input);
   });
 }
 
@@ -662,6 +727,50 @@ async function getAllPlayers(guildId, { limit = MAX_PAGE_SIZE } = {}) {
         [guildId, normalizeLimit(limit, MAX_PAGE_SIZE)]
       )
       .map(mapPlayer);
+  });
+}
+
+// Read-only, paged list of the players filed under one guild with their wallet and bank, for the owner's
+// lookup. It writes nothing, not even the guild's settings row, and ignores the guild's coin-system switch (a
+// reader is not a coin operation). The order is total, so a page never overlaps the next: assets first, then
+// the user ID. A page past the last is the last page; an empty guild has one empty page.
+async function readWalletPage(guildId, { page = 1, pageSize = DEFAULT_PAGE_SIZE } = {}) {
+  return withCoinDatabase((api) => {
+    requireGuildId(guildId);
+
+    const normalizedSize = normalizeLimit(pageSize);
+    const total = Number(api.get(
+      `SELECT COUNT(*) AS count
+       FROM coin_guild_players gp
+       JOIN coin_wallets w ON w.user_id = gp.user_id
+       WHERE gp.guild_id = ?`,
+      [guildId]
+    ).count);
+    const pageCount = Math.max(1, Math.ceil(total / normalizedSize));
+    const normalizedPage = Math.min(normalizePage(page), pageCount);
+    const rows = api.all(
+      `SELECT gp.user_id, w.balance, COALESCE(ba.balance, 0) AS bank_balance
+       FROM coin_guild_players gp
+       JOIN coin_wallets w ON w.user_id = gp.user_id
+       LEFT JOIN coin_bank_accounts_global ba ON ba.user_id = gp.user_id
+       WHERE gp.guild_id = ?
+       ORDER BY (w.balance + COALESCE(ba.balance, 0)) DESC, gp.user_id ASC
+       LIMIT ? OFFSET ?`,
+      [guildId, normalizedSize, (normalizedPage - 1) * normalizedSize]
+    );
+
+    return {
+      guildId,
+      page: normalizedPage,
+      pageSize: normalizedSize,
+      pageCount,
+      total,
+      rows: rows.map((row) => ({
+        userId: row.user_id,
+        balance: Number(row.balance),
+        bankBalance: Number(row.bank_balance || 0),
+      })),
+    };
   });
 }
 
@@ -987,53 +1096,6 @@ async function purchaseItem(guildId, userId, itemId, quantity = 1) {
   });
 }
 
-async function refundPurchase(guildId, userId, { itemId, quantity, amount, reason }) {
-  return withCoinTransaction((api) => {
-    const player = ensurePlayer(api, guildId, userId);
-    const normalizedAmount = normalizeNonNegativeInteger(amount, '退款金額');
-    const normalizedQuantity = normalizePositiveInteger(quantity || 1, '退款數量');
-    const item = api.get('SELECT * FROM coin_global_shop_items WHERE id = ?', [itemId]);
-    const timestamp = nowIso();
-    const after = player.balance + normalizedAmount;
-
-    mutateWalletWithApi(api, {
-      guildId,
-      userId,
-      type: TransactionType.SYSTEM_REFUND,
-      balanceDelta: normalizedAmount,
-      totalSpentTarget: Math.max(player.totalSpent - normalizedAmount, 0),
-      operatorId: null,
-      reason,
-      metadata: { itemId, quantity: normalizedQuantity },
-      createdAt: timestamp,
-    });
-
-    if (item?.stock !== null && item?.stock !== undefined) {
-      api.run('UPDATE coin_global_shop_items SET stock = stock + ?, updated_at = ? WHERE id = ?', [
-        normalizedQuantity,
-        timestamp,
-        itemId,
-      ]);
-    }
-
-    api.run(
-      `UPDATE coin_global_inventory
-       SET quantity = MAX(quantity - ?, 0)
-       WHERE user_id = ? AND item_id = ?`,
-      [normalizedQuantity, userId, itemId]
-    );
-    api.run('DELETE FROM coin_global_inventory WHERE user_id = ? AND item_id = ? AND quantity <= 0', [
-      userId,
-      itemId,
-    ]);
-    return {
-      before: player.balance,
-      after,
-      amount: normalizedAmount,
-    };
-  });
-}
-
 async function getInventory(guildId, userId) {
   return withCoinTransaction((api) => {
     const settings = ensureGuildSettings(api, guildId);
@@ -1052,6 +1114,29 @@ async function getInventory(guildId, userId) {
   });
 }
 
+// Read-only counterpart of getInventory, for looking at somebody else's inventory. It files nobody under the
+// guild and writes nothing, not even the guild's settings row.
+async function readInventory(guildId, userId) {
+  return withCoinDatabase((api) => {
+    assertEconomyEnabledReadOnly(api, guildId);
+    requireUserId(userId);
+
+    return api
+      .all(
+        `SELECT *
+         FROM coin_global_inventory
+         WHERE user_id = ? AND quantity > 0
+         ORDER BY updated_at DESC, item_id`,
+        [userId]
+      )
+      .map(mapInventoryItem);
+  });
+}
+
+// The inventory table is global. Without a user the list is limited to the players of this guild, like the
+// purchase list (getAllPurchaseHistory) is limited to purchases made here, so a guild's audit does not list
+// people who never used the economy in it. With a user the rows are that user's; the command only asks for a
+// user who is a member of the guild.
 async function getAllInventory(guildId, { userId = null, limit = DEFAULT_PAGE_SIZE } = {}) {
   return withCoinDatabase((api) => {
     requireGuildId(guildId);
@@ -1062,6 +1147,9 @@ async function getAllInventory(guildId, { userId = null, limit = DEFAULT_PAGE_SI
     if (userId) {
       where += ' AND user_id = ?';
       params.push(userId);
+    } else {
+      where += ' AND user_id IN (SELECT user_id FROM coin_guild_players WHERE guild_id = ?)';
+      params.push(guildId);
     }
 
     params.push(normalizeLimit(limit, MAX_PAGE_SIZE));
@@ -1124,28 +1212,61 @@ async function getAllPurchaseHistory(guildId, { userId = null, limit = DEFAULT_P
   });
 }
 
+// The counts both database status readers report. A falsy guildId counts every guild.
+function collectDatabaseCounts(api, guildId) {
+  const count = (tableName, whereSql = '', params = []) =>
+    Number(api.get(`SELECT COUNT(*) AS count FROM ${tableName} ${whereSql}`, params).count);
+  const lastTransaction = api.get(
+    guildId
+      ? 'SELECT * FROM coin_transactions WHERE guild_id = ? ORDER BY created_at DESC, id DESC LIMIT 1'
+      : 'SELECT * FROM coin_transactions ORDER BY created_at DESC, id DESC LIMIT 1',
+    guildId ? [guildId] : []
+  );
+
+  return {
+    players: count('coin_guild_players', guildId ? 'WHERE guild_id = ?' : '', guildId ? [guildId] : []),
+    shopItems: count('coin_global_shop_items', 'WHERE deleted = 0'),
+    transactions: count('coin_transactions', guildId ? 'WHERE guild_id = ?' : '', guildId ? [guildId] : []),
+    purchases: count('coin_global_purchases', guildId ? 'WHERE source_guild_id = ?' : '', guildId ? [guildId] : []),
+    adminLogs: count('coin_admin_logs', guildId ? 'WHERE guild_id = ?' : '', guildId ? [guildId] : []),
+    lastTransaction: lastTransaction ? mapTransaction(lastTransaction) : null,
+  };
+}
+
 async function getCoinDatabaseStats(guildId) {
   return withCoinTransaction(async (api) => {
     const settings = guildId ? ensureGuildSettings(api, guildId) : null;
     const databaseInfo = await getCoinDatabaseInfo();
-    const count = (tableName, whereSql = '', params = []) =>
-      Number(api.get(`SELECT COUNT(*) AS count FROM ${tableName} ${whereSql}`, params).count);
-    const lastTransaction = api.get(
-      guildId
-        ? 'SELECT * FROM coin_transactions WHERE guild_id = ? ORDER BY created_at DESC, id DESC LIMIT 1'
-        : 'SELECT * FROM coin_transactions ORDER BY created_at DESC, id DESC LIMIT 1',
-      guildId ? [guildId] : []
-    );
 
     return {
       databaseInfo,
       settings,
-      players: count('coin_guild_players', guildId ? 'WHERE guild_id = ?' : '', guildId ? [guildId] : []),
-      shopItems: count('coin_global_shop_items', 'WHERE deleted = 0'),
-      transactions: count('coin_transactions', guildId ? 'WHERE guild_id = ?' : '', guildId ? [guildId] : []),
-      purchases: count('coin_global_purchases', guildId ? 'WHERE source_guild_id = ?' : '', guildId ? [guildId] : []),
-      adminLogs: count('coin_admin_logs', guildId ? 'WHERE guild_id = ?' : '', guildId ? [guildId] : []),
-      lastTransaction: lastTransaction ? mapTransaction(lastTransaction) : null,
+      ...collectDatabaseCounts(api, guildId),
+    };
+  });
+}
+
+// Read-only counterpart of getCoinDatabaseStats, for the owner's database status command. It never writes: a guild without a
+// settings row does not get one, and no transaction is opened, so the database file is not rewritten either.
+// A falsy guildId reports every guild together (players then counts one row per guild a user is in).
+// For one guild, `settings` says whether the coin system is on. A guild without a settings row counts as
+// enabled, which is the state ensureGuildSettings would give it on first use, and is marked recorded: false.
+async function readCoinDatabaseStats(guildId = null) {
+  const databaseInfo = await getCoinDatabaseInfo();
+
+  return withCoinDatabase((api) => {
+    let settings = null;
+    if (guildId) {
+      const row = api.get('SELECT * FROM coin_guild_settings WHERE guild_id = ?', [guildId]);
+      settings = row
+        ? { ...mapSettings(row), recorded: true }
+        : { guildId, enabled: true, recorded: false };
+    }
+
+    return {
+      databaseInfo,
+      settings,
+      ...collectDatabaseCounts(api, guildId),
     };
   });
 }
@@ -1154,7 +1275,9 @@ module.exports = {
   CoinServiceError,
   ShopItemTypes,
   TransactionType,
+  describeTransactionReason,
   adjustPlayerBalance,
+  adjustPlayerBalanceWithApi,
   createShopItem,
   dailyCheckin,
   deleteShopItem,
@@ -1173,7 +1296,10 @@ module.exports = {
   getTransactions,
   listShopItems,
   purchaseItem,
-  refundPurchase,
+  readCoinDatabaseStats,
+  readInventory,
+  readPlayerBalance,
+  readWalletPage,
   resetPlayerData,
   setGuildEconomyEnabled,
   setShopItemEnabled,
@@ -1183,6 +1309,9 @@ module.exports = {
   addDays,
   getCoinTimezone,
   ensureGuildSettings,
+  ensureGuildEconomyRowWithApi,
+  readGuildEconomyEnabledWithApi,
   ensurePlayer,
+  readPlayer,
   insertAdminLog,
 };

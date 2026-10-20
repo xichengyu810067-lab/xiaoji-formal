@@ -1,5 +1,6 @@
-const { BoardCoreError, cloneJson } = require('../../../../games/contracts');
+const { BoardCoreError, cloneJson } = require('../core/contracts');
 const { createGridMoveParser, getModalValue, parseGridCoordinate } = require('./boardInteractionAdapter');
+const { MAX_INPUT_LENGTH: MAX_JUDGE_INPUT_LENGTH } = require('../turtleSoup/retriever');
 
 const GAME_CHOICES = Object.freeze([
   Object.freeze({ name: '海龜湯（1–20 人）', value: 'turtle-soup' }),
@@ -52,7 +53,7 @@ const CONTROL_DEFINITIONS = Object.freeze({
 const MODAL_DEFINITIONS = Object.freeze({
   'turtle-soup': Object.freeze({
     ask: Object.freeze({ title: '向小吉提問', fields: [Object.freeze({ id: 'input', label: '只能用是、否或無關回答的問題', style: 'paragraph', maxLength: 1000 })] }),
-    guess: Object.freeze({ title: '猜海龜湯答案', fields: [Object.freeze({ id: 'input', label: '完整說明你的推理', style: 'paragraph', maxLength: 2000 })] }),
+    guess: Object.freeze({ title: '猜海龜湯答案', fields: [Object.freeze({ id: 'input', label: '完整說明你的推理', style: 'paragraph', maxLength: MAX_JUDGE_INPUT_LENGTH })] }),
   }),
   chess: Object.freeze({
     move: Object.freeze({ title: '西洋棋走棋', fields: [
@@ -171,8 +172,10 @@ function createActionParsers() {
   });
 }
 
+// Both names come from stored sessions and button ids, so only keys the tables define count.
 function getModalDefinition(gameKey, controlId) {
-  return MODAL_DEFINITIONS[gameKey]?.[controlId] || null;
+  const modals = Object.hasOwn(MODAL_DEFINITIONS, gameKey) ? MODAL_DEFINITIONS[gameKey] : null;
+  return modals && Object.hasOwn(modals, controlId) ? modals[controlId] : null;
 }
 
 function getControls(gameKey) {

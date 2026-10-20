@@ -1,4 +1,4 @@
-const { BoardRuleError } = require('../../../../games/contracts');
+const { BoardRuleError } = require('../core/contracts');
 const { isTrustedJudgeAction } = require('../turtleSoup/trustedJudgeAction');
 
 const key = 'turtle-soup';

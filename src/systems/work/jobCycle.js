@@ -1,6 +1,11 @@
 const { GLOBAL_RULE_VERSION, BASIC_RATIO } = require('./workRules');
 const crypto = require('node:crypto');
 const { CoinServiceError, ensureGuildSettings, ensurePlayer } = require('../../services/coinService');
+const {
+  findEscrowedLegacyWaiterOrderWithApi,
+  findPendingLegacyMakerItemWithApi,
+  findUnpaidLegacyMakerBonusItemWithApi,
+} = require('../casino/venueOrders');
 
 const RULE_VERSION = 'legacy-v21';
 const SNAPSHOT_KINDS = [
@@ -167,14 +172,8 @@ function legacySettlementPeriodKey(snapshot) {
 }
 
 function hasOpenLegacyVenueWithApi(api, jobId) {
-  const maker = api.get(
-    "SELECT 1 AS found FROM casino_venue_order_items WHERE maker_job_id = ? AND status = 'pending' LIMIT 1",
-    [jobId]
-  );
-  const waiter = api.get(
-    "SELECT 1 AS found FROM casino_venue_orders WHERE waiter_job_id = ? AND tip_status = 'escrowed' LIMIT 1",
-    [jobId]
-  );
+  const maker = findPendingLegacyMakerItemWithApi(api, jobId);
+  const waiter = findEscrowedLegacyWaiterOrderWithApi(api, jobId);
   return Boolean(maker || waiter);
 }
 
@@ -189,10 +188,7 @@ function legacyReadyForActivation(api, snapshot, now) {
   );
   if (!settlement || !['granted', 'legacy_paid'].includes(settlement.status)) return false;
   if (hasOpenLegacyVenueWithApi(api, snapshot.job_id)) return false;
-  if (api.get(
-    "SELECT 1 AS found FROM casino_venue_order_items WHERE maker_job_id = ? AND status = 'completed' AND bonus_paid = 0 AND bonus_amount > 0 LIMIT 1",
-    [snapshot.job_id]
-  )) return false;
+  if (findUnpaidLegacyMakerBonusItemWithApi(api, snapshot.job_id)) return false;
   if (api.get(
     "SELECT 1 AS found FROM coin_work_tasks WHERE job_id = ? AND status = 'pending' AND completed_at IS NULL LIMIT 1",
     [snapshot.job_id]
@@ -265,6 +261,9 @@ function completeLegacyTaskWithApi(api, {
   );
   if (!row || row.job_id == null || row.global_cycle_id) {
     throw new CoinServiceError('LEGACY_TASK_NOT_FOUND', '找不到這筆原群待辦。');
+  }
+  if (String(row.task_type || '').startsWith('casino_venue_')) {
+    throw new CoinServiceError('VENUE_TASK_REQUIRES_ORDER', '場館待辦須透過原場館訂單流程完成。');
   }
   const initial = api.get(
     "SELECT snapshot_json FROM coin_work_legacy_snapshot_items WHERE job_id = ? AND item_kind = 'task' AND item_id = ?",
@@ -369,11 +368,21 @@ function completeWorkTaskWithApi(api, input) {
   throw new CoinServiceError('WORK_TASK_SCOPE_CONFLICT', '工作待辦來源無法核對，暫停提交。');
 }
 
+// Task types starting with casino_venue_ belong to the venue flows, which write their tasks through
+// src/systems/work/venueTasks.js; the waiter payroll checks those tasks against their orders.  A
+// worker or an administrator cannot make one by hand (any case, surrounding spaces ignored).
+function refuseReservedVenueTaskType(taskType) {
+  if (String(taskType ?? '').trim().toLowerCase().startsWith('casino_venue_')) {
+    throw new CoinServiceError('VENUE_TASK_TYPE_RESERVED', '場館任務類型由系統保留，不能自行建立。');
+  }
+}
+
 function createGlobalWorkTaskWithApi(api, {
   guildId, userId, description, taskType = 'work_report', noWorkAvailable = false,
   channelId = null, channelName = null, messageId = null, attachmentUrls = [],
   externalServerCount = 0, externalServerIds = [], jobTypes, timestamp = new Date().toISOString(),
 }) {
+  if (!noWorkAvailable) refuseReservedVenueTaskType(taskType);
   const settings = ensureGuildSettings(api, guildId);
   if (!settings.enabled) throw new CoinServiceError('COIN_DISABLED', '這個伺服器的吉幣系統目前停用。');
   const cycle = getActiveCycleForUser(api, userId, timestamp);
@@ -413,6 +422,7 @@ function createGlobalPendingTaskWithApi(api, {
   guildId, userId, description, taskType = 'admin_task', dueHours = 10,
   jobTypes, timestamp = new Date().toISOString(),
 }) {
+  refuseReservedVenueTaskType(taskType);
   const settings = ensureGuildSettings(api, guildId);
   if (!settings.enabled) throw new CoinServiceError('COIN_DISABLED', '這個伺服器的吉幣系統目前停用。');
   const cycle = getActiveCycleForUser(api, userId, timestamp);
