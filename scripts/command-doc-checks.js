@@ -7,7 +7,7 @@ const { COMMAND_DOCS_PATH, renderCommandDocs } = require('./render-command-docs'
 // Checks that the documents and the website follow the command catalog. scripts/check-project.js
 // runs them for `npm run check`, and test/commandDocs.test.js exercises them. Nothing here writes a file.
 
-const README_COMMAND_HEADING = '公開指令';
+const COMMAND_SECTION_HEADING = '公開指令';
 const WEBSITE_ROOT = path.resolve(__dirname, '..', 'website');
 const WEBSITE_TEXT_EXTENSIONS = new Set(['.html', '.js']);
 
@@ -55,26 +55,26 @@ function findRemovedMentions(text, catalog = defaultCatalog) {
   return classifyMentions(text, catalog).filter((problem) => problem.removed).map((problem) => problem.message);
 }
 
-function findReadmeCommandSection(readme) {
-  const pattern = new RegExp(`\\n## ${README_COMMAND_HEADING}\\n([\\s\\S]*?)(?=\\n## |$)`, 'u');
+function findOperationsCommandSection(readme) {
+  const pattern = new RegExp(`\\n## ${COMMAND_SECTION_HEADING}\\n([\\s\\S]*?)(?=\\n## |$)`, 'u');
   const match = pattern.exec(`\n${readme}`);
   return match ? match[1] : null;
 }
 
-// The README command section follows the catalog: it names only live commands, it lists every command
+// The operations guide command section follows the catalog: it names only live commands, it lists every command
 // that /help lists, and no removed command appears anywhere else in the file. The setup chapters
 // mention paths of their own, so outside the section only removed names are looked for.
-function findReadmeIssues(readme, catalog = defaultCatalog) {
-  const section = findReadmeCommandSection(readme);
-  if (section === null) return [`README.md has no "${README_COMMAND_HEADING}" section`];
-  const issues = findStaleMentions(section, catalog).map((issue) => `${README_COMMAND_HEADING} section: ${issue}`);
+function findOperationsIssues(readme, catalog = defaultCatalog) {
+  const section = findOperationsCommandSection(readme);
+  if (section === null) return [`docs/OPERATIONS.md has no "${COMMAND_SECTION_HEADING}" section`];
+  const issues = findStaleMentions(section, catalog).map((issue) => `${COMMAND_SECTION_HEADING} section: ${issue}`);
   const mentioned = new Set(findMentions(section).map((mention) => mention.command));
   const listedInHelp = new Set(buildHelpSections(catalog).flatMap(({ entries }) => entries.map(({ name }) => name)));
   for (const name of listedInHelp) {
-    if (!mentioned.has(name)) issues.push(`${README_COMMAND_HEADING} section does not list /${name}`);
+    if (!mentioned.has(name)) issues.push(`${COMMAND_SECTION_HEADING} section does not list /${name}`);
   }
   for (const issue of findRemovedMentions(readme.replace(section, ''), catalog)) {
-    issues.push(`outside the ${README_COMMAND_HEADING} section: ${issue}`);
+    issues.push(`outside the ${COMMAND_SECTION_HEADING} section: ${issue}`);
   }
   return issues;
 }
@@ -191,13 +191,13 @@ function findWebsiteIssues({ websiteRoot = WEBSITE_ROOT, catalog = defaultCatalo
 }
 
 module.exports = {
-  README_COMMAND_HEADING,
+  COMMAND_SECTION_HEADING,
   WEBSITE_ROOT,
   extractWebsiteText,
   findCommandDocsIssues,
   findMentions,
-  findReadmeCommandSection,
-  findReadmeIssues,
+  findOperationsCommandSection,
+  findOperationsIssues,
   findRemovedMentions,
   findStaleMentions,
   findWebsiteIssues,
