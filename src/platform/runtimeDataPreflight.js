@@ -32,6 +32,14 @@ async function preflightRuntimeData({
   captureEnabled = isArchiveCaptureEnabled,
   checkArchive = preflightArchive,
   initializeCoins = initializeCoinDatabase,
+  // Injected by index.js (protectedEffects.start): the safety ledgers need the open coin
+  // database for their registrations, and they are opened before any runtime takes them.
+  // Resolves with the delivered ledgers (purpose ID -> ledger); never rejects for a ledger
+  // problem.
+  bootstrapLedgers = async () => new Map(),
+  checkOwnerSafetyNotifications = async () => {},
+  checkWelcomeSideEffects = async () => {},
+  checkPublicSideEffects = async () => {},
 } = {}) {
   requireExistingCoinDatabase(coinPath, filesystem);
   const descriptors = [{ filePath: coinPath }, admission.audit, admission.whitelist,
@@ -55,6 +63,10 @@ async function preflightRuntimeData({
     throw new Error('AI archive 無法使用；已停止登入。');
   }
   await initializeCoins();
+  const ledgers = await bootstrapLedgers({ reservedDescriptors: descriptors });
+  await checkOwnerSafetyNotifications({ reservedDescriptors: descriptors, ledgers });
+  await checkWelcomeSideEffects({ reservedDescriptors: descriptors, ledgers });
+  await checkPublicSideEffects({ reservedDescriptors: descriptors, ledgers });
 }
 
 module.exports = { preflightRuntimeData, requireExistingCoinDatabase };

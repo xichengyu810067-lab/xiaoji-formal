@@ -1,10 +1,19 @@
-const { getBotOwnerId } = require('../utils/env');
 const logger = require('../utils/logger');
 const { configureArchivePathResolver, getArchivePath, openArchive } = require('../systems/conversation/aiArchive');
+const { SAFETY_EVENT_CODES, emitSafetyEvent } = require('../platform/safetyEventCatalog');
+const {
+  getConversationDecisionPayload,
+  getMessageDecisionContext,
+  getPublicProjectionDecisionPayload,
+  sanitizeUntrustedText,
+  verifyConversationDecisionContext,
+  verifyPublicProjectionDecisionContext,
+} = require('../systems/conversation/disclosurePolicy');
 
 const ARCHIVE_UNAVAILABLE_REPLY = '小吉目前無法安全保存這次對話，請稍後再試。';
-const ARCHIVE_POLICY_VERSION = '1.1.0';
-const OWNER_ALERT = '小吉的對話保存暫時失敗，需檢查 AI archive；需要保存的 AI 回覆已暫停。';
+// Must equal `version` in website/policyPublication.js; the host .env must carry the same
+// XIAOJI_ARCHIVE_POLICY_VERSION or capture stays off.
+const ARCHIVE_POLICY_VERSION = '1.2.0';
 let archive = null;
 let currentPath = null;
 let alerted = false;
@@ -30,14 +39,9 @@ async function alertOwner(client) {
   if (alerted) return;
   alerted = true;
   logger.error('[AI_ARCHIVE] Persistence unavailable; AI replies requiring storage are paused.');
-  const ownerId = getBotOwnerId();
-  if (!ownerId || !client?.users?.fetch) return;
-  try {
-    const owner = await client.users.fetch(ownerId);
-    await owner?.send?.(OWNER_ALERT);
-  } catch (_error) {
-    logger.warn('[AI_ARCHIVE] Owner alert could not be delivered.');
-  }
+  // The Owner notifier owns its durable ledger, DM channel binding and rate budget.  Do
+  // not use client.users.fetch()/send() here: that bypassed all of those safeguards.
+  emitSafetyEvent(SAFETY_EVENT_CODES.ARCHIVE_UNAVAILABLE, { actorId: client?.user?.id });
 }
 
 async function preflightArchive(client) {
@@ -53,11 +57,14 @@ async function preflightArchive(client) {
 }
 
 function summary(value) {
-  return String(value || '').replace(/<@!?\d+>|<@&\d+>|<#\d+>/g, '')
+  return sanitizeUntrustedText(value).replace(/<@!?\d+>|<@&\d+>|<#\d+>/g, '')
     .replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-async function archiveInteraction(message, { userText, assistantText }) {
+async function archiveInteraction(message, decision) {
+  const { archiveAllowed, userText, text: assistantText } = getConversationDecisionPayload(decision);
+  if (!archiveAllowed) throw new TypeError('Conversation decision does not authorize archive persistence.');
+  verifyConversationDecisionContext(decision, getMessageDecisionContext(message), 'archive');
   if (!isArchiveCaptureEnabled()) return true;
   try {
     const store = getArchive();
@@ -69,8 +76,8 @@ async function archiveInteraction(message, { userText, assistantText }) {
       guildId: message.guildId || null,
       channelId: String(message.channelId),
       happenedAt: new Date(message.createdTimestamp).toISOString(),
-      userContent: String(message.content || ''),
-      assistantContent: String(assistantText || ''),
+      userContent: sanitizeUntrustedText(userText),
+      assistantContent: sanitizeUntrustedText(assistantText),
     };
     const saved = store.appendInteraction(scope);
     if (!saved.persisted) throw new Error(`Archive rejected interaction: ${saved.reason}`);
@@ -81,7 +88,10 @@ async function archiveInteraction(message, { userText, assistantText }) {
   }
 }
 
-async function confirmArchiveInteraction(message, { userText, assistantText }) {
+async function confirmArchiveInteraction(message, decision) {
+  const { archiveAllowed, userText, text: assistantText } = getConversationDecisionPayload(decision);
+  if (!archiveAllowed) throw new TypeError('Conversation decision does not authorize archive confirmation.');
+  verifyConversationDecisionContext(decision, getMessageDecisionContext(message), 'confirm');
   if (!isArchiveCaptureEnabled()) return true;
   try {
     const interactionKey = `discord:${message.id}`;
@@ -111,7 +121,9 @@ async function markArchivePartialDelivery(message) {
   }
 }
 
-function archivePublicMessage(message, content) {
+function archivePublicMessage(message, decision) {
+  const { text: content } = getPublicProjectionDecisionPayload(decision);
+  verifyPublicProjectionDecisionContext(decision, getMessageDecisionContext(message));
   if (!isArchiveCaptureEnabled()) return true;
   try {
     const result = getArchive().appendPublicMessage({
@@ -120,7 +132,7 @@ function archivePublicMessage(message, content) {
       guildId: String(message.guildId),
       channelId: String(message.channelId),
       happenedAt: new Date(message.createdTimestamp).toISOString(),
-      content: String(content),
+      content: sanitizeUntrustedText(content),
     });
     if (!result.persisted) throw new Error(`Archive rejected public message: ${result.reason}`);
     return true;

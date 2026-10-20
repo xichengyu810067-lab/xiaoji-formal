@@ -25,7 +25,12 @@ test('venue membership verifies named humans in the current guild', async () => 
   const result = await verifyVenueMembers(guild([member('1'), member('2')]), { userIds: ['1', '2', '1'] });
   assert.deepEqual(result, { guildId: '100', verifiedUserIds: ['1', '2'], rosterComplete: false });
   await assert.rejects(() => verifyVenueMembers(guild([member('1', '200')]), { userIds: ['1'] }), { code: 'VENUE_MEMBERSHIP_UNVERIFIED' });
-  await assert.rejects(() => verifyVenueMembers(guild([member('1', '100', true)]), { userIds: ['1'] }), { code: 'VENUE_MEMBERSHIP_UNVERIFIED' });
+  // A bot is refused for being a bot, in words that do not suggest trying again later.
+  await assert.rejects(() => verifyVenueMembers(guild([member('1', '100', true)]), { userIds: ['1'] }), {
+    code: 'VENUE_STAFF_IS_BOT', message: '機器人不能擔任服務生、廚師或調酒師，請改選真人成員。',
+  });
+  // A bot of another server is not found here, so it stays an unverified member rather than a named bot.
+  await assert.rejects(() => verifyVenueMembers(guild([member('1', '200', true)]), { userIds: ['1'] }), { code: 'VENUE_MEMBERSHIP_UNVERIFIED' });
 });
 
 test('venue auto assignment requires the complete verified roster', async () => {
@@ -35,5 +40,7 @@ test('venue auto assignment requires the complete verified roster', async () => 
   });
   await assert.rejects(() => verifyVenueMembers(guild([member('1')], { memberCount: 2 }), { completeRoster: true }), { code: 'VENUE_MEMBERSHIP_UNVERIFIED' });
   await assert.rejects(() => verifyVenueMembers(guild([member('1')], { fail: true }), { completeRoster: true }), { code: 'VENUE_MEMBERSHIP_UNVERIFIED' });
-  await assert.rejects(() => verifyVenueMembers(roster, { userIds: ['3'], completeRoster: true }), { code: 'VENUE_MEMBERSHIP_UNVERIFIED' });
+  await assert.rejects(() => verifyVenueMembers(roster, { userIds: ['3'], completeRoster: true }), { code: 'VENUE_STAFF_IS_BOT' });
+  await assert.rejects(() => verifyVenueMembers(roster, { userIds: ['1', '3'], completeRoster: true }), { code: 'VENUE_STAFF_IS_BOT' });
+  await assert.rejects(() => verifyVenueMembers(roster, { userIds: ['9'], completeRoster: true }), { code: 'VENUE_MEMBERSHIP_UNVERIFIED' });
 });

@@ -1,8 +1,6 @@
 const { ModalBuilder, ActionRowBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const { GAME_CHOICES } = require('../../games/discord/boardControls');
-const { getBoardRuntime } = require('../../games/boardRuntimeRegistry');
-const { isGuildApproved: defaultIsGuildApproved } = require('../../services/auditService');
-const { isBotOwner: defaultIsBotOwner } = require('../../utils/ownerOnly');
+const { GAME_CHOICES } = require('./board/discord/boardControls');
+const { getBoardRuntime } = require('./board/core/boardRuntimeRegistry');
 const { createSoloSessionService } = require('./soloSessionService');
 const { GameError } = require('./soloGameError');
 const { buildSoloMessagePayload } = require('./soloPresenter');
@@ -13,6 +11,7 @@ const SOLO_CHOICES = Object.freeze([
   { label: '數字配對', value: 'solo:number-match' },
   { label: '數獨', value: 'solo:sudoku' },
 ]);
+const SOLO_NAMES = Object.freeze(Object.fromEntries(SOLO_CHOICES.map((choice) => [choice.value.slice('solo:'.length), choice.label])));
 const DIFFICULTY_CHOICES = Object.freeze([
   { label: '簡單', value: 'easy' }, { label: '一般', value: 'normal' },
   { label: '複雜', value: 'complex' }, { label: '困難', value: 'hard' },
@@ -111,15 +110,18 @@ function friendlyError(error) {
     SESSION_EXPIRED: '這局已逾時，請開始新遊戲。', SESSION_NOT_ACTIVE: '這局已結束。',
     ACTION_LIMIT_REACHED: '這局已達操作次數上限。',
     SESSION_NOT_FOUND: '找不到這局。', INVALID_ACTION: error?.message || '這一步不符合規則。',
+    CORPUS_UNAVAILABLE: '海龜湯題庫暫時無法使用；其他遊戲不受影響。',
+    OPERATION_CONFLICT: '這個互動已用於不同的遊戲開局。',
+    RECEIPT_CORRUPT: '這局的開局收據無法驗證，請通知管理員。',
     GIVEN_LOCKED: error?.message || '數獨題目原有的數字不能修改。',
     WRONG_SUDOKU_ENTRY: error?.message || '答案錯誤，棋盤未更新。',
-    GUILD_NOT_APPROVED: '小吉在這個伺服器尚未通過機器人擁有者的審核，暫時無法提供服務。',
   };
   return messages[error?.code] || '遊戲目前無法處理，請稍後再試。';
 }
 
 function resultMessage(session) {
   if (session.status === 'expired') return '這局已逾時，請開始新遊戲。';
+  if (session.status === 'cancelled') return '這局已由你提前結束，請開始新遊戲。';
   if (session.status === 'completed') {
     const ending = session.gameType === 'tetris' ? '本局已結束！' : '通關！';
     if (session.rewardStatus === 'granted') {
@@ -138,17 +140,13 @@ function resultMessage(session) {
   return '遊戲面板已更新。';
 }
 
-function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRuntime, renderPng, runtimeLogger,
-  isGuildApproved = defaultIsGuildApproved, isBotOwner = defaultIsBotOwner } = {}) {
+function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRuntime, renderPng, runtimeLogger } = {}) {
   if (!service) throw new GameError('STORE_NOT_CONFIGURED', 'Solo game service is required.');
   const payload = (session) => buildSoloMessagePayload(session, { renderPng });
 
-  function assertAdmitted(interaction) {
+  function assertGuildChannel(interaction) {
     if (!interaction?.guildId || !interaction?.channelId || !interaction?.user?.id) {
       throw new GameError('INVALID_REQUEST', 'Guild channel required.');
-    }
-    if (!isBotOwner(interaction.user.id) && !isGuildApproved(interaction.guildId)) {
-      throw new GameError('GUILD_NOT_APPROVED', 'Guild admission is required.');
     }
   }
 
@@ -164,19 +162,32 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
   }
 
   async function start(interaction, gameType, difficulty) {
-    assertAdmitted(interaction);
+    assertGuildChannel(interaction);
     await interaction.deferReply();
-    const created = await service.create({ userId: interaction.user.id, guildId: interaction.guildId, channelId: interaction.channelId, gameType, difficulty });
+    const created = await service.create({ userId: interaction.user.id, guildId: interaction.guildId,
+      channelId: interaction.channelId, gameType, difficulty, interactionId: interaction.id });
+    if (created.alreadyApplied) {
+      const current = await service.get({ sessionId: created.id, actorId: interaction.user.id,
+        guildId: interaction.guildId, channelId: interaction.channelId });
+      if (current.messageId) {
+        await editPanel(current);
+        await interaction.editReply({ content: '這個開局已處理，原遊戲面板已重新整理。',
+          allowedMentions: { parse: [] } });
+        return current;
+      }
+      Object.assign(created, current);
+    }
     await interaction.editReply(payload(created));
     const message = await interaction.fetchReply();
     return service.bindMessage({ sessionId: created.id, actorId: interaction.user.id, guildId: interaction.guildId,
       channelId: interaction.channelId, messageId: message.id });
   }
 
-  async function resume(interaction) {
-    assertAdmitted(interaction);
+  async function resume(interaction, gameType = null) {
+    assertGuildChannel(interaction);
     await interaction.deferReply({ ephemeral: true });
-    const session = await service.findLatest({ actorId: interaction.user.id, guildId: interaction.guildId, channelId: interaction.channelId });
+    const session = await service.findLatest({ actorId: interaction.user.id, guildId: interaction.guildId,
+      channelId: interaction.channelId, gameType });
     if (!session) return interaction.editReply({ content: '目前沒有進行中的個人遊戲。', allowedMentions: { parse: [] } });
     if (session.messageId) {
       let existing = null;
@@ -202,9 +213,52 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
     return interaction.editReply({ content: '遊戲面板已重新建立。', allowedMentions: { parse: [] } });
   }
 
+  // Ends the caller's own personal games in this channel, early and without a reward (/board stop). The service picks
+  // the games by caller, guild and channel, so nobody else's game can be reached from here. The public panel of each
+  // game is edited to say it ended and loses its buttons; a panel that cannot be edited (deleted, or the bot may no
+  // longer write there) does not undo the ending, and the reply says so.
+  async function stop(interaction) {
+    try {
+      assertGuildChannel(interaction);
+      if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true });
+      const ended = await service.cancelActive({ actorId: interaction.user.id, guildId: interaction.guildId,
+        channelId: interaction.channelId });
+      if (!ended.length) {
+        await interaction.editReply({ content: '你在這個頻道目前沒有進行中的個人遊戲。', allowedMentions: { parse: [] } });
+        return { ok: true, ended: [] };
+      }
+      let panelFailures = 0;
+      for (const session of ended) {
+        if (!session.messageId) continue;
+        try { await editPanel(session); }
+        catch (error) {
+          panelFailures += 1;
+          runtimeLogger?.error?.('solo game ended panel edit failed', error);
+        }
+      }
+      const names = ended.map((session) => SOLO_NAMES[session.gameType] || session.gameType).join('、');
+      await interaction.editReply({
+        content: [
+          `已結束你在這個頻道的個人遊戲：${names}。提前結束不發獎勵。`,
+          panelFailures
+            ? `有 ${panelFailures} 個遊戲面板沒能更新（訊息可能已被刪除，或小吉無法編輯它）；遊戲本身已結束，面板上的按鈕不會再有作用。`
+            : '遊戲面板已改成「已結束」，按鈕不會再有作用。',
+        ].join('\n'),
+        allowedMentions: { parse: [] },
+      });
+      return { ok: true, ended: ended.map((session) => session.id) };
+    } catch (error) {
+      runtimeLogger?.error?.('solo game stop failed', error);
+      const response = { content: friendlyError(error), allowedMentions: { parse: [] } };
+      if (interaction.deferred || interaction.replied) await interaction.editReply(response);
+      else await interaction.reply({ ...response, ephemeral: true });
+      return { ok: false, code: error?.code || 'SOLO_STOP_FAILED' };
+    }
+  }
+
   async function executeCommand(interaction) {
     try {
-      assertAdmitted(interaction);
+      assertGuildChannel(interaction);
       const subcommand = interaction.options.getSubcommand();
       if (subcommand === 'menu') return await interaction.reply(menuPayload());
       if (subcommand === 'resume') return await resume(interaction);
@@ -224,7 +278,7 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
     if (!customId.startsWith('solo|1|')) return false;
     let scope = null;
     try {
-      assertAdmitted(interaction);
+      assertGuildChannel(interaction);
       if (customId === 'solo|1|menu' && interaction.isStringSelectMenu()) {
         const selected = String(interaction.values?.[0] || '');
         if (selected.startsWith('solo:')) return await interaction.reply(difficultyPayload(selected.slice(5)));
@@ -277,7 +331,7 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
       try { await editPanel(result); }
       catch (error) {
         runtimeLogger?.error?.('solo game panel edit failed', error);
-        message += ' 這一步已儲存，但面板更新失敗；請按重新整理或使用 /games resume。';
+        message += ' 這一步已儲存，但面板更新失敗；請按重新整理或使用 /board status。';
       }
       await interaction.editReply({ content: message, allowedMentions: { parse: [] } });
       return true;
@@ -295,15 +349,18 @@ function createSoloDiscordRuntime({ service, client, boardRuntime = getBoardRunt
     }
   }
 
-  return Object.freeze({ executeCommand, handleInteraction, start, resume });
+  return Object.freeze({ executeCommand, handleInteraction, start, resume, stop, service });
 }
 
-function createDefaultSoloDiscordRuntime({ client, runtimeLogger, rewardCoordinator = null } = {}) {
+// The reward coordinator is the assembly root's: this module builds none of its own, and without one it refuses to
+// start rather than fail later, when a finished game asks for its reward.
+function createDefaultSoloDiscordRuntime({ client, runtimeLogger, rewardCoordinator } = {}) {
+  if (typeof rewardCoordinator?.grantInTransaction !== 'function') {
+    throw new GameError('REWARD_NOT_CONFIGURED', 'The solo game runtime needs the reward coordinator from the assembly root.');
+  }
   const { withCoinTransaction, withCoinDatabase } = require('../../services/coinDatabase');
-  const { createRuntimeRewardCoordinator } = require('../../coordinators/rewardRuntime');
-  const coordinator = rewardCoordinator || createRuntimeRewardCoordinator();
   const service = createSoloSessionService({ withTransaction: withCoinTransaction, withDatabase: withCoinDatabase,
-    grantRewardOnceV2WithApi: (api, input) => coordinator.grantInTransaction(api, input) });
+    grantRewardOnceV2WithApi: (api, input) => rewardCoordinator.grantInTransaction(api, input) });
   return createSoloDiscordRuntime({ service, client, runtimeLogger });
 }
 

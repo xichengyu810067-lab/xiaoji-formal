@@ -17,7 +17,7 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - run: npm ci
+      - run: npm ci --no-audit
       - run: npm run check
       - run: npm test
       - run: npm run ci:runtime
@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         working-directory: ${{ runner.temp }}/public-core
         run: |
-          npm ci
+          npm ci --no-audit
           npm run check
           npm test
           npm run ci:runtime

@@ -1,4 +1,9 @@
-const { withCoinDatabase, withCoinTransaction } = require('../../services/coinDatabase');
+const { Routes } = require('discord.js');
+const {
+  normalizeWorkReminderTimestamp,
+  withCoinDatabase,
+  withCoinTransaction,
+} = require('../../services/coinDatabase');
 const {
   CoinServiceError,
   TransactionType,
@@ -8,25 +13,60 @@ const {
 } = require('../../services/coinService');
 const { mutateWalletWithApi } = require('../../services/coinWalletService');
 const { grantRewardOnceV2, getRewardReceiptV2, grantRewardOnceV2WithApi, makeRewardKey } = require('../../services/featurePlatformService');
-const { createRuntimeRewardCoordinator } = require('../../coordinators/rewardRuntime');
+const { getWorkRewardCoordinator } = require('./workRewardPort');
+const { getWorkRoleCoordinator } = require('./workRolePort');
 const {
   activatePrimaryJobWithApi,
-  calculateGlobalPayrollWithApi,
   captureLegacyJobsForUserWithApi,
   completeWorkTaskWithApi,
   createGlobalPendingTaskWithApi,
   createGlobalWorkTaskWithApi,
   getActiveCycleForUser,
   hasOpenLegacyVenueWithApi,
-  hasOpenPrimaryWaiterOrderWithApi,
   legacySettlementPeriodKey,
   mapPrimary,
-  reviewPrimaryPenaltyAppealWithApi,
   selectPrimaryJobWithApi,
   verifySavedSnapshot,
-} = require('../economy/workSystem');
+} = require('./jobCycle');
+const {
+  calculateGlobalPayrollWithApi,
+  calculatePrimaryPenaltyRefundAmount,
+  hasOpenPrimaryWaiterOrderWithApi,
+  reviewPrimaryPenaltyAppealWithApi,
+} = require('./payroll');
+const {
+  findPendingPrimaryMakerItemWithApi,
+  findVenueSweepOrderForTaskWithApi,
+  listUnpaidLegacyMakerBonusItemsWithApi,
+  markLegacyMakerBonusPaidWithApi,
+  markPrimaryMakerBonusPaidWithApi,
+  listVenueSweepWaiterTaskKeysWithApi,
+} = require('../casino/venueOrders');
 const logger = require('../../utils/logger');
 const { isBotOwner } = require('../../utils/ownerOnly');
+const {
+  getPublicEffectRuntime,
+  issuePenaltyGrant,
+  issueWorkReminderGrant,
+} = require('../../platform/publicEffectAdapter');
+const {
+  buildWorkPenaltyAnnouncementBody,
+  consumeWorkPenaltySourceProof,
+  proveWorkPenaltySourceWithApi,
+} = require('../safety/workPenaltySource');
+const {
+  buildWorkReminderBody,
+  buildWorkReminderPreparationRecord,
+  buildWorkReminderSendRecord,
+  consumeWorkReminderSourceProof,
+  normalizeReminderSource,
+  proveWorkReminderAckWithApi,
+  proveWorkReminderPlanWithApi,
+  proveWorkReminderSourceWithApi,
+  reminderOperationId,
+  validateDmChannelBindingForOperation,
+} = require('../safety/workReminderSource');
+const { applyWorkReminderPlanWithApi } = require('./workReminderAccounting');
 
 const JOB_TYPES = Object.freeze([
   {
@@ -132,6 +172,14 @@ const TASK_STATUS = Object.freeze({
   CANCELED: 'cancelled',
   NO_WORK_AVAILABLE: 'no_work_available',
 });
+// Venue reassignments and cancellations used to store cancelled tasks as 'canceled'. New writes
+// use TASK_STATUS.CANCELED; reads treat the old spelling as the same status. No stored row is
+// rewritten.
+const LEGACY_TASK_CANCELED_SPELLING = 'canceled';
+
+function normalizeTaskStatus(status) {
+  return status === LEGACY_TASK_CANCELED_SPELLING ? TASK_STATUS.CANCELED : status;
+}
 
 const PenaltyStatus = Object.freeze({
   ACTIVE: 'active',
@@ -156,6 +204,10 @@ const MIN_WORK_DAYS = 1;
 const MAX_WORK_DAYS = 30;
 const PAY_TIME_LABEL = '22:00 (台灣時間)';
 const WORK_REMINDER_HOURS = 10;
+const WORK_REMINDER_BATCH_LIMIT = 25;
+// A blocked or deferred candidate must not consume one of the 25 send slots. Scan a
+// bounded superset so a busy recipient cannot starve unrelated reminders forever.
+const WORK_REMINDER_SCAN_LIMIT = WORK_REMINDER_BATCH_LIMIT * 4;
 const WORK_AUTO_COMPLETE_HOURS = 24;
 const APPEAL_WINDOW_DAYS = 14;
 const MAX_DESCRIPTION_LENGTH = 1000;
@@ -169,6 +221,27 @@ const VALID_PAYROLL_TASK_STATUSES = Object.freeze([
   TASK_STATUS.COMPLETED,
   TASK_STATUS.NO_WORK_AVAILABLE,
 ]);
+// Statuses of a submission its worker may still edit or delete, and an administrator may still
+// review (paid and deleted ones are refused earlier).  An edit always sends the submission back to review, also after approval or rejection.
+// Cancelled, expired and system-closed tasks are records of how a task ended, not submissions.
+const EDITABLE_SUBMISSION_STATUSES = new Set([
+  TASK_STATUS.PENDING,
+  TASK_STATUS.APPROVED,
+  TASK_STATUS.REJECTED,
+  TASK_STATUS.COMPLETED,
+  TASK_STATUS.NO_WORK_AVAILABLE,
+]);
+
+// Tasks the casino venue makes for its waiters, chefs and bartenders (casino_venue_service,
+// casino_venue_meal, casino_venue_drink), recognized by this prefix as in jobCycle and the reminder
+// source.  The venue flows open and close them and the waiter payroll checks them against their
+// orders, so editing, deleting or reviewing one by hand could stop a settlement or break the tip
+// flow.
+function refuseVenueTaskChange(row, message = '場館任務由系統管理，不能修改或刪除。') {
+  if (String(row.task_type || '').startsWith('casino_venue_')) {
+    throw new CoinServiceError('VENUE_TASK_SYSTEM_MANAGED', message);
+  }
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -363,7 +436,7 @@ function mapTask(row) {
     globalCycleId: row.global_cycle_id || null,
     jobName: row.job_name,
     taskType: row.task_type,
-    status: row.status,
+    status: normalizeTaskStatus(row.status),
     description: row.description || '',
     attachmentUrls,
     expectedChannelId: row.expected_channel_id || null,
@@ -779,19 +852,7 @@ function calculateVenueBonusForJob(api, job) {
     return { amount: 0, itemIds: [] };
   }
 
-  const rows = api.all(
-    `SELECT id, bonus_amount
-     FROM casino_venue_order_items
-     WHERE guild_id = ?
-       AND maker_user_id = ?
-       AND maker_job_id = ?
-       AND maker_is_npc = 0
-       AND status = 'completed'
-       AND bonus_paid = 0
-       AND bonus_amount > 0
-     ORDER BY completed_at ASC, id ASC`,
-    [job.guildId, job.userId, job.id]
-  );
+  const rows = listUnpaidLegacyMakerBonusItemsWithApi(api, { guildId: job.guildId, userId: job.userId, jobId: job.id });
 
   return {
     amount: rows.reduce((sum, row) => sum + Number(row.bonus_amount || 0), 0),
@@ -942,6 +1003,8 @@ async function getWorkStatus(guildId, userId) {
       latestPayroll: latestPayroll ? mapPayroll(latestPayroll) : null,
       latestPrimaryPayroll: latestPrimaryPayroll ? {
         cycleId: latestPrimaryPayroll.cycle_id,
+        // The server the settled cycle was started in: the pay of a cycle started elsewhere is not shown to this one.
+        sourceGuildId: latestPrimaryPayroll.source_guild_id,
         jobName: latestPrimaryPayroll.job_name,
         paidAmount: Number(latestPrimaryPayroll.paid_amount),
         grossAmount: Number(latestPrimaryPayroll.gross_amount),
@@ -989,11 +1052,12 @@ async function getAllWorkStatuses(guildId, { limit = 10, visibleUserIds = null }
   });
 }
 
+// Resigning is not offered: a started job always runs to the end of its chosen days and is then
+// settled.  /work cancel replies with this text; cancelJob refuses with it.
+const RESIGNATION_UNAVAILABLE_MESSAGE = '目前不開放辭職。已開始的工作會在選定的天數期滿時自動結算薪水並結束。';
+
 async function cancelJob() {
-  throw new CoinServiceError(
-    'WORK_CUTOVER_CANCEL_REVIEW',
-    '舊工作與已賺取薪資須先按原規則結清；目前不能取消或清除原工作。'
-  );
+  throw new CoinServiceError('WORK_CUTOVER_CANCEL_REVIEW', RESIGNATION_UNAVAILABLE_MESSAGE);
 }
 async function reportWork(
   guildId,
@@ -1079,7 +1143,11 @@ async function listWorkTasks(guildId, { userId = null, status = null, limit = 10
       params.push(userId);
     }
 
-    if (status) {
+    if (normalizeTaskStatus(status) === TASK_STATUS.CANCELED) {
+      // Either spelling of the cancelled status (see LEGACY_TASK_CANCELED_SPELLING).
+      where += ' AND status IN (?, ?)';
+      params.push(TASK_STATUS.CANCELED, LEGACY_TASK_CANCELED_SPELLING);
+    } else if (status) {
       where += ' AND status = ?';
       params.push(status);
     }
@@ -1114,6 +1182,7 @@ async function editWorkSubmission(
     if (row.user_id !== actorUserId && !canManage) {
       throw new CoinServiceError('NOT_OWN_SUBMISSION', '你只能修改自己的工作內容。');
     }
+    refuseVenueTaskChange(row);
     if (row.global_cycle_id && !row.completed_at) {
       throw new CoinServiceError('PRIMARY_TASK_NOT_COMPLETED', '指派的主職待辦須先用 task-id 完成，才能修改提交內容。');
     }
@@ -1124,6 +1193,13 @@ async function editWorkSubmission(
 
     if (row.status === TASK_STATUS.DELETED) {
       throw new CoinServiceError('SUBMISSION_DELETED', '這筆工作已經刪除，請重新提交新的工作內容。');
+    }
+
+    // Editing sends a submission (back) to review.  A task that was cancelled, expired or closed
+    // by the system is not a submission: putting it back to pending would revive it as an open
+    // obligation (reminders, overdue penalty) or turn an overdue close-out into payable work.
+    if (!EDITABLE_SUBMISSION_STATUSES.has(normalizeTaskStatus(row.status))) {
+      throw new CoinServiceError('SUBMISSION_NOT_EDITABLE', '這筆工作已取消、逾期或由小吉接手完成，不能再修改。');
     }
 
     const timestamp = nowIso();
@@ -1187,12 +1263,23 @@ async function deleteWorkSubmission(
     if (row.user_id !== actorUserId && !canManage) {
       throw new CoinServiceError('NOT_OWN_SUBMISSION', '你只能刪除自己的工作內容。');
     }
+    refuseVenueTaskChange(row);
     if (row.global_cycle_id && !row.completed_at) {
       throw new CoinServiceError('PRIMARY_TASK_NOT_COMPLETED', '指派的主職待辦尚未完成，不能刪除以免遺失義務。');
     }
 
     if (isLockedSubmission(row)) {
       throw new CoinServiceError('SUBMISSION_ALREADY_PAID', '這筆工作已經發薪，不能再刪除。如有特殊情況，請聯絡管理員。');
+    }
+
+    if (row.status === TASK_STATUS.DELETED) {
+      throw new CoinServiceError('SUBMISSION_DELETED', '這筆工作已經刪除。');
+    }
+
+    // Deleting would overwrite the status and review reason that record how the task ended (for
+    // example an overdue close-out).  Penalties are kept apart and never depended on the task status.
+    if (!EDITABLE_SUBMISSION_STATUSES.has(normalizeTaskStatus(row.status))) {
+      throw new CoinServiceError('SUBMISSION_NOT_DELETABLE', '這筆工作已取消、逾期或由小吉接手完成，不能刪除。');
     }
 
     const timestamp = nowIso();
@@ -1224,6 +1311,7 @@ async function reviewWorkSubmission(guildId, reviewerId, submissionId, { action,
     if (!row) {
       throw new CoinServiceError('SUBMISSION_NOT_FOUND', '找不到這筆工作提交紀錄。');
     }
+    refuseVenueTaskChange(row, '場館任務由系統管理，不能審核。');
     if (row.global_cycle_id && !row.completed_at) {
       throw new CoinServiceError('PRIMARY_TASK_NOT_COMPLETED', '指派的主職待辦尚未完成，不能審核。');
     }
@@ -1234,6 +1322,12 @@ async function reviewWorkSubmission(guildId, reviewerId, submissionId, { action,
 
     if (row.status === TASK_STATUS.DELETED) {
       throw new CoinServiceError('SUBMISSION_DELETED', '這筆工作已被刪除，不能再審核。');
+    }
+
+    // Approving would count a cancelled, expired or system-closed task as work, and either action
+    // would overwrite the reason it ended with.
+    if (!EDITABLE_SUBMISSION_STATUSES.has(normalizeTaskStatus(row.status))) {
+      throw new CoinServiceError('SUBMISSION_NOT_REVIEWABLE', '這筆工作已取消、逾期或由小吉接手完成，不能審核。');
     }
 
     const nextStatus = action === TASK_STATUS.APPROVED ? TASK_STATUS.APPROVED : TASK_STATUS.REJECTED;
@@ -1441,6 +1535,48 @@ async function createWorkPenaltyAppeal(guildId, userId, penaltyId, { reason = ''
   });
 }
 
+// Payroll marks a penalty applied even when the pay it was taken from was already used up, so what a
+// legacy penalty really took is worked out from the payroll receipt, the way a primary job's refund is:
+// penalties are taken from the gross in id order. The legacy receipt keeps the pay paid, the base salary
+// and the pay ratio but not the gross, so the gross is rebuilt from them. When the pay was used up in a
+// worked job its extras are not on the receipt; the base salary is then used, which never refunds more
+// than was taken.
+function calculateLegacyPenaltyRefundAmount(api, penalty) {
+  const payroll = api.get(
+    'SELECT base_salary, pay_ratio, paid_amount FROM coin_payroll_history WHERE job_id = ? ORDER BY id DESC LIMIT 1',
+    [penalty.jobId]
+  );
+  if (!payroll) {
+    throw new CoinServiceError('WORK_PAYROLL_REQUIRED', '扣薪已有套用紀錄但缺少發薪收據，暫停退款。');
+  }
+
+  const applied = api.get(
+    `SELECT COALESCE(SUM(penalty_amount), 0) AS total,
+            COALESCE(SUM(CASE WHEN id < ? THEN penalty_amount ELSE 0 END), 0) AS prior
+     FROM coin_work_penalties
+     WHERE job_id = ? AND user_id = ? AND applied_at IS NOT NULL`,
+    [penalty.id, penalty.jobId, penalty.userId]
+  );
+  const baseSalary = Number(payroll.base_salary);
+  const payRatio = Number(payroll.pay_ratio);
+  const paidAmount = Number(payroll.paid_amount);
+  let grossAmount;
+
+  if (payRatio <= 0) {
+    grossAmount = 0;
+  } else if (payRatio < 1) {
+    grossAmount = Math.round(baseSalary * payRatio);
+  } else {
+    grossAmount = paidAmount > 0 ? paidAmount + Number(applied.total) : baseSalary;
+  }
+
+  return calculatePrimaryPenaltyRefundAmount(
+    { gross_amount: grossAmount, paid_amount: paidAmount },
+    { amount: penalty.penaltyAmount },
+    Number(applied.prior)
+  );
+}
+
 async function reviewWorkPenaltyAppeal(guildId, reviewerId, appealId, { action, reason = '' } = {}) {
   return withCoinTransaction((api) => {
     const id = Number(appealId);
@@ -1483,24 +1619,27 @@ async function reviewWorkPenaltyAppeal(guildId, reviewerId, appealId, { action, 
       );
 
       if (penalty.appliedAt && !penalty.refundedAt && penalty.penaltyAmount > 0) {
-        const player = ensurePlayer(api, guildId, penalty.userId);
-        const after = player.balance + penalty.penaltyAmount;
-        mutateWalletWithApi(api, {
-          guildId,
-          userId: penalty.userId,
-          type: TransactionType.WORK_PENALTY_REFUND,
-          balanceDelta: penalty.penaltyAmount,
-          totalEarnedDelta: penalty.penaltyAmount,
-          operatorId: reviewerId,
-          reason: `扣薪申訴通過，退還扣薪 #${penalty.id}`,
-          metadata: { penaltyId: penalty.id, appealId: id },
-          createdAt: timestamp,
-        });
+        const refundable = calculateLegacyPenaltyRefundAmount(api, penalty);
+        if (refundable > 0) {
+          const player = ensurePlayer(api, guildId, penalty.userId);
+          const after = player.balance + refundable;
+          mutateWalletWithApi(api, {
+            guildId,
+            userId: penalty.userId,
+            type: TransactionType.WORK_PENALTY_REFUND,
+            balanceDelta: refundable,
+            totalEarnedDelta: refundable,
+            operatorId: reviewerId,
+            reason: `扣薪申訴通過，退還扣薪 #${penalty.id}`,
+            metadata: { penaltyId: penalty.id, appealId: id },
+            createdAt: timestamp,
+          });
+          refund = { amount: refundable, before: player.balance, after };
+        }
         api.run(
           'UPDATE coin_work_penalties SET refunded_at = ?, updated_at = ? WHERE guild_id = ? AND id = ?',
           [timestamp, timestamp, guildId, penalty.id]
         );
-        refund = { amount: penalty.penaltyAmount, before: player.balance, after };
       }
     }
 
@@ -1532,31 +1671,342 @@ async function updateJobRoleId(guildId, jobId, roleId) {
   });
 }
 
-async function sendWorkReminder(client, row) {
-  if (!client) return false;
-  const guild = await client.guilds.fetch(row.guild_id).catch(() => null);
-  const member = guild ? await guild.members.fetch(row.user_id).catch(() => null) : null;
-  if (!member) return false;
-  const actionHint = String(row.task_type || '').startsWith('casino_venue_')
-    ? '你有尚未完成的場館任務，請用對應場館指令處理。'
-    : '請使用 /work submit 的 task-id 完成這筆待辦。';
-  const message = [
-    '你有一筆小吉工作待辦。',
-    '任務 #' + row.id + '：' + (row.description || row.task_type),
-    actionHint,
-  ].join('\n');
-  return member.send({ content: message, allowedMentions: { parse: [] } })
-    .then(() => true).catch(() => false);
+function workReminderSource(client, row, scope, slot = Number(row.reminder_count || 0) + 1) {
+  return normalizeReminderSource({
+    botId: client?.user?.id,
+    guildId: row.guild_id,
+    userId: row.user_id,
+    taskId: row.id,
+    createdAt: row.created_at,
+    scope,
+    parentId: scope === 'legacy' ? row.job_id : row.global_cycle_id,
+    slot,
+  });
 }
+
+function reminderOutcome(state, reason, fallbackAt) {
+  const attemptedAt = state?.operation?.attemptedAtMs == null
+    ? null : new Date(state.operation.attemptedAtMs).toISOString();
+  const completedAt = state?.result?.completedAt || null;
+  const fixedAt = completedAt || attemptedAt ||
+    (state?.operation?.finishedAtMs == null ? null : new Date(state.operation.finishedAtMs).toISOString()) || fallbackAt;
+  return Object.freeze({ reason, attemptedAt: attemptedAt || fixedAt, completionAt: completedAt, fixedAt });
+}
+
+async function persistAndApplyReminderAccounting(runtime, source, outcome = null) {
+  let accounting = runtime.inspectWorkReminderAccounting(source);
+  if (accounting.kind === 'conflict' || accounting.kind === 'unavailable') {
+    throw new Error('WORK_REMINDER_ACCOUNTING_UNAVAILABLE');
+  }
+  if (accounting.kind === 'acked') return Object.freeze({ kind: 'acked', plan: accounting.plan.result });
+  if (accounting.kind === 'none') {
+    if (!outcome) return Object.freeze({ kind: 'none' });
+    const proof = await withCoinDatabase((api) => proveWorkReminderPlanWithApi(api, {
+      source, dmOperationId: reminderOperationId(source), outcome,
+    }));
+    if (!proof) throw new Error('WORK_REMINDER_ACCOUNTING_PLAN_REJECTED');
+    const persisted = runtime.persistWorkReminderAccounting(proof);
+    if (!['persisted', 'existing'].includes(persisted.kind)) {
+      throw new Error('WORK_REMINDER_ACCOUNTING_PLAN_PERSIST_FAILED');
+    }
+    accounting = runtime.inspectWorkReminderAccounting(source);
+  }
+  if (accounting.kind !== 'planned' || !accounting.plan?.result || !accounting.plan?.resultDigest) {
+    throw new Error('WORK_REMINDER_ACCOUNTING_PLAN_INVALID');
+  }
+  const plan = accounting.plan.result;
+  const applied = await withCoinTransaction((api) => applyWorkReminderPlanWithApi(api, plan));
+  if (!['applied', 'already_applied'].includes(applied.kind)) {
+    throw new Error('WORK_REMINDER_ACCOUNTING_CONFLICT');
+  }
+  const ackProof = await withCoinDatabase((api) => proveWorkReminderAckWithApi(api, {
+    source,
+    plan,
+    planOperationId: accounting.plan.operationId,
+    planResultDigest: accounting.plan.resultDigest,
+    appliedAt: plan.post.taskUpdatedAt,
+  }));
+  if (!ackProof) throw new Error('WORK_REMINDER_ACCOUNTING_ACK_REJECTED');
+  const acked = runtime.persistWorkReminderAccounting(ackProof);
+  if (!['persisted', 'existing'].includes(acked.kind)) {
+    throw new Error('WORK_REMINDER_ACCOUNTING_ACK_PERSIST_FAILED');
+  }
+  return Object.freeze({ kind: 'applied', plan });
+}
+
+async function proveReminderEffect(source, effect, options) {
+  return withCoinDatabase((api) => proveWorkReminderSourceWithApi(api, {
+    source, effect, ...options,
+  }));
+}
+
+// A reminder slot may be used up without a DM only by a terminal outcome that belongs to
+// the source itself: a durable ledger record (basis durable), or a task at or before the
+// ledger cutover or its source watermark (basis computed, reason before_cutover or
+// source_watermark). A terminal answer kept only in memory (basis volatile) is never
+// accounted: a failed preparation, revoked final authorization, or missing proof must
+// not use up the reminder. Such a task is held back instead (WORK_REMINDER_HELD_IN_MEMORY).
+const SOURCE_TERMINAL_CODES = new Set(['before_cutover', 'source_watermark']);
+
+function isSourceTerminal(state) {
+  if (state?.kind !== 'terminal') return false;
+  if (state.basis === 'durable' || state.basis === 'computed') return true;
+  if (state.basis === 'volatile') return false;
+  // Answers without a basis (callers outside the public runtime).
+  if (SOURCE_TERMINAL_CODES.has(state.reason)) return true;
+  const operation = state.operation;
+  return operation?.durable === true ||
+    (operation?.durable === false && SOURCE_TERMINAL_CODES.has(operation.resultCode));
+}
+
+// A terminal answer held only in this process's memory: the task is neither accounted nor
+// skipped silently. The batch logs it once by task ID and code, and the retry tracker keeps
+// it out of the next batches (so it never holds one of their 25 places) until its delay
+// expires or the process restarts and the decision is forgotten.
+function heldInMemory(state) {
+  return state?.kind === 'terminal' && !isSourceTerminal(state);
+}
+
+function workReminderHeldInMemory() {
+  return Object.assign(new Error('WORK_REMINDER_HELD_IN_MEMORY'), { code: 'WORK_REMINDER_HELD_IN_MEMORY' });
+}
+
+async function dispatchReminderEffect(runtime, source, effect, options) {
+  const proof = await proveReminderEffect(source, effect, options);
+  const grant = issueWorkReminderGrant(proof, effect);
+  // No proof for this task right now: terminal for this attempt only, never accounted.
+  if (!grant) return Object.freeze({ kind: 'terminal', basis: 'volatile' });
+  return runtime.dispatch(grant, effect, {
+    beforeAttempt: async (begin) => {
+      const finalProof = await proveReminderEffect(source, effect, options);
+      if (!finalProof) throw Object.assign(new Error('WORK_REMINDER_AUTHORIZATION_REVOKED'), {
+        terminal: true, code: 'authorization_revoked',
+      });
+      consumeWorkReminderSourceProof(finalProof);
+      begin();
+    },
+  });
+}
+
+function isDiscordNotFound(error, code) {
+  return Number(error?.code) === code || String(error?.code || '') === String(code);
+}
+
+async function resolveWorkReminderRecipient(client, source) {
+  let guild;
+  try {
+    guild = await client.guilds.fetch(source.guildId);
+  } catch (error) {
+    if (isDiscordNotFound(error, 10004)) return null;
+    throw Object.assign(new Error('WORK_REMINDER_GUILD_LOOKUP_FAILED'), {
+      code: 'WORK_REMINDER_GUILD_LOOKUP_FAILED', cause: error,
+    });
+  }
+  if (!guild) return null;
+  try {
+    const member = await guild.members.fetch(source.userId);
+    return member && String(member.id || member.user?.id || '') === source.userId ? member : null;
+  } catch (error) {
+    if (isDiscordNotFound(error, 10007)) return null;
+    throw Object.assign(new Error('WORK_REMINDER_MEMBER_LOOKUP_FAILED'), {
+      code: 'WORK_REMINDER_MEMBER_LOOKUP_FAILED', cause: error,
+    });
+  }
+}
+
+async function processOneWorkReminder(client, row, scope, { now, cutoff, force }) {
+  const runtime = getPublicEffectRuntime();
+  if (!runtime?.isPurposeReady('work.reminder.dm.prepare') ||
+      !runtime?.isPurposeReady('work.reminder.dm.send')) return Object.freeze({ reminded: false, skipped: true });
+
+  const currentCount = Number(row.reminder_count || 0);
+  let previousAccounting = null;
+  if (currentCount > 0) {
+    const previous = workReminderSource(client, row, scope, currentCount);
+    previousAccounting = runtime.inspectWorkReminderAccounting(previous);
+    if (previousAccounting.kind === 'planned') {
+      await persistAndApplyReminderAccounting(runtime, previous);
+      return Object.freeze({ reminded: false, recovered: true });
+    }
+    if (previousAccounting.kind === 'conflict') throw new Error('WORK_REMINDER_PREVIOUS_ACCOUNTING_CONFLICT');
+  }
+
+  const source = workReminderSource(client, row, scope);
+  if (!source) throw new Error('WORK_REMINDER_SOURCE_INVALID');
+  const existingAccounting = runtime.inspectWorkReminderAccounting(source);
+  if (existingAccounting.kind === 'planned') {
+    await persistAndApplyReminderAccounting(runtime, source);
+    return Object.freeze({ reminded: false, recovered: true });
+  }
+  if (!['none'].includes(existingAccounting.kind)) throw new Error('WORK_REMINDER_ACCOUNTING_STATE_CONFLICT');
+
+  const sendRecord = buildWorkReminderSendRecord(source);
+  let sendState = runtime.inspectSource(sendRecord);
+  if (sendState.kind === 'confirmed' || sendState.kind === 'unknown' || isSourceTerminal(sendState)) {
+    const reason = sendState.kind === 'confirmed' ? 'message_confirmed' :
+      sendState.kind === 'unknown' ? 'message_unknown' : 'message_terminal';
+    const recovered = await persistAndApplyReminderAccounting(runtime, source,
+      reminderOutcome(sendState, reason, now));
+    return Object.freeze({ reminded: sendState.kind === 'confirmed', recovered: recovered.kind !== 'none' });
+  }
+  if (heldInMemory(sendState)) throw workReminderHeldInMemory();
+  if (sendState.kind !== 'retryable_before_attempt') return Object.freeze({ reminded: false, skipped: true });
+
+  // A previous reminder whose delivery is unknown keeps its fixed recovery cooldown.
+  // Manual force runs (administrators or the Owner) cannot start the next slot early,
+  // so a possibly delivered DM is never followed by an immediate duplicate.
+  const previousPlan = previousAccounting?.kind === 'acked' ? previousAccounting.plan?.result : null;
+  if (previousPlan?.reason === 'message_unknown' &&
+      !(Date.parse(now) >= Date.parse(previousPlan.recoveryNotBefore))) {
+    return Object.freeze({ reminded: false, skipped: true });
+  }
+
+  const member = await resolveWorkReminderRecipient(client, source);
+  if (!member) {
+    await persistAndApplyReminderAccounting(runtime, source,
+      Object.freeze({ reason: 'recipient_not_found', attemptedAt: now, completionAt: null, fixedAt: now }));
+    return Object.freeze({ reminded: false, notFound: true });
+  }
+
+  const reusable = typeof runtime.findReusableWorkReminderChannel === 'function'
+    ? runtime.findReusableWorkReminderChannel({ botId: source.botId, recipientId: source.userId })
+    : Object.freeze({ kind: 'none' });
+  if (reusable.kind === 'unavailable') return Object.freeze({ reminded: false, skipped: true });
+  const prepareRecord = buildWorkReminderPreparationRecord(source);
+  let preparation = reusable.kind === 'confirmed'
+    ? Object.freeze({ kind: 'confirmed', operation: reusable.operation, result: reusable.result })
+    : runtime.inspectSource(prepareRecord);
+  if (preparation.kind === 'retryable_before_attempt') {
+    const effect = Object.freeze({
+      purposeId: 'work.reminder.dm.prepare',
+      action: 'work-reminder-dm-channel.prepare',
+      target: source.userId,
+      method: 'POST',
+      route: Routes.userChannels(),
+      body: Object.freeze({ recipient_id: source.userId }),
+    });
+    preparation = await dispatchReminderEffect(runtime, source, effect,
+      { nowIso: now, cutoffIso: cutoff, force });
+  }
+  if (preparation.kind !== 'confirmed') {
+    // Only an unknown attempt or a terminal outcome of the source itself uses up the slot;
+    // unavailable, retryable, deferred, and in flight are skipped, and a terminal answer
+    // kept in memory holds the task back.
+    if (heldInMemory(preparation)) throw workReminderHeldInMemory();
+    if (preparation.kind !== 'unknown' && !isSourceTerminal(preparation)) {
+      return Object.freeze({ reminded: false, skipped: true });
+    }
+    const reason = preparation.kind === 'unknown' ? 'prepare_unknown' : 'prepare_terminal';
+    // The preparation outcome belongs to this send. Account it at the current time, so
+    // a recovered outcome never moves a reminder time backwards.
+    const accountedAt = nowIso();
+    await persistAndApplyReminderAccounting(runtime, source,
+      Object.freeze({ reason, attemptedAt: accountedAt, completionAt: null, fixedAt: accountedAt }));
+    return Object.freeze({ reminded: false });
+  }
+
+  const channelId = validateDmChannelBindingForOperation(preparation.result, preparation.operation,
+    source.botId, source.userId);
+  if (!channelId) return Object.freeze({ reminded: false, skipped: true });
+  const body = buildWorkReminderBody(row);
+  const effect = Object.freeze({
+    purposeId: 'work.reminder.dm.send',
+    action: 'work-reminder-message.create',
+    target: channelId,
+    method: 'POST',
+    route: Routes.channelMessages(channelId),
+    body,
+  });
+  sendState = await dispatchReminderEffect(runtime, source, effect, {
+    nowIso: now, cutoffIso: cutoff, force, channelBinding: preparation.result,
+    preparationOperation: preparation.operation,
+  });
+  if (heldInMemory(sendState)) throw workReminderHeldInMemory();
+  if (sendState.kind !== 'confirmed' && sendState.kind !== 'unknown' && !isSourceTerminal(sendState)) {
+    return Object.freeze({ reminded: false, skipped: true });
+  }
+  const reason = sendState.kind === 'confirmed' ? 'message_confirmed' :
+    sendState.kind === 'unknown' ? 'message_unknown' : 'message_terminal';
+  await persistAndApplyReminderAccounting(runtime, source, reminderOutcome(sendState, reason, now));
+  return Object.freeze({ reminded: sendState.kind === 'confirmed' });
+}
+// A penalty's created_at must name its offset (trailing Z or ±HH:MM, the work reminder rule);
+// otherwise it has no source time and its announcement is never sent.
+function buildPenaltySource(client, penalty) {
+  const zonedCreatedAt = normalizeWorkReminderTimestamp(penalty?.createdAt);
+  const sourceTimestampMs = zonedCreatedAt ? Date.parse(zonedCreatedAt) : Number.NaN;
+  if (!client?.user?.id || !Number.isSafeInteger(sourceTimestampMs)) return null;
+  return Object.freeze({
+    purposeId: 'work.penalty.announce',
+    sourceNamespace: 'db.coin_work_penalties',
+    botId: String(client.user.id),
+    guildId: String(penalty.guildId),
+    penaltyId: Number(penalty.id),
+    createdAt: String(penalty.createdAt),
+    sourceTimestampMs,
+  });
+}
+
+async function repairWorkPenaltyAnnouncement(penalty, result) {
+  if (!result?.announcedAt || !result?.channelId || !result?.messageId) return false;
+  return withCoinTransaction((api) => {
+    const row = api.get('SELECT * FROM coin_work_penalties WHERE guild_id = ? AND id = ? AND created_at = ?',
+      [penalty.guildId, penalty.id, penalty.createdAt]);
+    if (!row) return false;
+    if (row.announced_at) {
+      return row.announced_at === result.announcedAt && row.announcement_channel_id === result.channelId &&
+        row.announcement_message_id === result.messageId;
+    }
+    api.run(
+      `UPDATE coin_work_penalties
+       SET announced_at = ?, announcement_channel_id = ?, announcement_message_id = ?, updated_at = ?
+       WHERE guild_id = ? AND id = ? AND created_at = ? AND announced_at IS NULL`,
+      [result.announcedAt, result.channelId, result.messageId, result.announcedAt,
+        penalty.guildId, penalty.id, penalty.createdAt]
+    );
+    return Number(api.get('SELECT changes() AS count')?.count || 0) === 1;
+  });
+}
+
+// Whether the penalty's appeal deadline has passed on the penalty ledger's own clock: true,
+// false, or null when the purpose is unavailable. A deadline that does not name its offset
+// counts as passed (the announcement is never sent).
+function penaltyAppealDeadlinePassed(runtime, penalty) {
+  const ledgerNow = runtime.getObservedNow?.('work.penalty.announce') ?? null;
+  if (!Number.isSafeInteger(ledgerNow)) return null;
+  const deadline = normalizeWorkReminderTimestamp(penalty?.appealDeadlineAt);
+  return !deadline || ledgerNow >= Date.parse(deadline);
+}
+
+// A penalty announcement goes out at most until the penalty's appeal deadline. Before it, a
+// channel that cannot be sent to, or a full queue only delays it; after it, the announcement
+// is terminal (computed from the source, nothing sent or written). A test-control stop leaves
+// it unavailable, to be retried after the restart.
 async function sendWorkPenaltyAnnouncement(client, penalty) {
-  if (!client || penalty.announcedAt) {
-    return false;
+  if (!client || penalty.announcedAt) return { kind: 'terminal', announced: false, dispatched: false };
+  if (client.testControlRuntimeController?.isStopping?.()) {
+    return { kind: 'unavailable', announced: false, dispatched: false };
+  }
+  const runtime = getPublicEffectRuntime();
+  if (!client.user?.id || !runtime) return { kind: 'unavailable', announced: false, dispatched: false };
+  const source = buildPenaltySource(client, penalty);
+  if (!source) return { kind: 'terminal', reason: 'source_invalid', announced: false, dispatched: false };
+  const existing = runtime.inspectSource(source);
+  if (existing.kind === 'confirmed') {
+    const repaired = await repairWorkPenaltyAnnouncement(penalty, existing.result);
+    return { kind: 'confirmed', announced: repaired, dispatched: false };
+  }
+  if (existing.kind !== 'retryable_before_attempt') {
+    return { kind: existing.kind, announced: false, dispatched: false };
+  }
+  const deadlinePassed = penaltyAppealDeadlinePassed(runtime, penalty);
+  if (deadlinePassed === null) return { kind: 'unavailable', announced: false, dispatched: false };
+  if (deadlinePassed) {
+    return { kind: 'terminal', reason: 'appeal_deadline_passed', announced: false, dispatched: false };
   }
 
   const guild = await client.guilds.fetch(penalty.guildId).catch(() => null);
-  if (!guild) {
-    return false;
-  }
+  if (!guild) return { kind: 'retryable_before_attempt', announced: false, dispatched: false };
 
   const settings = await withCoinDatabase((api) => ensureGuildSettings(api, penalty.guildId)).catch(() => null);
   const channelIds = [
@@ -1568,93 +2018,233 @@ async function sendWorkPenaltyAnnouncement(client, penalty) {
 
   for (const channelId of channelIds) {
     channel = await guild.channels.fetch(channelId).catch(() => null);
-    if (channel?.isTextBased?.()) {
+    if (channel?.isTextBased?.() && (typeof channel.isSendable !== 'function' || channel.isSendable())) {
       break;
     }
   }
 
   if (!channel?.isTextBased?.()) {
-    channel = guild.channels.cache.find((candidate) => candidate?.isTextBased?.()) || null;
+    channel = guild.channels.cache.find((candidate) => candidate?.isTextBased?.() &&
+      (typeof candidate.isSendable !== 'function' || candidate.isSendable())) || null;
   }
 
   if (!channel?.isTextBased?.()) {
-    return false;
+    return { kind: 'retryable_before_attempt', announced: false, dispatched: false };
   }
 
-  const message = await channel
-    .send({
-      content: [
-        `**小吉工作扣薪公告 #${penalty.id}**`,
-        `當事人：<@${penalty.userId}>`,
-        `職業：${penalty.jobName}`,
-        `扣薪金額：${penalty.penaltyAmount.toLocaleString('zh-TW')} 吉幣`,
-        `原因：${penalty.reason}`,
-        `申訴期限：<t:${Math.floor(new Date(penalty.appealDeadlineAt).getTime() / 1000)}:F>`,
-        `如需申訴，請使用 \`/work appeal penalty-id:${penalty.id} reason:申訴事由\`。`,
-      ].join('\n'),
-      allowedMentions: { users: [penalty.userId], roles: [] },
-    })
-    .catch((error) => {
-      logger.warn(`發送工作扣薪公告失敗：penalty=${penalty.id}`, error);
-      return null;
-    });
-
-  if (!message) {
-    return false;
-  }
-
-  await withCoinTransaction((api) => {
-    const timestamp = nowIso();
-    api.run(
-      `UPDATE coin_work_penalties
-       SET announced_at = ?, announcement_channel_id = ?, announcement_message_id = ?, updated_at = ?
-       WHERE guild_id = ? AND id = ?`,
-      [timestamp, channel.id, message.id, timestamp, penalty.guildId, penalty.id]
-    );
+  let body;
+  try { body = buildWorkPenaltyAnnouncementBody(penalty); }
+  catch { return { kind: 'terminal', announced: false, dispatched: false }; }
+  const effect = Object.freeze({ purposeId: source.purposeId, action: 'work-penalty-message.create',
+    target: String(channel.id), method: 'POST', route: `/channels/${channel.id}/messages`, body });
+  const sourceProof = await withCoinTransaction((api) => proveWorkPenaltySourceWithApi(api,
+    { ...source, effect })).catch(() => null);
+  const grant = issuePenaltyGrant(sourceProof, effect);
+  if (!grant) return { kind: 'terminal', announced: false, dispatched: false };
+  const outcome = await runtime.dispatch(grant, effect, {
+    beforeAttempt: (begin) => withCoinTransaction((api) => {
+      if (client.testControlRuntimeController?.isStopping?.()) {
+        throw Object.assign(new Error('PENALTY_STOPPING'), { unavailable: true });
+      }
+      const passed = penaltyAppealDeadlinePassed(runtime, penalty);
+      if (passed === null) throw Object.assign(new Error('PENALTY_UNAVAILABLE'), { unavailable: true });
+      if (passed) {
+        throw Object.assign(new Error('PENALTY_APPEAL_DEADLINE_PASSED'), { terminal: true, code: 'appeal_deadline_passed' });
+      }
+      // The channel was lost meanwhile: only a delay, until the deadline.
+      if (!channel?.isTextBased?.() ||
+          (typeof channel.isSendable === 'function' && !channel.isSendable())) {
+        throw Object.assign(new Error('PENALTY_SCOPE_UNAVAILABLE'), { deferred: true });
+      }
+      const finalProof = proveWorkPenaltySourceWithApi(api, { ...source, effect });
+      if (!consumeWorkPenaltySourceProof(finalProof)) {
+        throw Object.assign(new Error('PENALTY_SOURCE_REVOKED'), { terminal: true, code: 'source_revoked' });
+      }
+      begin();
+    }),
   });
-
-  return true;
+  if (outcome.kind !== 'confirmed') {
+    if (outcome.kind === 'unknown') logger.warn(`發送工作扣薪公告結果不明：penalty=${penalty.id}`);
+    // Discord refused the notice (a 4xx, recorded rejected): it was not posted and is not
+    // sent again. Only the penalty ID and the fixed result code are logged.
+    if (outcome.kind === 'terminal' && outcome.basis === 'durable') {
+      logger.warn(`工作扣薪公告被 Discord 拒絕，不會重送：penalty=${penalty.id} code=${outcome.reason || 'effect_rejected'}`);
+    }
+    return { kind: outcome.kind, announced: false, dispatched: outcome.kind === 'unknown' };
+  }
+  const repaired = await repairWorkPenaltyAnnouncement(penalty, outcome.result);
+  return { kind: 'confirmed', announced: repaired, dispatched: true };
 }
 
-async function processWorkPenaltyAnnouncements(client, { guildId = null, limit = 10 } = {}) {
-  const rows = await withCoinDatabase((api) => {
+const penaltyAnnouncementCursors = new Map();
+
+async function processWorkPenaltyAnnouncements(client, {
+  guildId = null,
+  limit = 10,
+} = {}) {
+  const cursorKey = guildId || '*';
+  const maxDispatches = normalizeLimit(limit, 10, 10);
+  const loadRows = (cursor) => withCoinDatabase((api) => {
     const params = [PenaltyStatus.ACTIVE];
     let where = 'WHERE status = ? AND announced_at IS NULL';
     if (guildId) {
       where += ' AND guild_id = ?';
       params.push(guildId);
     }
-    params.push(normalizeLimit(limit, 10, 25));
+    if (cursor) {
+      where += ' AND (created_at > ? OR (created_at = ? AND id > ?))';
+      params.push(cursor.createdAt, cursor.createdAt, cursor.id);
+    }
+    params.push(250);
     return api
       .all(`SELECT * FROM coin_work_penalties ${where} ORDER BY created_at ASC, id ASC LIMIT ?`, params)
       .map(mapPenalty);
   });
-
-  let announced = 0;
-  for (const penalty of rows) {
-    if (await sendWorkPenaltyAnnouncement(client, penalty)) {
-      announced++;
-    }
+  let rows = await loadRows(penaltyAnnouncementCursors.get(cursorKey) || null);
+  if (rows.length === 0 && penaltyAnnouncementCursors.has(cursorKey)) {
+    penaltyAnnouncementCursors.delete(cursorKey);
+    rows = await loadRows(null);
   }
 
-  return { checked: rows.length, announced };
+  let announced = 0;
+  let dispatched = 0;
+  for (const penalty of rows) {
+    const source = buildPenaltySource(client, penalty);
+    const state = getPublicEffectRuntime()?.inspectSource(source);
+    if (state?.kind === 'retryable_before_attempt' && dispatched >= maxDispatches) continue;
+    const result = await sendWorkPenaltyAnnouncement(client, penalty);
+    if (result.dispatched) dispatched += 1;
+    if (result.announced) announced += 1;
+  }
+  const last = rows.at(-1);
+  if (last) penaltyAnnouncementCursors.set(cursorKey, { createdAt: last.createdAt, id: last.id });
+
+  return { checked: rows.length, announced, dispatched };
+}
+
+// A task that failed in this process is left out of scheduled batches for an in-memory
+// delay (90 minutes, doubling up to one day) instead of failing first in every hourly
+// batch. A forced manual run retries it immediately; a restart clears the delays.
+function createWorkReminderRetryTracker({
+  baseMs = 90 * 60 * 1000,
+  maxMs = 24 * 60 * 60 * 1000,
+  limit = 500,
+  log = logger,
+} = {}) {
+  const entries = new Map();
+  return Object.freeze({
+    deferredTaskIds(nowMs) {
+      const taskIds = [];
+      for (const [taskId, entry] of entries) {
+        if (entry.retryAtMs > nowMs) taskIds.push(taskId);
+      }
+      return taskIds;
+    },
+    recordFailure(taskId, nowMs) {
+      const previous = entries.get(taskId);
+      const failures = (previous?.failures || 0) + 1;
+      const delayMs = Math.min(baseMs * 2 ** Math.min(failures - 1, 30), maxMs);
+      entries.delete(taskId);
+      // Memory stays bounded: the oldest tracked task is forgotten first and simply
+      // becomes eligible again.
+      while (entries.size >= limit) entries.delete(entries.keys().next().value);
+      const entry = Object.freeze({ failures, delayMs, retryAtMs: nowMs + delayMs });
+      entries.set(taskId, entry);
+      if (delayMs >= maxMs && !(previous?.delayMs >= maxMs)) {
+        log.warn(`工作提醒任務 #${taskId} 已連續失敗 ${failures} 次，之後每 ${Math.round(maxMs / 3_600_000)} 小時才重試一次；請檢查本機 log。`);
+      }
+      return entry;
+    },
+    recordSuccess(taskId) {
+      entries.delete(taskId);
+    },
+    get(taskId) {
+      return entries.get(taskId) || null;
+    },
+    get size() {
+      return entries.size;
+    },
+    clear() {
+      entries.clear();
+    },
+  });
+}
+
+const workReminderRetries = createWorkReminderRetryTracker();
+// A batch holding the process-wide lock this long is probably stuck; warn once per batch.
+const WORK_REMINDER_STUCK_WARN_MS = 2 * 60 * 60 * 1000;
+let activeWorkReminderRun = null;
+
+function workReminderFailureCode(error) {
+  const code = error?.code;
+  if (Number.isSafeInteger(code) || (typeof code === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/u.test(code))) {
+    return String(code);
+  }
+  const message = String(error?.message || '');
+  if (/^[A-Z][A-Z0-9_]{2,63}$/u.test(message)) return message;
+  const name = String(error?.name || '');
+  return /^[A-Za-z]{1,64}$/u.test(name) && name !== 'Error' ? name : 'UNEXPECTED_ERROR';
+}
+
+function resetWorkReminderRetryStateForTests() {
+  workReminderRetries.clear();
+}
+
+function isWorkReminderGuardReady() {
+  const runtime = getPublicEffectRuntime();
+  return Boolean(runtime?.isPurposeReady?.('work.reminder.dm.prepare') &&
+    runtime?.isPurposeReady?.('work.reminder.dm.send'));
 }
 
 async function processWorkReminders(client, { guildId = null, force = false } = {}) {
-  const now = nowIso();
-  const cutoff = addHoursIso(now, -WORK_REMINDER_HOURS);
-  const params = [TASK_STATUS.PENDING, JOB_STATUS.ACTIVE];
-  let guildFilter = '';
-
-  if (guildId) {
-    guildFilter = 'AND t.guild_id = ?';
-    params.push(guildId);
+  // Only one batch runs per process. A manual run overlapping the schedule could build
+  // a second, different accounting plan for the same reminder and disable the ledger,
+  // so an overlapping trigger returns immediately instead of queueing behind the batch.
+  if (activeWorkReminderRun) {
+    const elapsedMs = Date.now() - activeWorkReminderRun.startedAtMs;
+    if (!activeWorkReminderRun.stuckWarned && elapsedMs >= WORK_REMINDER_STUCK_WARN_MS) {
+      activeWorkReminderRun.stuckWarned = true;
+      logger.warn(`工作提醒批次已執行 ${Math.floor(elapsedMs / 60_000)} 分鐘仍未結束，可能卡住；` +
+        '在它結束前新的觸發都會略過，請檢查本機 log 或重新啟動。');
+    } else if (!activeWorkReminderRun.stuckWarned) {
+      logger.info('工作提醒仍在處理上一輪，略過這次觸發。');
+    }
+    return Object.freeze({ checked: 0, reminded: 0, busy: true });
   }
+  const run = { startedAtMs: Date.now(), stuckWarned: false };
+  activeWorkReminderRun = run;
+  try {
+    return await runWorkReminderBatch(client, { guildId, force });
+  } finally {
+    if (activeWorkReminderRun === run) activeWorkReminderRun = null;
+  }
+}
 
-  params.push(force ? 1 : 0, now, force ? 1 : 0, cutoff, force ? 1 : 0, cutoff);
-  const rows = await withCoinDatabase((api) =>
-    api.all(
-      `SELECT t.*, j.last_contribution_at AS job_last_contribution_at, j.last_reminder_at AS job_last_reminder_at
+async function runWorkReminderBatch(client, { guildId, force }) {
+  const now = nowIso();
+  const nowMs = Date.parse(now);
+  const cutoff = addHoursIso(now, -WORK_REMINDER_HOURS);
+  const deferredTaskIds = force ? [] : workReminderRetries.deferredTaskIds(nowMs);
+  const deferredList = deferredTaskIds.map(() => '?').join(', ');
+  const skipDeferred = deferredTaskIds.length
+    ? { sql: `AND t.id NOT IN (${deferredList})`, params: deferredTaskIds }
+    : { sql: '', params: [] };
+  const onlyDeferred = deferredTaskIds.length
+    ? { sql: `AND t.id IN (${deferredList})`, params: deferredTaskIds }
+    : null;
+
+  const legacyQuery = (columns, idFilter, tail) => {
+    const params = [TASK_STATUS.PENDING, JOB_STATUS.ACTIVE];
+    let guildFilter = '';
+
+    if (guildId) {
+      guildFilter = 'AND t.guild_id = ?';
+      params.push(guildId);
+    }
+
+    params.push(force ? 1 : 0, now, force ? 1 : 0, cutoff, force ? 1 : 0, cutoff, ...idFilter.params);
+    return [
+      `SELECT ${columns}
        FROM coin_work_tasks t
        JOIN coin_jobs j ON j.id = t.job_id
        WHERE t.status = ?
@@ -1665,54 +2255,77 @@ async function processWorkReminders(client, { guildId = null, force = false } = 
          AND (? = 1 OR t.due_at <= ?)
          AND (? = 1 OR j.last_contribution_at IS NULL OR j.last_contribution_at <= ?)
          AND (? = 1 OR j.last_reminder_at IS NULL OR j.last_reminder_at <= ?)
-       ORDER BY t.due_at ASC
-       LIMIT 25`,
-      params
-    )
-  );
+         ${idFilter.sql}
+       ${tail}`,
+      params,
+    ];
+  };
 
+  const globalQuery = (columns, idFilter, tail) => {
+    const params = [now, cutoff];
+    const guildFilter = guildId ? 'AND t.guild_id = ?' : '';
+    if (guildId) params.push(guildId);
+    params.push(...idFilter.params);
+    return [
+      `SELECT ${columns} FROM coin_work_tasks t JOIN coin_primary_job_cycles c ON c.cycle_id = t.global_cycle_id WHERE t.status = 'pending' AND t.completed_at IS NULL AND t.reminder_count < 3 AND c.status = 'active' AND t.due_at <= ? AND (t.last_reminder_at IS NULL OR t.last_reminder_at <= ?) ${guildFilter} ${idFilter.sql} ${tail}`,
+      params,
+    ];
+  };
+
+  let checked = 0;
   let reminded = 0;
-
-  for (const row of rows) {
-    const sent = await sendWorkReminder(client, row);
-
-    await withCoinTransaction((api) => {
-      const timestamp = nowIso();
-      api.run(
-        `UPDATE coin_work_tasks
-         SET reminder_count = reminder_count + 1, last_reminder_at = ?
-         WHERE id = ?`,
-        [timestamp, row.id]
-      );
-      api.run('UPDATE coin_jobs SET last_reminder_at = ?, updated_at = ? WHERE id = ?', [
-        timestamp,
-        timestamp,
-        row.job_id,
-      ]);
-    });
-
-    if (sent) {
-      reminded++;
+  let failed = 0;
+  let deferred = 0;
+  // Legacy and global batches are isolated from each other, and every task from the
+  // rest of its batch: a failure is logged by task ID and error code (never task text)
+  // and processing continues with the next task.
+  for (const batch of [
+    { scope: 'legacy', query: legacyQuery, force, order: `ORDER BY t.due_at ASC LIMIT ${WORK_REMINDER_SCAN_LIMIT}`,
+      columns: 't.*, j.last_contribution_at AS job_last_contribution_at, j.last_reminder_at AS job_last_reminder_at' },
+    { scope: 'global', query: globalQuery, force: false, order: `ORDER BY t.due_at,t.id LIMIT ${WORK_REMINDER_SCAN_LIMIT}`,
+      columns: 't.*' },
+  ]) {
+    let rows;
+    try {
+      rows = await withCoinDatabase((api) => {
+        // Delayed tasks are only counted, so they never take a slot of the 25-task batch.
+        if (onlyDeferred) deferred += Number(api.get(...batch.query('COUNT(*) AS count', onlyDeferred, ''))?.count || 0);
+        return api.all(...batch.query(batch.columns, skipDeferred, batch.order));
+      });
+    } catch (error) {
+      failed += 1;
+      logger.error(`工作提醒批次讀取失敗：scope=${batch.scope} code=${workReminderFailureCode(error)}`);
+      continue;
+    }
+    let occupied = 0;
+    for (const row of rows) {
+      if (occupied >= WORK_REMINDER_BATCH_LIMIT) break;
+      const taskId = Number(row.id);
+      checked += 1;
+      try {
+        const result = await processOneWorkReminder(client, row, batch.scope, {
+          now, cutoff, force: batch.force,
+        });
+        workReminderRetries.recordSuccess(taskId);
+        if (result.reminded) reminded += 1;
+        // Authorization failures, queue pressure, and an in-flight operation are
+        // intentionally not batch work. Continue scanning for another candidate.
+        if (!result.skipped) occupied += 1;
+      } catch (error) {
+        failed += 1;
+        logger.error(`工作提醒處理失敗：task=${taskId} scope=${batch.scope} code=${workReminderFailureCode(error)}`);
+        workReminderRetries.recordFailure(taskId, nowMs);
+      }
     }
   }
 
-  const globalParams = [now, cutoff];
-  const globalGuildFilter = guildId ? 'AND t.guild_id = ?' : '';
-  if (guildId) globalParams.push(guildId);
-  const globalRows = await withCoinDatabase((api) => api.all(
-    "SELECT t.* FROM coin_work_tasks t JOIN coin_primary_job_cycles c ON c.cycle_id = t.global_cycle_id WHERE t.status = 'pending' AND t.completed_at IS NULL AND t.reminder_count < 3 AND c.status = 'active' AND t.due_at <= ? AND (t.last_reminder_at IS NULL OR t.last_reminder_at <= ?) " +
-      globalGuildFilter + ' ORDER BY t.due_at,t.id LIMIT 25',
-    globalParams
-  ));
-  for (const row of globalRows) {
-    const sent = await sendWorkReminder(client, row);
-    await withCoinTransaction((api) => api.run(
-      "UPDATE coin_work_tasks SET reminder_count = reminder_count + 1, last_reminder_at = ?, updated_at = ? WHERE id = ? AND global_cycle_id = ? AND status = 'pending' AND completed_at IS NULL AND reminder_count < 3",
-      [nowIso(), nowIso(), row.id, row.global_cycle_id]
-    ));
-    if (sent) reminded++;
-  }
-  return { checked: rows.length + globalRows.length, reminded };
+  return Object.freeze({
+    checked,
+    reminded,
+    ...(failed > 0 ? { failed } : {}),
+    ...(deferred > 0 ? { deferred } : {}),
+    ...(isWorkReminderGuardReady() ? {} : { guardDisabled: true }),
+  });
 }
 
 async function processExpiredWorkTasks(client = null, { guildId = null, date = new Date() } = {}) {
@@ -1759,7 +2372,8 @@ async function processExpiredWorkTasks(client = null, { guildId = null, date = n
         return { completed: false, penalty: null };
       }
 
-      const timestamp = nowIso(date);
+      // The sweep's own time, like the primary branch below (nowIso() takes no argument).
+      const timestamp = date.toISOString();
       api.run(
         `UPDATE coin_work_tasks
          SET status = ?, completed_at = ?, review_reason = ?, updated_at = ?
@@ -1807,15 +2421,36 @@ async function processExpiredWorkTasks(client = null, { guildId = null, date = n
   return { checked: rows.length, completedBySystem, penaltiesCreated, primary, announcements };
 }
 
+// The venue sweep (processExpiredVenueOrderItems) closes the waiter task of every order that
+// matches its order condition, refunding the tip and naming the cause (late waiter or late maker)
+// in the same step; leaving exactly those tasks to it keeps that review reason the same whichever
+// sweep runs first.  This sweep closes every other waiter task, so none is left to neither sweep.
+// Both checks below use the venue sweep's own condition (src/systems/casino/venueOrders.js).
+const VENUE_SERVICE_TASK_TYPE = 'casino_venue_service';
+
+// Leaves the venue sweep's waiter tasks out in SQL, before the limit, so they can never take the
+// places of other tasks.  The parameter is a JSON array of [guild_id, message_id] pairs.
+const NOT_A_VENUE_SWEEP_WAITER_TASK =
+  `AND NOT (t.task_type = '${VENUE_SERVICE_TASK_TYPE}' AND EXISTS (SELECT 1 FROM json_each(?) k ` +
+  "WHERE json_extract(k.value, '$[0]') = t.guild_id AND json_extract(k.value, '$[1]') = t.message_id)) ";
+
+function venueSweepWaiterTaskKeys(api) {
+  return JSON.stringify(listVenueSweepWaiterTaskKeysWithApi(api).map((key) => [key.guild_id, key.message_id]));
+}
+
+// The same check for one task, inside the transaction that would close it.
+function isVenueSweepWaiterTask(api, task) {
+  return task.task_type === VENUE_SERVICE_TASK_TYPE && task.message_id != null &&
+    Boolean(findVenueSweepOrderForTaskWithApi(api, { guildId: task.guild_id, messageId: task.message_id }));
+}
+
 async function processExpiredPrimaryTasks({ guildId = null, date = new Date() } = {}) {
   const cutoff = new Date(date.getTime() - WORK_AUTO_COMPLETE_HOURS * 3_600_000).toISOString();
-  const params = [cutoff];
-  const guildFilter = guildId ? 'AND t.guild_id = ?' : '';
-  if (guildId) params.push(guildId);
+  const guildFilter = guildId ? 'AND t.guild_id = ? ' : '';
   const rows = await withCoinDatabase((api) => api.all(
     "SELECT t.id FROM coin_work_tasks t JOIN coin_primary_job_cycles c ON c.cycle_id = t.global_cycle_id WHERE t.status = 'pending' AND t.completed_at IS NULL AND t.created_at <= ? AND c.status = 'active' " +
-      guildFilter + ' ORDER BY t.created_at,t.id LIMIT 50',
-    params
+      NOT_A_VENUE_SWEEP_WAITER_TASK + guildFilter + 'ORDER BY t.created_at,t.id LIMIT 50',
+    [cutoff, venueSweepWaiterTaskKeys(api), ...(guildId ? [guildId] : [])]
   ));
   let completed = 0;
   let penalties = 0;
@@ -1826,7 +2461,7 @@ async function processExpiredPrimaryTasks({ guildId = null, date = new Date() } 
           "SELECT t.*, c.salary_snapshot_json, c.status AS cycle_status FROM coin_work_tasks t JOIN coin_primary_job_cycles c ON c.cycle_id = t.global_cycle_id WHERE t.id = ? AND t.status = 'pending' AND t.completed_at IS NULL",
           [row.id]
         );
-        if (!task || task.cycle_status !== 'active') return null;
+        if (!task || task.cycle_status !== 'active' || isVenueSweepWaiterTask(api, task)) return null;
         const timestamp = date.toISOString();
         api.run(
           "UPDATE coin_work_tasks SET status = 'system_completed', completed_at = ?, review_reason = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND completed_at IS NULL",
@@ -1867,10 +2502,7 @@ async function processExpiredPrimaryTasks({ guildId = null, date = new Date() } 
 async function runPrimaryRoleCleanupAfterCommit(client, { cycleId, userId, sourceGuildId },
   { runHook = null } = {}) {
   if (!client) return { skipped: true };
-  const invoke = runHook || ((name, payload) => {
-    const { getClientExtensionHost } = require('../../extensions/extensionHost');
-    return getClientExtensionHost(client).runHook(name, payload);
-  });
+  const invoke = runHook || ((name, payload) => getWorkRoleCoordinator().runHook(client, name, payload));
   const results = await invoke('workRole.clearPrimaryJobRoleForMember', {
     client, cycleId, userId, sourceGuildId,
   });
@@ -1907,10 +2539,7 @@ async function processDuePrimaryCycles(client = null) {
           [cycle.cycle_id]
         )) return null;
         if (hasOpenPrimaryWaiterOrderWithApi(api, cycle)) return null;
-        if (['廚師', '調酒師'].includes(cycle.job_name) && api.get(
-          "SELECT 1 AS found FROM casino_venue_order_items WHERE global_cycle_id = ? AND status = 'pending' LIMIT 1",
-          [cycle.cycle_id]
-        )) return null;
+        if (['廚師', '調酒師'].includes(cycle.job_name) && findPendingPrimaryMakerItemWithApi(api, cycle.cycle_id)) return null;
         const calculated = calculateGlobalPayrollWithApi(api, cycle);
         if (typeof makeRewardKey !== 'function' || typeof grantRewardOnceV2 !== 'function' ||
             typeof getRewardReceiptV2 !== 'function' || typeof grantRewardOnceV2WithApi !== 'function') {
@@ -1922,7 +2551,7 @@ async function processDuePrimaryCycles(client = null) {
         });
         let transactionId = null;
         if (calculated.paidAmount > 0) {
-          const grant = createRuntimeRewardCoordinator().grantInTransaction(api, {
+          const grant = getWorkRewardCoordinator().grantInTransaction(api, {
             kind: 'work-settlement', canonicalSourceId, rewardKind: 'salary',
             userId: cycle.user_id, sourceGuildId: cycle.source_guild_id,
             amount: calculated.paidAmount, operationId: 'work-settlement:primary:' + cycle.cycle_id,
@@ -1948,10 +2577,7 @@ async function processDuePrimaryCycles(client = null) {
           );
         }
         for (const itemId of calculated.venueItemIds) {
-          api.run(
-            'UPDATE casino_venue_order_items SET bonus_paid = 1, updated_at = ? WHERE id = ? AND global_cycle_id = ?',
-            [timestamp, itemId, cycle.cycle_id]
-          );
+          markPrimaryMakerBonusPaidWithApi(api, { itemId, cycleId: cycle.cycle_id, timestamp });
         }
         for (const penaltyId of calculated.penaltyIds) {
           api.run(
@@ -2086,7 +2712,7 @@ async function processDueJobs(client = null) {
         });
         let transactionId = null;
         if (calculated.paidAmount > 0) {
-          const grant = createRuntimeRewardCoordinator().grantInTransaction(api, {
+          const grant = getWorkRewardCoordinator().grantInTransaction(api, {
             kind: 'work-settlement', canonicalSourceId, rewardKind: 'salary',
             userId: job.userId, sourceGuildId: job.guildId, amount: calculated.paidAmount,
             operationId: 'work-settlement:' + job.id + ':' + periodKey + ':' + job.userId,
@@ -2131,12 +2757,7 @@ async function processDueJobs(client = null) {
         }
 
         for (const orderItemId of calculated.venueBonusItemIds) {
-          api.run(
-            `UPDATE casino_venue_order_items
-             SET bonus_paid = 1, updated_at = ?
-             WHERE guild_id = ? AND id = ?`,
-            [timestamp, job.guildId, orderItemId]
-          );
+          markLegacyMakerBonusPaidWithApi(api, { guildId: job.guildId, itemId: orderItemId, timestamp });
         }
 
         for (const penaltyId of calculated.penaltyIds || []) {
@@ -2187,8 +2808,7 @@ async function processDueJobs(client = null) {
         const guild = await client.guilds.fetch(job.guildId).catch(() => null);
         const member = guild ? await guild.members.fetch(job.userId).catch(() => null) : null;
         if (member) {
-          const { getClientExtensionHost } = require('../../extensions/extensionHost');
-          await getClientExtensionHost(client).runHook('workRole.removeJobRoleForMember', {
+          await getWorkRoleCoordinator().runHook(client, 'workRole.removeJobRoleForMember', {
             member,
             jobName: job.jobName,
           }).catch((error) => {
@@ -2221,6 +2841,7 @@ module.exports = {
   JOB_TYPES,
   PAYROLL_STATUS,
   PenaltyStatus,
+  RESIGNATION_UNAVAILABLE_MESSAGE,
   TASK_STATUS,
   VENUE_JOB_NAMES,
   WAITER_JOB_NAMES,
@@ -2253,7 +2874,10 @@ module.exports = {
   processExpiredWorkTasks,
   processExpiredPrimaryTasks,
   processWorkPenaltyAnnouncements,
+  sendWorkPenaltyAnnouncement,
   processWorkReminders,
+  createWorkReminderRetryTracker,
+  resetWorkReminderRetryStateForTests,
   reportWork,
   reviewWorkPenaltyAppeal,
   createPrimaryPenaltyAppeal,

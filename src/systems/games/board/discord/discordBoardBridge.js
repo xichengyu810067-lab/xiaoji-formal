@@ -6,7 +6,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
 } = require('discord.js');
-const { BoardCoreError } = require('../../../../games/contracts');
+const { BoardCoreError } = require('../core/contracts');
 
 const BUTTON_STYLES = Object.freeze({
   primary: ButtonStyle.Primary,

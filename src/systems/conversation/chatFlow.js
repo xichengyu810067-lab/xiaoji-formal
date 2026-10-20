@@ -1,9 +1,17 @@
 const {
-  AI_PROVIDER_RATE_LIMIT_REPLY,
   finalizeAssistantReply,
   generateChatReply,
+  getDeployedModelIds,
+  getProtectedPromptTexts,
+  isGuildQuotaExhaustedError,
+  isLocalProviderGuardError,
   isProviderRateLimitError,
+  QUOTA_EXHAUSTED_MESSAGE,
 } = require('./provider');
+const { providerCallGuard } = require('./providerGuard');
+const { resolveProviderOutput } = require('./jevOutputGate');
+const { AI_SPAM_BLOCK_REASONS, aiSpamGuard, isBareCall } = require('./aiSpamGuard');
+const { refusalNoticeCap } = require('./refusalNoticeCap');
 const {
   DEFAULT_CHAT_STYLE,
   renderChatStyleFallback,
@@ -16,6 +24,7 @@ const {
 } = require('../../services/romanceModeService');
 const {
   checkCooldown,
+  endConversation,
   hasActiveConversation,
   isConversationSilenced,
   isStopConversationCommand,
@@ -26,16 +35,56 @@ const {
 } = require('../../services/conversationModeService');
 const { answerMemoryQuery, recordPrivateInteraction } = require('./projection');
 const { resolveMemberFacts } = require('./memberFacts');
-const { INTERNAL_REPLY, requestsInternalDetails, containsInternalDisclosure } = require('./disclosurePolicy');
+const {
+  INTERNAL_REPLY,
+  decideAssistantOutput,
+  decideLocalBusyOutput,
+  decideRateLimitOutput,
+  decideRequestIngress,
+  getConversationDecisionPayload,
+  getMessageDecisionContext,
+  looksLikeInjectionAttempt,
+  verifyConversationDecisionContext,
+} = require('./disclosurePolicy');
 const { ARCHIVE_UNAVAILABLE_REPLY, archiveInteraction, confirmArchiveInteraction,
   markArchivePartialDelivery, preflightArchive } = require('../../services/aiArchiveService');
-const { rememberConversationTurn } = require('../../services/conversationHistoryService');
-const { getWeatherMentionReply, isWeatherQuery, recordConversationInteraction } = require('../../coordinators/conversationCoordinator');
+const { getRecentConversationTurns, rememberConversationTurn } = require('../../services/conversationHistoryService');
+const { captureProofFor, isCurrentPublicChannel } = require('./publicVisibility');
 const logger = require('../../utils/logger');
+const { isEgressRateLimitError } = require('../../platform/egressLimiter');
+const { SAFETY_EVENT_CODES, reportSecurityAlert } = require('../../platform/safetyEventCatalog');
 
 const MENTION_OUTCOME = Object.freeze({
   SUPPRESS_PUBLIC_PERSISTENCE: 'suppress_public_persistence',
 });
+
+// The weather port: getMentionReply(userText, { guildId }) resolves to the reply to a weather
+// question or null; isQuery(userText) says whether a text is one. The second argument of
+// getMentionReply is optional context (the server the question was asked in, null in a direct
+// message): a port that reads only the text keeps working.
+const DEFAULT_WEATHER_PORT = Object.freeze({
+  getMentionReply: async () => null,
+  isQuery: () => false,
+});
+const DEFAULT_STATUS_PORT = Object.freeze({
+  recordInteraction: async () => undefined,
+});
+
+// Both members are required and nothing else is checked: getMentionReply may take the context
+// argument or ignore it, so a port written for the text alone is as valid as the default one.
+function requireWeatherPort(weatherPort) {
+  if (!weatherPort || typeof weatherPort.getMentionReply !== 'function' || typeof weatherPort.isQuery !== 'function') {
+    throw new TypeError('Conversation weather port is invalid.');
+  }
+  return weatherPort;
+}
+
+function requireStatusPort(statusPort) {
+  if (!statusPort || typeof statusPort.recordInteraction !== 'function') {
+    throw new TypeError('Conversation status port is invalid.');
+  }
+  return statusPort;
+}
 
 function isPublicPersistenceSuppressed(result) {
   return result?.outcome === MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE;
@@ -73,7 +122,9 @@ function getConversationDisplayName(message) {
   for (const candidate of candidates) {
     const normalized = String(candidate || '')
       .replace(/<@!?\d{17,20}>/g, '')
-      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      // Invisible format characters (bidirectional overrides, zero-width and tag characters) are dropped.
+      .replace(/\p{Cf}/gu, '')
+      .replace(/\p{Cc}/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 80);
@@ -116,20 +167,21 @@ function getMentionFallbackReply(
   displayName = 'Discord 使用者',
   userId = '',
   chatStyle = DEFAULT_CHAT_STYLE,
-  romanceEnabled = false
+  romanceEnabled = false,
+  weatherPort = DEFAULT_WEATHER_PORT
 ) {
+  const { isQuery: isWeatherQuery } = requireWeatherPort(weatherPort);
   logger.info('[HELP_FALLBACK] using mention fallback reply');
   const finalizeFallback = (templateName, context = {}) => finalizeAssistantReply(
     renderRomanceFallback(
       renderChatStyleFallback(chatStyle, templateName, { displayName, ...context }),
       { enabled: romanceEnabled, chatStyle, displayName }
     ),
-    userId
+    userId,
+    { displayNames: [displayName] }
   );
-  const safeUserText = String(userText || '')
-    .split(String(userId || '').trim() || '\0')
-    .join('[內部識別碼已隱藏]')
-    .replace(/\b\d{17,20}\b/g, '[Discord 識別碼已隱藏]');
+  // Generic fallback must never mirror arbitrary input, credentials, or injected instructions.
+  const safeUserText = '這件事';
   if (!userText) {
     return finalizeFallback('empty');
   }
@@ -176,22 +228,62 @@ function finalizeConversationalInformationReply(
     chatStyle,
     displayName,
   });
-  return finalizeAssistantReply(romanticReply, userId);
+  // Memory and weather replies quote stored user text or service data, not the assistant describing
+  // itself, so first-person self-description rules do not apply to them.
+  return finalizeAssistantReply(romanticReply, userId, { assistantVoice: false, displayNames: [displayName] });
 }
 
+// The romance-mode opener placed before a generated reply ("小明～小吉很喜歡和你這樣甜甜地聊聊 ♡"), or '' when
+// romance mode is off. It is program text, so the checks leave it out and read only the model's reply.
+function getRomanceReplyPrefix(chatStyle = DEFAULT_CHAT_STYLE, romanceEnabled = false, displayName = 'Discord 使用者') {
+  return renderRomanceFallback('', { enabled: romanceEnabled, chatStyle, displayName });
+}
+
+// waiveSoft (a Set of soft output rules, see disclosurePolicy.js) is passed only by the optional second opinion.
 function finalizeGeneratedConversationalReply(
   content,
   displayName = 'Discord 使用者',
   userId = '',
   chatStyle = DEFAULT_CHAT_STYLE,
-  romanceEnabled = false
+  romanceEnabled = false,
+  { waiveSoft = null } = {}
 ) {
+  if (content === INTERNAL_REPLY) return INTERNAL_REPLY;
   const romanticReply = renderRomanceFallback(content, {
     enabled: romanceEnabled,
     chatStyle,
     displayName,
   });
-  return finalizeAssistantReply(romanticReply, userId);
+  return finalizeAssistantReply(romanticReply, userId, {
+    displayNames: [displayName],
+    templatePrefix: getRomanceReplyPrefix(chatStyle, romanceEnabled, displayName),
+    waiveSoft,
+  });
+}
+
+// The whole output check of one model reply: the text check, then the decision. Both gates take the same waiveSoft.
+// protectedModelIds is the deployed model list unless a caller (a test) supplies its own.
+function evaluateProviderReply({
+  ingressDecision, reply, displayName, userId, chatStyle, romanceEnabled, waiveSoft = null,
+  protectedModelIds = getDeployedModelIds(),
+}) {
+  const finalReply = finalizeGeneratedConversationalReply(reply, displayName, userId, chatStyle, romanceEnabled, { waiveSoft });
+  const decision = decideAssistantOutput({
+    ingressDecision,
+    rawCandidate: reply,
+    styledCandidate: finalReply,
+    source: 'provider',
+    historyAllowed: true,
+    // The exact prompt texts the provider ran under; a reply that copies them is refused.
+    protectedInstructions: getProtectedPromptTexts(chatStyle, romanceEnabled),
+    // Deployed model identifiers, compared in memory only.
+    protectedModelIds,
+    // The user's display name is only a name; the romance-mode opener is program text.
+    displayNames: [displayName],
+    templatePrefix: getRomanceReplyPrefix(chatStyle, romanceEnabled, displayName),
+    waiveSoft,
+  });
+  return { finalReply, decision };
 }
 
 function splitReply(content, maxLength = 1800) {
@@ -233,9 +325,10 @@ async function replyInChunks(message, content, { onChunkDelivered } = {}) {
   try {
     await message.reply({
       content: firstChunk,
-      allowedMentions: { parse: [], repliedUser: false },
+      allowedMentions: { parse: [], users: [], roles: [], repliedUser: false },
     });
   } catch (error) {
+    if (isEgressRateLimitError(error)) return false;
     const referenceErrors = error?.rawError?.errors?.message_reference?._errors;
     const hasUnknownReferenceCode = Array.isArray(referenceErrors)
       ? referenceErrors.some((entry) => entry?.code === 'MESSAGE_REFERENCE_UNKNOWN_MESSAGE')
@@ -247,21 +340,129 @@ async function replyInChunks(message, content, { onChunkDelivered } = {}) {
     }
 
     logger.warn('[CHAT_REPLY_FALLBACK] Source message is unavailable; sending an unreferenced channel message.');
-    await message.channel.send({
-      content: firstChunk,
-      allowedMentions: { parse: [] },
-    });
+    try {
+      await message.channel.send({
+        content: firstChunk,
+        allowedMentions: { parse: [], users: [], roles: [], repliedUser: false },
+      });
+    } catch (error) {
+      if (isEgressRateLimitError(error)) return false;
+      throw error;
+    }
   }
 
   onChunkDelivered?.();
 
   for (const chunk of restChunks) {
-    await message.channel.send({ content: chunk, allowedMentions: { parse: [] } });
+    try {
+      await message.channel.send({
+        content: chunk,
+        allowedMentions: { parse: [], users: [], roles: [], repliedUser: false },
+      });
+    } catch (error) {
+      if (isEgressRateLimitError(error)) return false;
+      throw error;
+    }
     onChunkDelivered?.();
+  }
+  return true;
+}
+
+function getPriorUserStatements(message) {
+  const identity = {
+    userId: message.author.id,
+    guildId: message.guildId,
+    channelId: message.channelId,
+  };
+  if (!message.guildId) {
+    return getRecentConversationTurns(identity).map((turn) => turn.user).filter(Boolean);
+  }
+  const hasCurrentPublicProof = isCurrentPublicChannel(message) && Boolean(captureProofFor(message));
+  return hasCurrentPublicProof
+    ? getRecentConversationTurns(identity, { requirePublicCapture: true }).map((turn) => turn.user).filter(Boolean)
+    : [];
+}
+
+// Replies sent before the main flow (stop acknowledgement, oversized input, confidentiality refusal,
+// archive unavailable) spend the same per-channel cooldown and per-user provider guard budget as a
+// normal reply, so repeating them cannot bypass rate limits. A blocked attempt is dropped silently.
+// Neither limit exempts the owner. A provider call that is merely in flight does not block them.
+function admitPreflightReply(message, userText) {
+  const scope = `guild=${message.guildId || 'dm'} channel=${message.channelId} user=${message.author.id}`;
+  if (!checkCooldown(message).ok) {
+    logger.info(`[CHAT_COOLDOWN] ${scope} preflight=true`);
+    return false;
+  }
+  try {
+    providerCallGuard.admit({
+      userId: message.author.id,
+      guildId: message.guildId ?? null,
+      channelId: message.channelId,
+    }, userText);
+    return true;
+  } catch (error) {
+    if (!isLocalProviderGuardError(error)) throw error;
+    logger.info(`[CHAT_PREFLIGHT_GUARD] ${scope} reason=${error.reason}`);
+    return false;
   }
 }
 
-async function handleMentionMessage(message, { generateChatReplyImpl = generateChatReply } = {}) {
+// Reports a security alert for a message: where it was written and by whom, never what it said. The notifier
+// sends it only from the host's operation for that message (safetyEventCatalog.js reportSecurityAlert).
+function reportMessageSecurityAlert(kind, message) {
+  return reportSecurityAlert(kind, {
+    guildId: message.guildId ?? null,
+    guildName: message.guild?.name ?? '',
+    actorId: message.author?.id ?? null,
+    channelId: message.channelId ?? null,
+    messageId: message.id ?? null,
+  });
+}
+
+function hasStickerOrFile(message) {
+  return Number(message.stickers?.size) > 0 || Number(message.attachments?.size) > 0;
+}
+
+// A request the anti-spam gate blocked (aiSpamGuard.js): no model call, no provider guard count, no
+// archive, history, statistics or public memory, and no safety event. The member gets the gate's fixed
+// notice when it allows one, sent through the same egress guard and output rate limit as every reply; a
+// notice that cannot be sent is only logged, and the request stays out of persistence either way.
+async function replyToBlockedRequest(message, verdict) {
+  // Only a flood of a channel, or a member who has just been put on cooldown, is an attack worth telling the Owner
+  // of; a meaningless message, one repeat or a bare call is routine and is not.
+  if (verdict.reason === AI_SPAM_BLOCK_REASONS.CHANNEL_FLOOD || verdict.cooldownStarted === true) {
+    reportMessageSecurityAlert('flood', message);
+  }
+  if (verdict.cooldownStarted) endConversation(message);
+  if (verdict.notice) {
+    try {
+      await replyInChunks(message, verdict.notice);
+    } catch {
+      aiSpamGuard.reportNoticeFailure();
+    }
+  }
+  return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+}
+
+async function sendUnpersistedDecision(message, decision) {
+  const payload = getConversationDecisionPayload(decision);
+  if (payload.archiveAllowed || payload.historyAllowed || payload.privateMemoryAllowed) {
+    throw new TypeError('Unpersisted output must not carry persistence authority.');
+  }
+  verifyConversationDecisionContext(decision, getMessageDecisionContext(message), 'send');
+  await replyInChunks(message, payload.text);
+  return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+}
+
+async function handleMentionMessage(message, {
+  generateChatReplyImpl = generateChatReply,
+  weatherPort = DEFAULT_WEATHER_PORT,
+  statusPort = DEFAULT_STATUS_PORT,
+  // The optional second opinion ({ config, judgeAssistantReply }); undefined uses the one the environment configures.
+  jevRuntime = undefined,
+} = {}) {
+  const activeWeatherPort = requireWeatherPort(weatherPort);
+  const activeStatusPort = requireStatusPort(statusPort);
   if (shouldIgnoreChatMessage(message)) {
     return;
   }
@@ -288,30 +489,102 @@ async function handleMentionMessage(message, { generateChatReplyImpl = generateC
   }
 
   const userText = isMentioned ? mentionedText : isExplicitCall ? explicitCallText : removeBotMention(message.content, botId);
+  const isStopCommand = isStopConversationCommand(userText);
 
-  if (isStopConversationCommand(userText)) {
-    silenceConversation(message);
-    await replyInChunks(message, '好，我先安靜。');
-    return;
+  // Silencing always applies; only the acknowledgement is rate limited.
+  if (isStopCommand) silenceConversation(message);
+
+  const inputValidation = !isStopCommand && userText ? validateChatInput(userText) : { ok: true };
+
+  // A message meant for someone else, or nothing but spaces, is not a request: nothing counts it.
+  if (!inputValidation.ok && !inputValidation.message) return;
+
+  // A bare mention, or a message that is only 小吉, with nothing after it but punctuation or emoji ("小吉！",
+  // "@小吉 ~", "小吉..."; no sticker or file): not a request for the model and not counted against the
+  // member. It may get a fixed line, which also opens a conversation so that the next message needs no
+  // mention. One to three question marks ("小吉？") still ask something, so they are a request.
+  if ((isMentioned || isExplicitCall) && isBareCall(userText) && !hasStickerOrFile(message)) {
+    const presence = aiSpamGuard.evaluatePresence({
+      guildId: message.guildId ?? null,
+      channelId: message.channelId,
+      userId: message.author.id,
+    });
+    if (presence.notice && presence.reason === 'presence') startConversation(message);
+    return replyToBlockedRequest(message, presence);
   }
 
-  const inputValidation = userText ? validateChatInput(userText) : { ok: true };
+  // A reply to 小吉 with only punctuation or emoji (no sticker or file) is a reaction, not a request: it is
+  // ignored without a word, never counted against the member and never sent to the model.
+  if (isReply && isBareCall(userText) && !hasStickerOrFile(message)) {
+    return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+  }
 
-  if (!inputValidation.ok) {
-    if (inputValidation.message) {
-      await replyInChunks(message, inputValidation.message);
+  // Every request passes the anti-spam gate before anything else that costs (see replyToBlockedRequest).
+  const spamVerdict = aiSpamGuard.evaluate({
+    guildId: message.guildId ?? null,
+    channelId: message.channelId,
+    userId: message.author.id,
+    text: userText,
+    explicit: isMentioned || isExplicitCall || isReply,
+  });
+  if (!spamVerdict.allowed) return replyToBlockedRequest(message, spamVerdict);
+  // A request that ends without an answer is taken back out of the repeat history, so sending it again is
+  // not "said before" (it still counted toward the rate limits).
+  const unanswered = () => aiSpamGuard.forgetRepeat(spamVerdict.ticket);
+
+  if (isStopCommand) {
+    if (admitPreflightReply(message, userText)) {
+      await replyInChunks(message, '好，我先安靜。');
+    } else {
+      unanswered();
     }
     return;
   }
 
+  if (!inputValidation.ok) {
+    if (inputValidation.message && admitPreflightReply(message, userText)) {
+      await replyInChunks(message, inputValidation.message);
+    } else {
+      unanswered();
+    }
+    return;
+  }
+
+  const ingressDecision = decideRequestIngress({
+    userText,
+    priorUserStatements: getPriorUserStatements(message),
+    context: getMessageDecisionContext(message),
+  });
+  if (ingressDecision.kind === 'refusal') {
+    // The refusal keeps its log line and observation (refusalNoticeCap.js); the Owner is told by a security alert,
+    // one fixed notice per guild, kind and hour: a request shaped like a role or authority override is a prompt
+    // injection, any other refused request asked for the bot's internals.
+    refusalNoticeCap.report(ingressDecision.reason === 'sensitive_request'
+      ? SAFETY_EVENT_CODES.AI_PROMPT_INJECTION_BLOCKED : SAFETY_EVENT_CODES.AI_REQUEST_REFUSED, {
+      actorId: message.author?.id, guildId: message.guildId, channelId: message.channelId, messageId: message.id,
+    });
+    reportMessageSecurityAlert(looksLikeInjectionAttempt(userText) ? 'prompt-injection' : 'dev-info', message);
+    // A suppressed refusal still keeps the request out of public persistence.
+    if (!admitPreflightReply(message, userText)) {
+      unanswered();
+      return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+    }
+    const refusal = decideAssistantOutput({ ingressDecision, rawCandidate: INTERNAL_REPLY });
+    return sendUnpersistedDecision(message, refusal);
+  }
+
   if (!await preflightArchive(message.client)) {
-    await replyInChunks(message, ARCHIVE_UNAVAILABLE_REPLY);
+    unanswered();
+    if (admitPreflightReply(message, userText)) {
+      await replyInChunks(message, ARCHIVE_UNAVAILABLE_REPLY);
+    }
     return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
   }
 
   const cooldown = checkCooldown(message);
 
   if (!cooldown.ok) {
+    unanswered();
     logger.info(
       `[CHAT_COOLDOWN] guild=${message.guildId || 'dm'} channel=${message.channelId} user=${message.author.id}`
     );
@@ -336,47 +609,73 @@ async function handleMentionMessage(message, { generateChatReplyImpl = generateC
     resolveUserRomancePreference(message.author.id),
   ]);
 
-  const sendSavedReply = async (content, { rememberPrompt = false } = {}) => {
-    const safeContent = containsInternalDisclosure(content) ? INTERNAL_REPLY : content;
-    const saved = await archiveInteraction(message, { userText, assistantText: safeContent });
+  const sendDecision = async (decision) => {
+    const payload = getConversationDecisionPayload(decision);
+    verifyConversationDecisionContext(decision, getMessageDecisionContext(message), 'send');
+    // The reply the model wrote was turned into the fixed refusal because it leaked what it must not say.
+    if (payload.kind === 'refusal') reportMessageSecurityAlert('output-guard', message);
+    if (!payload.archiveAllowed) return sendUnpersistedDecision(message, decision);
+    const saved = await archiveInteraction(message, decision);
     if (!saved) {
+      unanswered();
       await replyInChunks(message, ARCHIVE_UNAVAILABLE_REPLY);
       return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
     }
     let deliveredChunks = 0;
+    let delivered;
     try {
-      await replyInChunks(message, safeContent, { onChunkDelivered: () => { deliveredChunks += 1; } });
+      delivered = await replyInChunks(message, payload.text, { onChunkDelivered: () => { deliveredChunks += 1; } });
     } catch (error) {
       if (deliveredChunks > 0) await markArchivePartialDelivery(message);
       throw error;
     }
-    if (!await confirmArchiveInteraction(message, { userText, assistantText: safeContent })) {
+    if (!delivered) {
+      // The output rate limit held back a part: the reply did not fully reach the channel, so it is
+      // neither confirmed in the archive nor written to history, statistics or private memory.
+      unanswered();
+      if (deliveredChunks > 0) await markArchivePartialDelivery(message);
       return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
     }
-    if (rememberPrompt && safeContent !== INTERNAL_REPLY) {
+    if (!await confirmArchiveInteraction(message, decision)) {
+      return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+    }
+    if (payload.historyAllowed) {
       const persistence = await rememberConversationTurn({
         userId: message.author.id, guildId: message.guildId, channelId: message.channelId,
-      }, userText || '', safeContent, new Date(), { captureMessage: message });
+      }, decision, new Date(), { captureMessage: message });
       if (!persistence.persisted) logger.warn(`[NORMAL_CHAT] Prompt projection was not persisted: ${persistence.reason}`);
     }
-    await recordConversationInteraction();
-    if (safeContent !== INTERNAL_REPLY) {
+    await activeStatusPort.recordInteraction();
+    if (payload.privateMemoryAllowed) {
       recordPrivateInteraction({
         guildId: message.guildId,
         channelId: message.channelId,
         userId: message.author.id,
         displayName,
-        userText,
-        assistantText: safeContent,
+        decision,
+        message,
       });
     }
-    return undefined;
+    return payload.publicPersistenceAllowed
+      ? undefined
+      : { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
   };
 
-  if (requestsInternalDetails(userText)) return sendSavedReply(INTERNAL_REPLY);
+  if (ingressDecision.kind === 'public_fact') {
+    return sendDecision(decideAssistantOutput({
+      ingressDecision,
+      rawCandidate: ingressDecision.publicFact.text,
+      publicFact: ingressDecision.publicFact,
+      source: 'public_fact',
+    }));
+  }
 
   const memberResult = await resolveMemberFacts(message, userText);
-  if (memberResult.reply) return sendSavedReply(memberResult.reply);
+  if (memberResult.reply) return sendDecision(decideAssistantOutput({
+    ingressDecision,
+    rawCandidate: memberResult.reply,
+    source: 'member_fact',
+  }));
 
   const memoryReply = answerMemoryQuery({ text: userText, message });
 
@@ -388,10 +687,17 @@ async function handleMentionMessage(message, { generateChatReplyImpl = generateC
       chatPreference.style,
       romancePreference.enabled
     );
-    return sendSavedReply(finalMemoryReply);
+    return sendDecision(decideAssistantOutput({
+      ingressDecision,
+      rawCandidate: memoryReply,
+      styledCandidate: finalMemoryReply,
+      source: 'memory',
+      displayNames: [displayName],
+    }));
   }
 
-  const weatherReply = await getWeatherMentionReply(userText);
+  // The server is passed along so a question that names no place can use the server's default city.
+  const weatherReply = await activeWeatherPort.getMentionReply(userText, { guildId: message.guildId ?? null });
 
   if (weatherReply) {
     const finalWeatherReply = finalizeConversationalInformationReply(
@@ -401,11 +707,19 @@ async function handleMentionMessage(message, { generateChatReplyImpl = generateC
       chatPreference.style,
       romancePreference.enabled
     );
-    return sendSavedReply(finalWeatherReply);
+    return sendDecision(decideAssistantOutput({
+      ingressDecision,
+      rawCandidate: weatherReply,
+      styledCandidate: finalWeatherReply,
+      source: 'weather',
+      displayNames: [displayName],
+    }));
   }
 
   let reply;
   let providerRateLimitError = null;
+  let localProviderGuardError = null;
+  let guildQuotaExhausted = false;
   try {
     reply = await generateChatReplyImpl({
       userText,
@@ -416,48 +730,95 @@ async function handleMentionMessage(message, { generateChatReplyImpl = generateC
       chatStyle: chatPreference.style,
       romanceEnabled: romancePreference.enabled,
       memberFacts: memberResult.facts,
+      ingressDecision,
       message,
-    }, { persistConversation: false });
+    });
   } catch (error) {
     if (isProviderRateLimitError(error)) {
       providerRateLimitError = error;
+    } else if (isLocalProviderGuardError(error)) {
+      localProviderGuardError = error;
+    } else if (isGuildQuotaExhaustedError(error)) {
+      guildQuotaExhausted = true;
     } else {
-      logger.error('AI mention reply failed', error);
+      logger.warn(`[AI_CHAT_FAILED] code=${String(error?.code || 'unknown').slice(0, 80)}`);
     }
   }
 
+  // No answer from the model: the provider's own limit, the guild quota, the provider guard, or a failed call
+  // (a fixed fallback reply follows).
+  if (!reply) unanswered();
   if (providerRateLimitError) {
-    await replyInChunks(message, AI_PROVIDER_RATE_LIMIT_REPLY);
+    return sendUnpersistedDecision(message, decideRateLimitOutput(ingressDecision));
+  }
+  // The guild's AI quota is used up and the model was not called: a fixed line, nothing persisted.
+  if (guildQuotaExhausted) {
+    await replyInChunks(message, QUOTA_EXHAUSTED_MESSAGE);
     return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
   }
+  if (localProviderGuardError) {
+    if (!localProviderGuardError.shouldNotify) {
+      return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+    }
+    return sendUnpersistedDecision(message, decideLocalBusyOutput(ingressDecision));
+  }
 
-  const finalReply = reply
-    ? finalizeGeneratedConversationalReply(
-      reply,
-      displayName,
-      message.author.id,
-      chatPreference.style,
-      romancePreference.enabled
-    )
-    : getMentionFallbackReply(
+  if (reply) {
+    // The one place the optional second opinion can matter (see jevOutputGate.js). With it off, or for a server
+    // that is not listed, this is the single check it always was.
+    const output = await resolveProviderOutput({
+      evaluate: (waiveSoft) => evaluateProviderReply({
+        ingressDecision,
+        reply,
+        displayName,
+        userId: message.author.id,
+        chatStyle: chatPreference.style,
+        romanceEnabled: romancePreference.enabled,
+        waiveSoft,
+      }),
       userText,
-      displayName,
-      message.author.id,
-      chatPreference.style,
-      romancePreference.enabled
-    );
-  return sendSavedReply(finalReply, { rememberPrompt: Boolean(reply) });
+      replyText: reply,
+      displayNames: [displayName],
+      guildId: message.guildId ?? null,
+      runtime: jevRuntime,
+    });
+    return sendDecision(output.decision);
+  }
+
+  const finalReply = getMentionFallbackReply(
+    userText,
+    displayName,
+    message.author.id,
+    chatPreference.style,
+    romancePreference.enabled,
+    activeWeatherPort
+  );
+  return sendDecision(decideAssistantOutput({
+    ingressDecision,
+    rawCandidate: finalReply,
+    styledCandidate: finalReply,
+    source: 'fallback',
+    historyAllowed: false,
+    // The exact prompt texts the provider ran under; a reply that copies them is refused.
+    protectedInstructions: getProtectedPromptTexts(chatPreference.style, romancePreference.enabled),
+    // Deployed model identifiers, compared in memory only.
+    protectedModelIds: getDeployedModelIds(),
+    // The user's display name is only a name; the romance-mode opener is program text.
+    displayNames: [displayName],
+    templatePrefix: '',
+  }));
 }
 
 module.exports = {
   MENTION_OUTCOME,
+  evaluateProviderReply,
   finalizeGeneratedConversationalReply,
+  getRomanceReplyPrefix,
   finalizeConversationalInformationReply,
   getConversationDisplayName,
   getMentionFallbackReply,
   getExplicitCallText,
   getMentionText,
-  getWeatherMentionReply,
   handleMentionMessage,
   isPublicPersistenceSuppressed,
   replyInChunks,

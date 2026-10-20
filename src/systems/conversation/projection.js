@@ -4,6 +4,16 @@ const { getGuildConfig } = require('../../utils/guildConfig');
 const logger = require('../../utils/logger');
 const { archivePublicMessage, getArchive, isArchiveCaptureEnabled } = require('../../services/aiArchiveService');
 const { captureProofFor, everyoneCanRead, hasPublicCaptureProof, isCurrentPublicChannel } = require('./publicVisibility');
+const {
+  decidePublicMessagePersistence,
+  getConversationDecisionPayload,
+  getMessageDecisionContext,
+  getPublicProjectionDecisionPayload,
+  sanitizeAdmittedProviderData,
+  sanitizePublicProjectionText,
+  sanitizeUntrustedText,
+  verifyConversationDecisionContext,
+} = require('./disclosurePolicy');
 
 const defaultMemoryPath = path.join(__dirname, '..', '..', '..', 'data', 'xiaojiMemory.json');
 const MAX_PRIVATE_RECORDS_PER_USER = 100;
@@ -94,7 +104,7 @@ function writeMemory(memory) {
 }
 
 function normalizeText(value) {
-  return String(value || '')
+  return sanitizeUntrustedText(value)
     .replace(/<@!?\d+>/g, '')
     .replace(/<@&\d+>/g, '')
     .replace(/<#\d+>/g, '')
@@ -107,8 +117,21 @@ function summarizeContent(content, maxLength = 120) {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}...` : normalized;
 }
 
+function sanitizePublicRecord(record) {
+  const originalContent = sanitizePublicProjectionText(record?.originalContent || '');
+  return {
+    ...record,
+    displayName: sanitizeUntrustedText(record?.displayName || '未知使用者'),
+    username: sanitizeUntrustedText(record?.username || ''),
+    contentSummary: summarizeContent(sanitizePublicProjectionText(record?.contentSummary || originalContent)),
+    originalContent,
+  };
+}
+
 function getDisplayName(message) {
-  return message.member?.displayName || message.author?.globalName || message.author?.username || '未知使用者';
+  return sanitizeUntrustedText(
+    message.member?.displayName || message.author?.globalName || message.author?.username || '未知使用者'
+  );
 }
 
 function getPublicCacheKey(guildId, channelId) {
@@ -130,11 +153,11 @@ function recordPublicMessage(message) {
   const captureProof = captureProofFor(message);
   if (!captureProof || !isCurrentPublicChannel(message)) return null;
 
-  const content = normalizeText(message.content);
-
-  if (!content) {
-    return null;
-  }
+  const persistenceDecision = decidePublicMessagePersistence(normalizeText(message.content), {
+    context: getMessageDecisionContext(message),
+  });
+  if (!persistenceDecision) return null;
+  const { text: content } = getPublicProjectionDecisionPayload(persistenceDecision);
 
   const record = {
     guildId: message.guildId,
@@ -150,7 +173,7 @@ function recordPublicMessage(message) {
     captureProof,
   };
 
-  if (!archivePublicMessage(message, message.content)) {
+  if (!archivePublicMessage(message, persistenceDecision)) {
     return null;
   }
 
@@ -175,8 +198,16 @@ function recordPublicMessage(message) {
   return record;
 }
 
-function recordPrivateInteraction({ guildId, channelId, userId, displayName, userText, assistantText }) {
-  if (!userId || (!userText && !assistantText)) {
+function recordPrivateInteraction({ guildId, channelId, userId, displayName, decision, message }) {
+  const payload = getConversationDecisionPayload(decision);
+  if (!payload.privateMemoryAllowed) throw new TypeError('Conversation decision does not authorize private memory.');
+  const context = getMessageDecisionContext(message);
+  verifyConversationDecisionContext(decision, context, 'private_memory');
+  if (String(userId || '') !== context.actorId || String(guildId || 'dm') !== String(context.guildId || 'dm') ||
+      String(channelId || '') !== context.channelId) {
+    throw new TypeError('Private memory identity does not match the authorized context.');
+  }
+  if (!userId || (!payload.userText && !payload.text)) {
     return null;
   }
 
@@ -192,9 +223,9 @@ function recordPrivateInteraction({ guildId, channelId, userId, displayName, use
     guildId: guildId || null,
     channelId: channelId || null,
     userId,
-    displayName: displayName || '未知使用者',
-    userContentSummary: summarizeContent(userText),
-    assistantContentSummary: summarizeContent(assistantText),
+    displayName: sanitizeUntrustedText(displayName || '未知使用者'),
+    userContentSummary: summarizeContent(sanitizeUntrustedText(payload.userText)),
+    assistantContentSummary: summarizeContent(sanitizeUntrustedText(payload.text)),
     timestamp: new Date().toISOString(),
     visibility: 'private',
     source: 'private_user_memory',
@@ -244,17 +275,12 @@ function getPrivateMemoryContext(
     ).slice(0, recordLimit).reverse();
   const formatted = records
     .map((record) => {
-      const userSummary = summarizeContent(record.userContentSummary, 180);
-      const assistantSummary = summarizeContent(record.assistantContentSummary, 180);
+      const userSummary = summarizeContent(sanitizeAdmittedProviderData(record.userContentSummary), 180);
       const parts = [];
 
       if (userSummary) {
         parts.push(`${record.displayName || '這位使用者'}曾說：「${userSummary}」`);
       }
-      if (assistantSummary) {
-        parts.push(`小吉當時回覆：「${assistantSummary}」`);
-      }
-
       return parts.join('；');
     })
     .filter(Boolean)
@@ -368,7 +394,9 @@ function getPublicRecords({ guildId, channelId, includeGuildWide = false }) {
   const memory = readMemory();
   const stored = memory.public_channel_memory[guildId] || [];
   const cache = channelId ? recentPublicMessages.get(getPublicCacheKey(guildId, channelId)) || [] : [];
-  const all = [...stored, ...cache];
+  // Apply the same boundary on read so retained records cannot re-enter a reply
+  // without changing or migrating the stored file.
+  const all = [...stored, ...cache].map(sanitizePublicRecord);
   const seen = new Set();
 
   return sortNewestFirst(
@@ -398,45 +426,12 @@ function getPrivateRecords(userId) {
   return sortNewestFirst((memory.private_user_memory[userId] || []).slice().reverse());
 }
 
-function getAllPrivateRecords() {
-  const memory = readMemory();
-  return sortNewestFirst(Object.values(memory.private_user_memory).flat());
-}
-
 function canSearchGuildWide(guildId) {
   if (!guildId) {
     return false;
   }
 
   return Boolean(getGuildConfig(guildId).memory.sharePublicAcrossChannels);
-}
-
-function findPrivateSelfMemory({ userId, keyword }) {
-  return getPrivateRecords(userId).find((record) => {
-    if (!keyword) {
-      return true;
-    }
-
-    return `${record.userContentSummary || ''} ${record.assistantContentSummary || ''}`.includes(keyword);
-  });
-}
-
-function findPrivateOtherMemory({ requesterId, targetUserId, targetText, keyword }) {
-  return getAllPrivateRecords().find((record) => {
-    if (record.userId === requesterId) {
-      return false;
-    }
-
-    if (!matchesTarget(record, targetText, targetUserId)) {
-      return false;
-    }
-
-    if (!keyword) {
-      return true;
-    }
-
-    return `${record.userContentSummary || ''} ${record.assistantContentSummary || ''}`.includes(keyword);
-  });
 }
 
 function findPublicMemory({ guildId, channelId, targetUserId, targetText, keyword, includeGuildWide,
@@ -454,8 +449,9 @@ function findPublicMemory({ guildId, channelId, targetUserId, targetText, keywor
 }
 
 function formatPublicFound(record, keyword) {
-  const what = keyword ? `說過${keyword}` : `說過「${record.contentSummary}」`;
-  return `有喔，${record.displayName} 剛剛在${record.channelId ? '這個頻道' : '伺服器'}${what}。`;
+  const safeKeyword = sanitizePublicProjectionText(keyword);
+  const what = safeKeyword ? `說過${safeKeyword}` : `說過「${sanitizePublicProjectionText(record.contentSummary)}」`;
+  return `有喔，${sanitizeUntrustedText(record.displayName)} 剛剛在${record.channelId ? '這個頻道' : '伺服器'}${what}。`;
 }
 
 function canDisclosePublicRecord(record, message) {
@@ -469,7 +465,8 @@ function canDisclosePublicRecord(record, message) {
 }
 
 function formatPrivateFound(record, keyword) {
-  const what = keyword ? `說過${keyword}` : `跟我說過「${record.userContentSummary}」`;
+  const safeKeyword = sanitizeUntrustedText(keyword);
+  const what = safeKeyword ? `說過${safeKeyword}` : `跟我說過「${sanitizeUntrustedText(record.userContentSummary)}」`;
   return `有喔，我記得你剛剛${what}。`;
 }
 

@@ -1,5 +1,4 @@
 const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
-const { isGuildApproved } = require('../services/auditService');
 const { corpusVersion } = require('../services/dailyDiscussionCorpus');
 const {
   FEATURE_KEY,
@@ -7,9 +6,9 @@ const {
   processDailyDiscussionTick,
 } = require('../services/dailyDiscussionService');
 const { getGuildFeatureSetting, setGuildFeatureSetting } = require('../services/featurePlatformService');
+const { formatDailyEventStatus } = require('../utils/dailyEventStatus');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
 const { ensureModerationAccess, handleCommandError, replyEphemeral } = require('../utils/moderation');
-const { isBotOwner } = require('../utils/ownerOnly');
 
 const REQUIRED_BOT_PERMISSIONS = [
   PermissionFlagsBits.ViewChannel,
@@ -43,10 +42,27 @@ async function resolveConfiguredChannel(interaction, channelId) {
     null;
 }
 
+// "發布 0" is wrong when the schedule already posted today's topic (or is posting it right now), so ask the event.
+async function describeRunNowResult(guildId, result) {
+  const counts = `結算 ${result.settled}、延後 ${result.deferred}`;
+  if (result.published === 0) {
+    const event = await getDailyDiscussionEvent(guildId, result.localDate || getTaipeiDateKey());
+    if (event?.status === 'published' || event?.status === 'published_late') {
+      return `每日議題檢查完成：今日議題已發布（排程已先處理），本次${counts}。`;
+    }
+    if (event?.status === 'claimed' && result.skipped > 0) {
+      return `每日議題檢查完成：今日議題正在發布中，請稍後用 \`/daily-discussion status\` 查看，本次${counts}。`;
+    }
+  }
+  return `每日議題檢查完成：發布 ${result.published}、${counts}。`;
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('daily-discussion')
     .setDescription('管理小吉每日議題討論')
+    // Hides the command from members without Administrator. The checks in execute stay the real guard.
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
     .addSubcommand((subcommand) =>
       subcommand
@@ -68,10 +84,6 @@ module.exports = {
     try {
       if (!interaction.guildId || !interaction.guild || !interaction.inGuild()) {
         await replyEphemeral(interaction, '每日議題只能在伺服器內設定。');
-        return;
-      }
-      if (!isBotOwner(interaction.user.id) && !isGuildApproved(interaction.guildId)) {
-        await replyEphemeral(interaction, '此伺服器尚未通過小吉擁有者審核，暫時不能設定每日議題。');
         return;
       }
 
@@ -118,10 +130,7 @@ module.exports = {
           now: new Date(),
           guildId: interaction.guildId,
         });
-        await replyEphemeral(
-          interaction,
-          `每日議題檢查完成：發布 ${result.published}、結算 ${result.settled}、延後 ${result.deferred}。`
-        );
+        await replyEphemeral(interaction, await describeRunNowResult(interaction.guildId, result));
         return;
       }
 
@@ -129,7 +138,7 @@ module.exports = {
       const channelLabel = setting.channelId ? `<#${setting.channelId}>` : '尚未設定';
       await replyEphemeral(
         interaction,
-        `每日議題：${setting.enabled ? '已啟用' : '已停用'}\n父頻道：${channelLabel}\n今日活動：${event?.status || '尚未建立'}`
+        `每日議題：${setting.enabled ? '已啟用' : '已停用'}\n父頻道：${channelLabel}\n今日活動：${formatDailyEventStatus(event?.status)}`
       );
     } catch (error) {
       await handleCommandError(interaction, error, '每日議題設定失敗，請稍後再試。');

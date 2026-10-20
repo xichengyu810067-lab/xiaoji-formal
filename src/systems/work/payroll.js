@@ -1,29 +1,27 @@
 const { CoinServiceError, TransactionType } = require('../../services/coinService');
 const { mutateWalletWithApi } = require('../../services/coinWalletService');
 const { GLOBAL_RULE_VERSION, BASIC_RATIO } = require('./workRules');
+const {
+  findEscrowedPrimaryWaiterOrderWithApi,
+  findUnlinkedMakerBonusItemWithApi,
+  findUnlinkedTippedWaiterOrderWithApi,
+  listPrimaryWaiterOrdersWithApi,
+  listUnpaidPrimaryMakerBonusItemsWithApi,
+} = require('../casino/venueOrders');
 
 const WAITER_JOB_NAMES = new Set(['服務生', '制服服務生']);
 
 function hasOpenPrimaryWaiterOrderWithApi(api, cycle) {
   if (!WAITER_JOB_NAMES.has(cycle.job_name)) return false;
-  return Boolean(api.get(
-    "SELECT 1 AS found FROM casino_venue_orders WHERE waiter_global_cycle_id = ? AND waiter_user_id = ? AND tip_status = 'escrowed' LIMIT 1",
-    [cycle.cycle_id, cycle.user_id]
-  ));
+  return Boolean(findEscrowedPrimaryWaiterOrderWithApi(api, { cycleId: cycle.cycle_id, userId: cycle.user_id }));
 }
 
 function verifyPrimaryWaiterOrdersWithApi(api, cycle, validTasks) {
   if (!WAITER_JOB_NAMES.has(cycle.job_name)) return [];
-  if (api.get(
-    "SELECT 1 AS found FROM casino_venue_orders WHERE waiter_user_id = ? AND waiter_job_id IS NULL AND waiter_global_cycle_id IS NULL AND tip_amount > 0 AND tip_status IN ('escrowed','paid') LIMIT 1",
-    [cycle.user_id]
-  )) {
+  if (findUnlinkedTippedWaiterOrderWithApi(api, cycle.user_id)) {
     throw new CoinServiceError('VENUE_WAITER_CYCLE_UNLINKED', '服務生訂單缺少本人主職週期歸屬，暫停發薪。');
   }
-  const orders = api.all(
-    'SELECT id,guild_id,waiter_user_id,waiter_job_id,waiter_job_name,tip_amount,tip_status FROM casino_venue_orders WHERE waiter_global_cycle_id = ? ORDER BY id',
-    [cycle.cycle_id]
-  );
+  const orders = listPrimaryWaiterOrdersWithApi(api, cycle.cycle_id);
   const byMessageId = new Map();
   const completedOrderIds = new Set();
   for (const order of orders) {
@@ -92,16 +90,13 @@ function calculateGlobalPayrollWithApi(api, cycle) {
   }
   const externalServerCount = externalIds.size + externalCountWithoutIds;
   const externalBonus = externalServerCount * Number(salary.translatorBonus || 0);
-  if (['廚師', '調酒師'].includes(cycle.job_name) && api.get(
-    "SELECT 1 AS found FROM casino_venue_order_items WHERE maker_user_id = ? AND maker_is_npc = 0 AND status = 'completed' AND bonus_paid = 0 AND global_cycle_id IS NULL AND completed_at >= ? AND completed_at <= ? LIMIT 1",
-    [cycle.user_id, cycle.starts_at, cycle.ends_at]
-  )) {
+  if (['廚師', '調酒師'].includes(cycle.job_name) && findUnlinkedMakerBonusItemWithApi(api, {
+    userId: cycle.user_id, startsAt: cycle.starts_at, endsAt: cycle.ends_at,
+  })) {
     throw new CoinServiceError('VENUE_CYCLE_UNLINKED', '場館訂單缺少主職週期歸屬，暫停發薪。');
   }
-  const venueRows = ['廚師', '調酒師'].includes(cycle.job_name) ? api.all(
-    "SELECT id,bonus_amount FROM casino_venue_order_items WHERE global_cycle_id = ? AND maker_user_id = ? AND maker_is_npc = 0 AND status = 'completed' AND bonus_paid = 0 AND bonus_amount > 0 ORDER BY completed_at,id",
-    [cycle.cycle_id, cycle.user_id]
-  ) : [];
+  const venueRows = ['廚師', '調酒師'].includes(cycle.job_name)
+    ? listUnpaidPrimaryMakerBonusItemsWithApi(api, { cycleId: cycle.cycle_id, userId: cycle.user_id }) : [];
   const venueBonus = venueRows.reduce((sum, row) => sum + Number(row.bonus_amount), 0);
   const penalties = api.all(
     "SELECT id,amount FROM coin_primary_cycle_penalties WHERE cycle_id = ? AND user_id = ? AND status = 'active' AND applied_at IS NULL ORDER BY id",

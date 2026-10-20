@@ -2,6 +2,7 @@ const { createHash, randomBytes } = require('node:crypto');
 const { GameError } = require('./soloGameError');
 const { MAX_ACTIONS, applyNumberMatchAction, applySudokuAction, applyTetrisAction, initialState } = require('./soloGameRules');
 const { DIFFICULTIES, GAME_TYPES, MAX_TETRIS_SCORE, deriveServerGameReward } = require('../../services/gameRewardPolicy');
+const { applyGameLaunchOnce } = require('./gameLaunchReceipt');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 
@@ -74,13 +75,31 @@ function nextGameState(row, action) {
   return { next, status, score, rewardAmount };
 }
 
-function createSoloSessionService({ withTransaction, withDatabase, grantRewardOnceV2WithApi, clock = () => new Date(),
+// Default source of the guild economy switch: the economy system's own transaction port.
+// Callers may inject another reader. The require stays lazy so that creating a session
+// service does not load the economy system until a completed game needs the switch.
+function defaultReadGuildEconomyEnabledWithApi(api, guildId) {
+  return require('../../services/coinService').readGuildEconomyEnabledWithApi(api, guildId);
+}
+
+// Reward receipts belong to the reward ledger, so a finished game reads the debt split of
+// its own receipt through the ledger's transaction port. The require stays lazy for the
+// same reason as above.
+function readRewardReceiptDebtSplitWithApi(api, rewardKey) {
+  return require('../../services/featurePlatformService').getRewardReceiptDebtSplitByKeyWithApi(api, rewardKey);
+}
+
+function createSoloSessionService({ withTransaction, withDatabase, grantRewardOnceV2WithApi,
+  readGuildEconomyEnabledWithApi = defaultReadGuildEconomyEnabledWithApi, clock = () => new Date(),
   idFactory = () => randomBytes(16).toString('hex'), seedFactory = () => randomBytes(16).toString('hex') } = {}) {
   if (typeof withTransaction !== 'function' || typeof withDatabase !== 'function') {
     throw new GameError('STORE_NOT_CONFIGURED', 'Solo game database is unavailable.');
   }
+  if (typeof readGuildEconomyEnabledWithApi !== 'function') {
+    throw new GameError('STORE_NOT_CONFIGURED', 'Solo game economy switch reader is invalid.');
+  }
 
-  async function create({ userId, guildId, channelId, gameType, difficulty }) {
+  async function create({ userId, guildId, channelId, gameType, difficulty, interactionId = null }) {
     const type = String(gameType || '');
     const level = String(difficulty || '');
     if (!GAME_TYPES.includes(type) || !DIFFICULTIES.includes(level)) throw new GameError('INVALID_REQUEST', 'Unsupported game or difficulty.');
@@ -94,12 +113,21 @@ function createSoloSessionService({ withTransaction, withDatabase, grantRewardOn
       score: 0, reward_amount: 0, expires_at: new Date(timestamp.getTime() + SESSION_TTL_MS).toISOString(),
       created_at: timestamp.toISOString(), updated_at: timestamp.toISOString(), completed_at: null,
     };
-    await withTransaction((api) => api.run(`INSERT INTO discord_game_sessions
-      (id,user_id,source_guild_id,channel_id,message_id,game_type,difficulty,seed,state_json,status,revision,action_count,score,reward_amount,expires_at,created_at,updated_at,completed_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [row.id, row.user_id, row.source_guild_id, row.channel_id, row.message_id,
-      row.game_type, row.difficulty, row.seed, row.state_json, row.status, row.revision, row.action_count, row.score,
-      row.reward_amount, row.expires_at, row.created_at, row.updated_at, row.completed_at]));
-    return publicSession(row);
+    return withTransaction((api) => applyGameLaunchOnce(api, {
+      interactionId,
+      kind: 'solo-game',
+      userId: row.user_id,
+      guildId: row.source_guild_id,
+      channelId: row.channel_id,
+      payload: { gameType: type, difficulty: level },
+    }, () => {
+      api.run(`INSERT INTO discord_game_sessions
+        (id,user_id,source_guild_id,channel_id,message_id,game_type,difficulty,seed,state_json,status,revision,action_count,score,reward_amount,expires_at,created_at,updated_at,completed_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [row.id, row.user_id, row.source_guild_id, row.channel_id, row.message_id,
+        row.game_type, row.difficulty, row.seed, row.state_json, row.status, row.revision, row.action_count, row.score,
+        row.reward_amount, row.expires_at, row.created_at, row.updated_at, row.completed_at]);
+      return publicSession(row);
+    }));
   }
 
   async function get({ sessionId, actorId, guildId, channelId, messageId = null }) {
@@ -111,7 +139,7 @@ function createSoloSessionService({ withTransaction, withDatabase, grantRewardOn
       if (row.status === 'completed') {
         session.rewardStatus = api.get('SELECT status FROM discord_game_rewards WHERE session_id = ?', [row.id])?.status || 'pending';
         if (session.rewardStatus === 'granted') {
-          const grant = api.get('SELECT debt_offset, net_amount FROM reward_grants_v2 WHERE reward_key = ?', [makeRewardKey({ sessionId: row.id, userId: row.user_id })]);
+          const grant = readRewardReceiptDebtSplitWithApi(api, makeRewardKey({ sessionId: row.id, userId: row.user_id }));
           if (grant) {
             session.rewardDebtOffset = Number(grant.debt_offset);
             session.rewardNetAmount = Number(grant.net_amount);
@@ -122,12 +150,39 @@ function createSoloSessionService({ withTransaction, withDatabase, grantRewardOn
     });
   }
 
-  async function findLatest({ actorId, guildId, channelId }) {
+  async function findLatest({ actorId, guildId, channelId, gameType = null }) {
     return withDatabase((api) => {
+      const type = gameType == null ? null : String(gameType);
+      if (type !== null && !GAME_TYPES.includes(type)) throw new GameError('INVALID_REQUEST', 'Unsupported game type.');
       const row = api.get(`SELECT * FROM discord_game_sessions WHERE user_id = ? AND source_guild_id = ? AND channel_id = ?
-        AND status = 'active' AND expires_at > ? ORDER BY created_at DESC LIMIT 1`,
-      [requireId(actorId, 'actorId'), requireId(guildId, 'guildId'), requireId(channelId, 'channelId'), requireClock(clock()).toISOString()]);
+        AND status = 'active' AND expires_at > ?${type ? ' AND game_type = ?' : ''} ORDER BY created_at DESC LIMIT 1`,
+      [requireId(actorId, 'actorId'), requireId(guildId, 'guildId'), requireId(channelId, 'channelId'),
+        requireClock(clock()).toISOString(), ...(type ? [type] : [])]);
       return row ? publicSession(row) : null;
+    });
+  }
+
+  // Ends, early and without a reward, every personal game the actor still has running in this channel. A game that has
+  // already finished or run out of time is left as it is, and so is every game of anyone else or in another channel:
+  // the rows are picked by actor, guild and channel together. The revision moves on, so a button of the old panel can
+  // no longer act on the game. Returns the games that were ended (none when there was nothing to end).
+  async function cancelActive({ actorId, guildId, channelId }) {
+    const actor = requireId(actorId, 'actorId');
+    const guild = requireId(guildId, 'guildId');
+    const channel = requireId(channelId, 'channelId');
+    return withTransaction((api) => {
+      const timestamp = requireClock(clock());
+      const rows = api.all(`SELECT * FROM discord_game_sessions WHERE user_id = ? AND source_guild_id = ? AND channel_id = ?
+        AND status = 'active' AND expires_at > ? ORDER BY created_at DESC, rowid DESC`, [actor, guild, channel, timestamp.toISOString()]);
+      return rows.map((row) => {
+        const revision = Number(row.revision) + 1;
+        api.run(`UPDATE discord_game_sessions SET status = 'cancelled', revision = ?, updated_at = ?, completed_at = ?
+          WHERE id = ? AND status = 'active' AND revision = ?`,
+        [revision, timestamp.toISOString(), timestamp.toISOString(), row.id, Number(row.revision)]);
+        if (Number(api.get('SELECT changes() AS count').count) !== 1) throw new GameError('STALE_REVISION', 'Solo game changed.');
+        return publicSession({ ...row, status: 'cancelled', revision, updated_at: timestamp.toISOString(),
+          completed_at: timestamp.toISOString() });
+      });
     });
   }
 
@@ -204,15 +259,24 @@ function createSoloSessionService({ withTransaction, withDatabase, grantRewardOn
       if (status === 'completed') {
         const rewardKey = makeRewardKey({ sessionId: id, userId: row.user_id });
         let receiptId = null;
-        const coinSettings = api.get('SELECT enabled FROM coin_guild_settings WHERE guild_id = ?', [row.source_guild_id]);
-        if (rewardAmount > 0 && Number(coinSettings?.enabled ?? 1) === 1) {
+        // A guild without a settings row counts as enabled; the reader must answer synchronously.
+        const economyEnabled = readGuildEconomyEnabledWithApi(api, row.source_guild_id);
+        if (economyEnabled && typeof economyEnabled.then === 'function') {
+          // A thenable need not have a catch method, and its then may throw: Promise.resolve takes either.
+          Promise.resolve(economyEnabled).catch(() => {}); // Suppress unhandledRejection; error is thrown below
+          throw new GameError('REWARD_CONTRACT_INVALID', 'Economy switch must be read inside the transaction.');
+        }
+        if (rewardAmount > 0 && Number(economyEnabled ?? 1) === 1) {
           if (typeof grantRewardOnceV2WithApi !== 'function') throw new GameError('REWARD_NOT_CONFIGURED', 'Reward coordinator is unavailable.');
           const receipt = grantRewardOnceV2WithApi(api, {
             kind: 'game', canonicalSourceId: `discord:${id}`, rewardKind: 'completion', userId: row.user_id,
             sourceGuildId: row.source_guild_id, amount: rewardAmount,
             metadata: { game: row.game_type, difficulty: row.difficulty },
           });
-          if (receipt && typeof receipt.then === 'function') throw new GameError('REWARD_CONTRACT_INVALID', 'Reward grant must complete inside the transaction.');
+          if (receipt && typeof receipt.then === 'function') {
+            Promise.resolve(receipt).catch(() => {}); // Suppress unhandledRejection; error is thrown below
+            throw new GameError('REWARD_CONTRACT_INVALID', 'Reward grant must complete inside the transaction.');
+          }
           receiptId = receipt?.receipt?.id || receipt?.receiptId || null;
           rewardStatus = 'granted';
           if (Number.isSafeInteger(receipt?.debtOffset) && receipt.debtOffset >= 0 && receipt.debtOffset <= rewardAmount) {
@@ -234,7 +298,7 @@ function createSoloSessionService({ withTransaction, withDatabase, grantRewardOn
     return outcome;
   }
 
-  return Object.freeze({ create, get, findLatest, bindMessage, rebindMessage, apply });
+  return Object.freeze({ create, get, findLatest, cancelActive, bindMessage, rebindMessage, apply });
 }
 
 module.exports = { SESSION_TTL_MS, assertBoundary, createSoloSessionService, makeRewardKey, publicSession };

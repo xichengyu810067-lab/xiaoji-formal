@@ -1,5 +1,7 @@
 const { PermissionFlagsBits } = require('discord.js');
+const { resolveBotMember } = require('./botMember');
 const logger = require('./logger');
+const { reportInteractionSecurityAlert } = require('./securityAlert');
 
 const DISCORD_BULK_DELETE_TOO_OLD = 50034;
 const DISCORD_MISSING_PERMISSIONS = 50013;
@@ -14,8 +16,12 @@ async function replyEphemeral(interaction, content) {
   await interaction.reply(payload);
 }
 
+// The bot's whole member (botMember.js): a partial one from the cache is fetched, not used. A member that
+// cannot be had stops the command the way a failed fetch always did.
 async function fetchBotMember(guild) {
-  return guild.members.me || guild.members.fetchMe();
+  const member = await resolveBotMember(guild);
+  if (!member) throw new Error('The bot member of this guild is unavailable.');
+  return member;
 }
 
 function hasAllPermissions(permissions, requiredPermissions) {
@@ -46,6 +52,7 @@ async function ensureModerationAccess(
 
   if (!canUse) {
     logger.warn(`[PERMISSION_BLOCK] User denied access to /${interaction.commandName}`);
+    reportInteractionSecurityAlert('permission-denied', interaction);
     await replyEphemeral(interaction, `你需要 ${userPermissionName} 權限才能使用 /${interaction.commandName}。`);
     return { ok: false };
   }

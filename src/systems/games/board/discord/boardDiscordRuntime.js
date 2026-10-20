@@ -1,8 +1,8 @@
 const { randomBytes, randomUUID } = require('node:crypto');
-const { BoardSessionService } = require('../../../../games/boardSessionService');
-const { createBoardLifecycle } = require('../../../../games/boardLifecycle');
-const { BoardCoreError } = require('../../../../games/contracts');
-const { BoardEngineRegistry } = require('../../../../games/engineRegistry');
+const { BoardSessionService } = require('../core/boardSessionService');
+const { createBoardLifecycle } = require('../core/boardLifecycle');
+const { BoardCoreError } = require('../core/contracts');
+const { BoardEngineRegistry } = require('../core/engineRegistry');
 const chess = require('../engines/chess');
 const checkers = require('../engines/checkers');
 const go = require('../engines/go');
@@ -16,9 +16,13 @@ const { TurtleSoupError } = require('../turtleSoup/errors');
 const { createTurtleSoupJudgeWorkflow } = require('../turtleSoup/judgeWorkflow');
 const { createJudgeProvider } = require('../turtleSoup/providerAdapter');
 const { createTurtleSoupRevealService } = require('../turtleSoup/revealService');
-const { createFileScenarioProvider } = require('../turtleSoup/scenarioProvider');
-const { isGuildApproved: defaultIsGuildApproved } = require('../../../../services/auditService');
-const { isBotOwner: defaultIsBotOwner } = require('../../../../utils/ownerOnly');
+const {
+  CORPUS_NOT_CONFIGURED,
+  CORPUS_READY,
+  CORPUS_UNAVAILABLE,
+  prepareFileScenarioProvider,
+} = require('../turtleSoup/scenarioProvider');
+const { runWithBackgroundContext } = require('../../../../platform/hostOperationContext');
 const logger = require('../../../../utils/logger');
 const { parseBoardCustomId } = require('./boardCustomId');
 const { createDiscordBoardInteractionAdapter, assertSessionBoundary, getInteractionIdentity } = require('./boardInteractionAdapter');
@@ -31,7 +35,8 @@ const {
 } = require('./boardControls');
 const { buildBoardModal, createDiscordBoardTransport } = require('./discordBoardBridge');
 
-const AUDIT_PENDING_MESSAGE = '小吉在這個伺服器尚未通過機器人擁有者的審核，暫時無法提供服務。請耐心等待批准。';
+const JUDGE_READY = 'JUDGE_READY';
+const STATUS_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/u;
 
 const FRIENDLY_ERRORS = Object.freeze({
   ACTION_NOT_AVAILABLE: '這個操作目前不能使用，請重新整理棋盤。',
@@ -49,6 +54,7 @@ const FRIENDLY_ERRORS = Object.freeze({
   LOBBY_FULL: '這個等候室已滿。',
   MESSAGE_MISMATCH: '這個控制不是目前棋盤的最新版，請使用最新訊息。',
   NOT_A_PLAYER: '只有目前棋局的參與者可以執行這個操作。',
+  NOT_PARTICIPANT: '只有目前棋局的參與者可以執行這個操作。',
   NOT_YOUR_TURN: '現在還沒輪到你。',
   RESIGN_REQUIRED: '進行中的棋局不能直接停止；請使用離開／認輸。',
   SESSION_ALREADY_ACTIVE: '這個頻道已有進行中的棋局。',
@@ -60,6 +66,29 @@ const FRIENDLY_ERRORS = Object.freeze({
 
 function friendlyError(error) {
   return FRIENDLY_ERRORS[error?.code] || '小吉暫時無法處理這個棋盤操作，請稍後再試。';
+}
+
+// Status and failure codes are the only turtle-soup facts that may reach the logs. Anything that
+// is not a plain upper-case token (a path, a message, player text) is replaced by the fallback.
+function safeStatusCode(value, fallback) {
+  return typeof value === 'string' && STATUS_CODE_PATTERN.test(value) ? value : fallback;
+}
+
+// The caller may already have prepared the corpus (index.js does, so it can log the reason).
+// A missing provider with a supplied verdict means "not ready, and this is why": keep that
+// verdict instead of re-deriving it from an empty root, which reports every failure as
+// CORPUS_NOT_CONFIGURED.
+function resolveCorpusSetup({ scenarioProvider, scenarioProviderReadiness, privateCorpusRoot }) {
+  if (scenarioProvider) {
+    const suppliedCorpusReady = scenarioProviderReadiness?.ready !== false;
+    return {
+      provider: suppliedCorpusReady ? scenarioProvider : null,
+      readiness: scenarioProviderReadiness ||
+        Object.freeze({ ready: true, code: CORPUS_READY, scenarioCount: null }),
+    };
+  }
+  if (scenarioProviderReadiness) return { provider: null, readiness: scenarioProviderReadiness };
+  return prepareFileScenarioProvider({ rootDir: privateCorpusRoot });
 }
 
 async function privateReply(interaction, content) {
@@ -111,12 +140,9 @@ function statusSummary(result) {
   return `目前棋局：${labels[result.session.status] || result.session.status}，玩家 ${activePlayers} 人，棋盤版本 ${result.session.revision}。`;
 }
 
-function assertApprovedGuild(interaction, { isGuildApproved, isBotOwner }) {
+function assertGuildChannel(interaction) {
   if (!interaction?.guildId || !interaction?.channelId || !interaction?.user?.id) {
     throw new BoardCoreError('SESSION_SCOPE_MISMATCH', '桌遊只能在伺服器文字頻道中使用。');
-  }
-  if (!isBotOwner(interaction.user.id) && !isGuildApproved(interaction.guildId)) {
-    throw new BoardCoreError('GUILD_NOT_APPROVED', AUDIT_PENDING_MESSAGE);
   }
 }
 
@@ -125,12 +151,11 @@ function createBoardDiscordRuntime({
   store = null,
   registry = null,
   scenarioProvider = null,
+  scenarioProviderReadiness = null,
   privateCorpusRoot = null,
   judgeProvider = null,
   transport = null,
   rebindSessionMessage = null,
-  isGuildApproved = defaultIsGuildApproved,
-  isBotOwner = defaultIsBotOwner,
   clock = () => new Date(),
   idFactory = () => randomUUID(),
   seedFactory = () => randomBytes(24).toString('hex'),
@@ -142,20 +167,34 @@ function createBoardDiscordRuntime({
   const engineRegistry = registry || new BoardEngineRegistry([turtleSoup, chess, gomoku, go, checkers, xiangqi]);
   const discordTransport = transport || createDiscordBoardTransport({ client });
 
-  let corpus = scenarioProvider;
-  if (!corpus && privateCorpusRoot) {
-    try {
-      corpus = createFileScenarioProvider({ rootDir: privateCorpusRoot });
-    } catch (error) {
-      runtimeLogger?.error?.('turtle soup corpus initialization failed', error);
-    }
-  }
+  const corpusSetup = resolveCorpusSetup({ scenarioProvider, scenarioProviderReadiness, privateCorpusRoot });
+  const corpus = corpusSetup.provider;
+  // Never report "ready" without a provider to back it, and never leave a bare CORPUS_READY on a
+  // corpus that is not usable.
+  const corpusReady = Boolean(corpus) && corpusSetup.readiness.ready === true;
+  let corpusCode = safeStatusCode(corpusSetup.readiness.code, corpusReady ? CORPUS_READY : CORPUS_UNAVAILABLE);
+  if (!corpusReady && corpusCode === CORPUS_READY) corpusCode = CORPUS_UNAVAILABLE;
+  const corpusStatus = Object.freeze({
+    ready: corpusReady,
+    code: corpusCode,
+    scenarioCount: Number.isSafeInteger(corpusSetup.readiness.scenarioCount)
+      ? corpusSetup.readiness.scenarioCount
+      : null,
+  });
   let judge = judgeProvider;
+  let judgeStatus = Object.freeze({ ready: true, code: JUDGE_READY });
   if (!judge) {
     try {
-      judge = createJudgeProvider();
-    } catch (_error) {
+      // Guard blocks on judge calls are logged through the runtime's logger, not sent to the owner.
+      judge = createJudgeProvider({ logger: runtimeLogger });
+    } catch (error) {
+      // Players still get a safe "judge unavailable" reply, but the reason is kept so startup can
+      // say whether the judge is missing a key or failed to build. Only the code is retained.
       judge = createUnavailableJudgeProvider();
+      judgeStatus = Object.freeze({
+        ready: false,
+        code: safeStatusCode(error instanceof TurtleSoupError ? error.code : null, 'JUDGE_UNAVAILABLE'),
+      });
     }
   }
   const safeScenarioProvider = corpus || createUnavailableScenarioProvider();
@@ -209,12 +248,23 @@ function createBoardDiscordRuntime({
     clock,
     intervalMs: lifecycleIntervalMs,
     logger: runtimeLogger,
+    runScheduledTick: (tick) => runWithBackgroundContext('board.lifecycle-tick', tick),
   });
 
   async function prepareStartOptions(gameKey) {
     if (gameKey !== 'turtle-soup') return {};
-    if (!corpus) throw new BoardCoreError('CORPUS_UNAVAILABLE', 'Turtle soup corpus is unavailable.');
+    // The readiness code is for the operator's log only; players see the friendly message.
+    if (!corpus) throw new BoardCoreError('CORPUS_UNAVAILABLE', `Turtle soup corpus is unavailable (${corpusStatus.code}).`);
     return corpus.selectScenarioReference();
+  }
+
+  // A turtle-soup request that stopped safely (session kept, player told to retry) is not an
+  // exception, so it would otherwise leave no trace. Log the action and the code, nothing else.
+  function logTurtleSoupSafeFailure(verb, result) {
+    // The anti-spam gate logs its own blocks, at most one line per reason a minute.
+    if (result?.ok !== false || result.code === 'JUDGE_SPAM_BLOCKED') return;
+    const action = verb === 'reveal' ? 'reveal' : verb === 'act.guess' ? 'guess' : 'ask';
+    runtimeLogger?.warn?.(`[TURTLE_SOUP] safe failure action=${action} code=${safeStatusCode(result.code, 'UNKNOWN')}`);
   }
 
   async function bindInitialMessage(interaction, started) {
@@ -287,7 +337,7 @@ function createBoardDiscordRuntime({
   }
 
   async function startGame(interaction, gameKey) {
-    assertApprovedGuild(interaction, { isGuildApproved, isBotOwner });
+    assertGuildChannel(interaction);
     if (typeof interaction.deferReply === 'function' && !interaction.deferred && !interaction.replied) {
       await interaction.deferReply();
     }
@@ -306,7 +356,7 @@ function createBoardDiscordRuntime({
 
   async function executeCommand(interaction) {
     try {
-      assertApprovedGuild(interaction, { isGuildApproved, isBotOwner });
+      assertGuildChannel(interaction);
       const action = interaction.options.getSubcommand();
       if (action === 'start') {
         const gameKey = interaction.options.getString('game', true);
@@ -359,8 +409,8 @@ function createBoardDiscordRuntime({
       await privateReply(interaction, statusSummary(result));
       return result;
     } catch (error) {
-      runtimeLogger?.error?.('board command failed', error);
-      const content = error?.code === 'GUILD_NOT_APPROVED' ? AUDIT_PENDING_MESSAGE : friendlyError(error);
+      runtimeLogger?.error?.(`board command failed code=${safeStatusCode(error?.code, 'UNKNOWN')}`, error);
+      const content = friendlyError(error);
       if (interaction.deferred && !interaction.__boardReplyDeferred) {
         await interaction.editReply({ content, allowedMentions: { parse: [] } });
       } else await privateReply(interaction, content);
@@ -371,7 +421,7 @@ function createBoardDiscordRuntime({
   async function handleInteraction(interaction) {
     if (!String(interaction?.customId || '').startsWith('board|')) return false;
     try {
-      assertApprovedGuild(interaction, { isGuildApproved, isBotOwner });
+      assertGuildChannel(interaction);
       const decoded = parseBoardCustomId(interaction.customId);
       const session = await boardStore.getSessionById(decoded.sessionId);
 
@@ -394,6 +444,7 @@ function createBoardDiscordRuntime({
         const result = turtleAction
           ? await turtleAdapter.handle(interaction)
           : await interactionAdapter.handle(interaction);
+        if (turtleAction) logTurtleSoupSafeFailure(decoded.verb, result);
         lifecycle.track(result?.board?.session || result?.session);
         const content = result?.revealText || result?.content || '棋盤已更新。';
         await privateReply(interaction, content);
@@ -405,8 +456,8 @@ function createBoardDiscordRuntime({
       lifecycle.track(result.session);
       return true;
     } catch (error) {
-      runtimeLogger?.error?.('board interaction failed', error);
-      await privateReply(interaction, error?.code === 'GUILD_NOT_APPROVED' ? AUDIT_PENDING_MESSAGE : friendlyError(error));
+      runtimeLogger?.error?.(`board interaction failed code=${safeStatusCode(error?.code, 'UNKNOWN')}`, error);
+      await privateReply(interaction, friendlyError(error));
       return true;
     }
   }
@@ -422,14 +473,38 @@ function createBoardDiscordRuntime({
     store: boardStore,
     transport: discordTransport,
     hasPrivateCorpus: () => Boolean(corpus),
+    getTurtleSoupReadiness: () => ({ ...corpusStatus }),
+    getTurtleSoupJudgeReadiness: () => ({ ...judgeStatus }),
   });
 }
 
+// One startup line: corpus code, scenario count, judge code. No paths, no story text.
+function formatTurtleSoupStartupLog(runtime) {
+  const corpus = runtime.getTurtleSoupReadiness();
+  const judge = runtime.getTurtleSoupJudgeReadiness();
+  const scenarioCount = Number.isSafeInteger(corpus.scenarioCount) ? corpus.scenarioCount : 'unknown';
+  return `[TURTLE_SOUP] corpus readiness=${safeStatusCode(corpus.code, CORPUS_UNAVAILABLE)} ` +
+    `scenarioCount=${scenarioCount} judgeReadiness=${safeStatusCode(judge.code, 'JUDGE_UNAVAILABLE')}`;
+}
+
+// Writes the startup line. A configured corpus that cannot be used, or a usable corpus with no
+// judge, is a warning so it is not lost among routine output; "not configured" is normal.
+function logTurtleSoupStartup(runtime, targetLogger = logger) {
+  const corpus = runtime.getTurtleSoupReadiness();
+  const judge = runtime.getTurtleSoupJudgeReadiness();
+  const degraded = corpus.ready ? !judge.ready : corpus.code !== CORPUS_NOT_CONFIGURED;
+  const message = formatTurtleSoupStartupLog(runtime);
+  if (degraded) targetLogger.warn(message);
+  else targetLogger.info(message);
+}
+
 module.exports = {
-  AUDIT_PENDING_MESSAGE,
   FRIENDLY_ERRORS,
+  JUDGE_READY,
   createBoardDiscordRuntime,
+  formatTurtleSoupStartupLog,
   friendlyError,
+  logTurtleSoupStartup,
   privateReply,
   statusSummary,
 };

@@ -1,11 +1,32 @@
 const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
-const { enqueueFeatureOutbox } = require('./featurePlatformService');
+const { enqueueFeatureOutboxWithApi } = require('./featurePlatformService');
 const { evaluateNumberExpression } = require('./numberExpressionService');
-const { REACTION_EMOJI, buildReactionPayload } = require('./wordChainService');
+const {
+  REACTION_EVENT_TYPE,
+  buildReactionOutboxPayload,
+  dispatchImmediateChainReaction,
+  processChainReactionOutbox,
+} = require('./chainReactionDelivery');
+const {
+  RESERVED_KEY,
+  closeFence,
+  getRuntime: getReactionRuntime,
+  inactiveReactionAuthority,
+  markCompletion,
+  mergeReservedConfig,
+  noteInactiveReactionAuthority,
+  openFence,
+  parseConfig,
+  readChainConfig,
+  requireChainConfig,
+  purposeFor,
+  revokeMetadata,
+  verifyMetadata,
+} = require('../systems/safety/chainReactionFence');
+const { snowflakeTimestamp } = require('../platform/publicEffectGrant');
 const logger = require('../utils/logger');
 
 const FEATURE_KEY = 'number_chain';
-const REACTION_EVENT_TYPE = 'discord_reaction';
 const DEFAULT_TARGET = 1;
 const MAX_ID_LENGTH = 80;
 const MAX_TARGET = Number.MAX_SAFE_INTEGER;
@@ -63,16 +84,62 @@ function selectActiveSession(api, guildId, channelId = null) {
   );
 }
 
-function setNumberChainFeatureSetting(api, guildId, { enabled, channelId, now }) {
-  const current = api.get('SELECT created_at FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?', [guildId, FEATURE_KEY]);
+function setNumberChainFeatureSetting(api, guildId, { enabled, channelId, now, reactionMetadata = undefined,
+  allowCorruptDisable = false }) {
+  const current = api.get('SELECT created_at, config_json FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?', [guildId, FEATURE_KEY]);
+  const parsed = readChainConfig(current?.config_json || '{}');
+  if (!parsed.valid && !(allowCorruptDisable && enabled === false)) throw new Error('CHAIN_REACTION_CONFIG_INVALID');
+  const currentConfig = parsed.valid ? parsed.config : {};
+  const metadata = reactionMetadata === undefined ? currentConfig[RESERVED_KEY] : reactionMetadata;
+  const configJson = JSON.stringify(mergeReservedConfig(currentConfig, metadata, { parserVersion: PARSER_VERSION }));
   api.run(
     `INSERT INTO feature_guild_settings
       (guild_id, feature_key, enabled, channel_id, config_json, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(guild_id, feature_key) DO UPDATE SET
        enabled = excluded.enabled, channel_id = excluded.channel_id, config_json = excluded.config_json, updated_at = excluded.updated_at`,
-    [guildId, FEATURE_KEY, enabled ? 1 : 0, channelId, enabled ? JSON.stringify({ parserVersion: PARSER_VERSION }) : '{}', current?.created_at || now, now]
+    [guildId, FEATURE_KEY, enabled ? 1 : 0, channelId, configJson, current?.created_at || now, now]
   );
+}
+
+// The session was created by this very start call, so there is no earlier progress to protect: retire it together
+// with the feature setting. previousRoundEnded tells the caller that a round in another channel was already retired
+// by the same call (a channel switch), which the administrator has to be told.
+function failClosedNumberChainStart(api, { guildId, sessionId, actorId, now, previousRoundEnded = false }) {
+  api.run(
+    `UPDATE number_chain_sessions
+     SET status = 'stopped', stopped_by = ?, stopped_at = ?, updated_at = ?, revision = revision + 1
+     WHERE id = ? AND status = 'active'`,
+    [actorId, now, now, sessionId]
+  );
+  setNumberChainFeatureSetting(api, guildId, { enabled: false, channelId: null, now,
+    reactionMetadata: null, allowCorruptDisable: true });
+  return { fenceOpenFailed: true, previousRoundEnded };
+}
+
+// Re-running start on a channel whose round is already in progress must not end that round. The reaction fence only
+// authorizes the public reaction (every dispatch re-verifies it against the stored metadata and the open fence), not
+// the stored entries, so a fence that cannot be opened disables the feature setting while the session row stays
+// untouched; running start again once the fence works resumes the same round.
+// The stored reaction authority is kept on purpose: the startup reconcile re-enables the setting of a guild that still
+// has an active round, and if the ledger fence verifies against the kept authority the reaction is sent again
+// without anybody running start. An authority that no longer verifies simply yields no reaction.
+function pauseNumberChainAfterFenceFailure(api, { guildId, now }) {
+  setNumberChainFeatureSetting(api, guildId, { enabled: false, channelId: null, now, allowCorruptDisable: true });
+  return { fenceOpenFailed: true, sessionKept: true };
+}
+
+// A stored reaction authority only becomes a reaction source while the live fence still verifies it, with the same
+// check the dispatch repeats later. A purpose that is unavailable, or a fence that was closed or replaced, yields none,
+// so no reaction is queued that could not be delivered or that would run without protection.
+function liveReactionAuthority(metadata, { guildId, channelId, session }) {
+  if (!metadata || metadata.revoked === true) return null;
+  try {
+    return verifyMetadata({ featureKey: FEATURE_KEY, guildId, channelId, sessionId: Number(session.id),
+      sessionCreatedAt: session.created_at, metadata, sourceFence: metadata.sourceFence });
+  } catch {
+    return null;
+  }
 }
 
 async function startNumberChain({ guildId, channelId, actorId, target = DEFAULT_TARGET, now = new Date(), beforeCommit = null }) {
@@ -83,7 +150,10 @@ async function startNumberChain({ guildId, channelId, actorId, target = DEFAULT_
   const timestamp = new Date(now).toISOString();
   if (Number.isNaN(new Date(timestamp).getTime())) throw new NumberChainError('INVALID_ARGUMENT', 'now must be valid.');
 
-  return withCoinTransaction((api) => {
+  const result = await withCoinTransaction((api) => {
+    const initialSetting = api.get('SELECT config_json FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?',
+      [normalizedGuildId, FEATURE_KEY]);
+    requireChainConfig(initialSetting?.config_json || '{}');
     const wordSession = api.get(
       "SELECT id, channel_id FROM text_chain_sessions WHERE guild_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1",
       [normalizedGuildId]
@@ -103,10 +173,21 @@ async function startNumberChain({ guildId, channelId, actorId, target = DEFAULT_
     }
     const existing = selectActiveSession(api, normalizedGuildId);
     if (existing?.channel_id === normalizedChannelId) {
-      setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: true, channelId: normalizedChannelId, now: timestamp });
-      return { alreadyActive: true, stoppedSession: null, session: mapSession(existing) };
+      const session = mapSession(existing);
+      const opened = openFence({ featureKey: FEATURE_KEY, guildId: normalizedGuildId,
+        channelId: normalizedChannelId, sessionId: session.id, sessionCreatedAt: session.createdAt });
+      if (!opened.metadata) return pauseNumberChainAfterFenceFailure(api, { guildId: normalizedGuildId,
+        now: timestamp });
+      setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: true, channelId: normalizedChannelId,
+        now: timestamp, reactionMetadata: opened.metadata });
+      return { alreadyActive: true, stoppedSession: null, session };
     }
     if (existing) {
+      const previousSetting = api.get('SELECT config_json FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?',
+        [normalizedGuildId, FEATURE_KEY]);
+      const previousMetadata = requireChainConfig(previousSetting?.config_json || '{}')[RESERVED_KEY];
+      closeFence({ featureKey: FEATURE_KEY, guildId: normalizedGuildId,
+        channelId: existing.channel_id, generation: previousMetadata?.generation });
       api.run(
         `UPDATE number_chain_sessions
          SET status = 'stopped', stopped_by = ?, stopped_at = ?, updated_at = ?, revision = revision + 1
@@ -121,7 +202,12 @@ async function startNumberChain({ guildId, channelId, actorId, target = DEFAULT_
       [normalizedGuildId, normalizedChannelId, expectedTarget, normalizedActorId, timestamp, timestamp]
     );
     const session = mapSession(api.get('SELECT * FROM number_chain_sessions WHERE id = last_insert_rowid()'));
-    setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: true, channelId: normalizedChannelId, now: timestamp });
+    const opened = openFence({ featureKey: FEATURE_KEY, guildId: normalizedGuildId,
+      channelId: normalizedChannelId, sessionId: session.id, sessionCreatedAt: session.createdAt });
+    if (!opened.metadata) return failClosedNumberChainStart(api, { guildId: normalizedGuildId,
+      sessionId: session.id, actorId: normalizedActorId, now: timestamp, previousRoundEnded: Boolean(existing) });
+    setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: true, channelId: normalizedChannelId,
+      now: timestamp, reactionMetadata: opened.metadata });
     if (typeof beforeCommit === 'function') beforeCommit();
     return {
       alreadyActive: false,
@@ -129,6 +215,19 @@ async function startNumberChain({ guildId, channelId, actorId, target = DEFAULT_
       session,
     };
   });
+  if (result?.fenceOpenFailed) {
+    const sessionKept = result.sessionKept === true;
+    const previousRoundEnded = result.previousRoundEnded === true;
+    const error = new NumberChainError('REACTION_FENCE_OPEN_FAILED', sessionKept
+      ? '數字接龍的公開回應安全狀態無法建立，已暫停此頻道的接龍；進度已保留，修復後重新開局即可繼續。'
+      : previousRoundEnded
+        ? '數字接龍的公開回應安全狀態無法建立，沒有開始新的一局，原頻道的那一局已結束，接龍保持停用。'
+        : '數字接龍的公開回應安全狀態無法建立，已保持停用。');
+    error.sessionKept = sessionKept;
+    error.previousRoundEnded = previousRoundEnded;
+    throw error;
+  }
+  return result;
 }
 
 async function stopNumberChain({ guildId, channelId, actorId, now = new Date() }) {
@@ -139,20 +238,68 @@ async function stopNumberChain({ guildId, channelId, actorId, now = new Date() }
 
   return withCoinTransaction((api) => {
     const session = selectActiveSession(api, normalizedGuildId, normalizedChannelId);
-    if (!session) return { stopped: false, session: null };
-    api.run(
-      `UPDATE number_chain_sessions
-       SET status = 'stopped', stopped_by = ?, stopped_at = ?, updated_at = ?, revision = revision + 1
-       WHERE id = ? AND status = 'active'`,
-      [normalizedActorId, timestamp, timestamp, session.id]
+    const activeSession = selectActiveSession(api, normalizedGuildId);
+    const setting = api.get('SELECT enabled, channel_id, config_json FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?',
+      [normalizedGuildId, FEATURE_KEY]);
+    const metadata = parseConfig(setting?.config_json || '{}')[RESERVED_KEY];
+    const completed = session ? null : api.get(
+      "SELECT id, created_at FROM number_chain_sessions WHERE guild_id = ? AND channel_id = ? AND status = 'completed' ORDER BY id DESC LIMIT 1",
+      [normalizedGuildId, normalizedChannelId]
     );
-    setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: false, channelId: null, now: timestamp });
-    return { stopped: true, session: mapSession(api.get('SELECT * FROM number_chain_sessions WHERE id = ?', [session.id])) };
+    const targetOwnsCurrentLineage = session
+      ? Number(activeSession?.id) === Number(session.id) &&
+        (!setting?.channel_id || setting.channel_id === normalizedChannelId) &&
+        (!metadata?.channelId || metadata.channelId === normalizedChannelId)
+      : Boolean(completed) && !activeSession &&
+        (!setting?.channel_id || setting.channel_id === normalizedChannelId) &&
+        (!metadata?.channelId || metadata.channelId === normalizedChannelId) &&
+        (!metadata?.session?.id || Number(metadata.session.id) === Number(completed.id));
+    if (!targetOwnsCurrentLineage) return { stopped: false, reactionRevoked: false, session: null };
+    const closed = closeFence({ featureKey: FEATURE_KEY, guildId: normalizedGuildId,
+      channelId: normalizedChannelId, generation: metadata?.generation });
+    if (session) {
+      api.run(
+        `UPDATE number_chain_sessions
+         SET status = 'stopped', stopped_by = ?, stopped_at = ?, updated_at = ?, revision = revision + 1
+         WHERE id = ? AND status = 'active'`,
+        [normalizedActorId, timestamp, timestamp, session.id]
+      );
+    }
+    setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: false, channelId: null, now: timestamp,
+      reactionMetadata: metadata ? revokeMetadata(metadata) : null, allowCorruptDisable: true });
+    return { stopped: Boolean(session), reactionRevoked: closed.kind === 'closed' || closed.kind === 'failed',
+      session: session ? mapSession(api.get('SELECT * FROM number_chain_sessions WHERE id = ?', [session.id])) : null };
   });
 }
 
+// The round in the channel, if any. paused is true while the round is still active but its feature setting is disabled
+// (or points elsewhere), so the router ignores the channel: a paused round must not be reported as running.
 async function getNumberChainStatus(guildId, channelId) {
-  return withCoinDatabase((api) => mapSession(selectActiveSession(api, requireId(guildId, 'guildId'), requireId(channelId, 'channelId'))));
+  const normalizedGuildId = requireId(guildId, 'guildId');
+  const normalizedChannelId = requireId(channelId, 'channelId');
+  return withCoinDatabase((api) => {
+    const session = mapSession(selectActiveSession(api, normalizedGuildId, normalizedChannelId));
+    if (!session) return null;
+    const setting = api.get('SELECT enabled, channel_id, config_json FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?',
+      [normalizedGuildId, FEATURE_KEY]);
+    const paused = !(Number(setting?.enabled) === 1 && setting.channel_id === session.channelId);
+    // A running round whose stored ✅ authority no longer verifies while the purpose is ready
+    // (for example the ledger was re-initialized) gets no reaction until start runs again.
+    const reactionInactive = !paused && Boolean(inactiveReactionAuthority({ featureKey: FEATURE_KEY,
+      guildId: normalizedGuildId, channelId: session.channelId, sessionId: session.id,
+      sessionCreatedAt: session.createdAt, metadata: readChainConfig(setting?.config_json || '{}').config[RESERVED_KEY] || null }));
+    return { ...session, paused, reactionInactive };
+  });
+}
+
+function describeNumberChainStatus(session) {
+  const progress = `目前要接 ${session.expectedTarget}，已答對 ${session.revision} 次`;
+  if (session.paused === true) {
+    return `數字接龍已暫停：${progress}；進度已保留，管理員可在同一頻道再次使用 /board start 接續這一局。`;
+  }
+  return session.reactionInactive === true
+    ? `數字接龍進行中：${progress}。✅ 未啟用，請在同頻道重新 /board start。`
+    : `數字接龍進行中：${progress}。`;
 }
 
 async function acceptNumberChainMessage({ guildId, channelId, messageId, userId, content, expectedChannelId = channelId, now = new Date() }) {
@@ -184,11 +331,41 @@ async function acceptNumberChainMessage({ guildId, channelId, messageId, userId,
       return { ok: false, code: 'TARGET_MISMATCH', message: `這一輪要接的數字是 ${session.expected_target} 喔。` };
     }
 
+    const setting = api.get('SELECT config_json FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?',
+      [normalizedGuildId, FEATURE_KEY]);
+    const chainConfig = readChainConfig(setting?.config_json || '{}');
+    let reactionMetadata = chainConfig.config[RESERVED_KEY] || null;
+    if (chainConfig.valid && !reactionMetadata) {
+      const runtime = getReactionRuntime();
+      const purposeId = purposeFor(FEATURE_KEY);
+      const sourceTime = snowflakeTimestamp(normalizedMessageId);
+      // A fence read that fails disables the purpose and returns null, so the cutover is read
+      // afterwards: it is null once the purpose is unavailable, and nothing is adopted.
+      const fenceMissing = Boolean(runtime?.isPurposeReady?.(purposeId)) &&
+        !runtime.getReactionFence(purposeId, normalizedGuildId);
+      const cutover = fenceMissing ? runtime.getCutoverSourceTimestampMs(purposeId) : null;
+      if (fenceMissing && Number.isSafeInteger(cutover) && Number.isSafeInteger(sourceTime) && sourceTime > cutover) {
+        const adopted = openFence({ featureKey: FEATURE_KEY, guildId: normalizedGuildId,
+          channelId: normalizedChannelId, sessionId: Number(session.id), sessionCreatedAt: session.created_at,
+          adoptOnlyIfMissing: true });
+        reactionMetadata = adopted.metadata;
+        if (reactionMetadata) setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: true,
+          channelId: normalizedChannelId, now: timestamp, reactionMetadata });
+      }
+    }
+    // Decided before the completion marker is added: only the authority that verifies now may queue a reaction.
+    const reactionAuthority = liveReactionAuthority(reactionMetadata, {
+      guildId: normalizedGuildId, channelId: normalizedChannelId, session });
+    if (!reactionAuthority) {
+      noteInactiveReactionAuthority({ featureKey: FEATURE_KEY, guildId: normalizedGuildId, metadata: reactionMetadata });
+    }
+
     api.run(
       `INSERT INTO number_chain_entries (session_id, guild_id, channel_id, message_id, user_id, expression, result, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [session.id, normalizedGuildId, normalizedChannelId, normalizedMessageId, normalizedUserId, expression, Number(evaluated.value), timestamp]
     );
+    const entryId = Number(api.get('SELECT last_insert_rowid() AS id').id);
     const completed = Number(session.expected_target) >= MAX_TARGET;
     const nextTarget = completed ? Number(session.expected_target) : Number(session.expected_target) + 1;
     api.run(
@@ -199,21 +376,23 @@ async function acceptNumberChainMessage({ guildId, channelId, messageId, userId,
        WHERE id = ? AND status = 'active'`,
       [nextTarget, normalizedUserId, timestamp, completed ? 1 : 0, completed ? 1 : 0, timestamp, session.id]
     );
-    if (completed) {
-      setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: false, channelId: null, now: timestamp });
+    const updatedSession = mapSession(api.get('SELECT * FROM number_chain_sessions WHERE id = ?', [session.id]));
+    if (completed && reactionMetadata) reactionMetadata = markCompletion(reactionMetadata, {
+      messageId: normalizedMessageId, entryId, finalRevision: updatedSession.revision,
+    });
+    if (completed) setNumberChainFeatureSetting(api, normalizedGuildId, { enabled: false, channelId: null,
+      now: timestamp, reactionMetadata });
+    let reactionSource = null;
+    if (reactionAuthority) {
+      reactionSource = Object.freeze({ guildId: normalizedGuildId, channelId: normalizedChannelId,
+        messageId: normalizedMessageId, authorId: normalizedUserId, sourceFence: reactionMetadata.sourceFence });
+      enqueueFeatureOutboxWithApi(api, {
+        guildId: normalizedGuildId, featureKey: FEATURE_KEY, eventType: REACTION_EVENT_TYPE,
+        dedupeKey: `reaction:${normalizedMessageId}`, payload: buildReactionOutboxPayload(reactionSource),
+        availableAt: now, now,
+      });
     }
-    return { ok: true, duplicate: false, completed, session: mapSession(api.get('SELECT * FROM number_chain_sessions WHERE id = ?', [session.id])) };
-  });
-}
-
-async function enqueueReaction(message) {
-  const payload = buildReactionPayload({ guildId: message.guildId, channelId: message.channelId, messageId: message.id });
-  return enqueueFeatureOutbox({
-    guildId: payload.guildId,
-    featureKey: FEATURE_KEY,
-    eventType: REACTION_EVENT_TYPE,
-    dedupeKey: `reaction:${payload.messageId}`,
-    payload,
+    return { ok: true, duplicate: false, completed, session: updatedSession, reactionSource };
   });
 }
 
@@ -231,15 +410,19 @@ async function handleNumberChainMessage(message, setting) {
     await message.reply({ content: result.message, allowedMentions: { repliedUser: false } }).catch((error) => logger.warn('數字接龍拒絕訊息回覆失敗', error));
     return true;
   }
-  await message.react(REACTION_EMOJI).catch(async (error) => {
-    logger.warn('數字接龍確認反應失敗，已加入重試佇列', error);
-    await enqueueReaction(message);
-  });
+  if (result.reactionSource) {
+    const reaction = await dispatchImmediateChainReaction(message.client, FEATURE_KEY, result.reactionSource);
+    if (reaction.kind !== 'confirmed') logger.warn(`數字接龍確認反應未確認。code=${reaction.kind}`);
+  }
   if (result.completed) {
-    await message.reply({ content: '數字已到達安全上限，這一輪數字接龍完成！請管理員使用 /number-chain start 開新局。', allowedMentions: { repliedUser: false } })
+    await message.reply({ content: '數字已到達安全上限，這一輪數字接龍完成！請管理員使用 /board start 開新局。', allowedMentions: { repliedUser: false } })
       .catch((error) => logger.warn('數字接龍完成訊息回覆失敗', error));
   }
   return true;
+}
+
+async function processNumberChainReactionOutbox(client, options = {}) {
+  return processChainReactionOutbox(client, FEATURE_KEY, options);
 }
 
 module.exports = {
@@ -248,8 +431,10 @@ module.exports = {
   MAX_TARGET,
   NumberChainError,
   acceptNumberChainMessage,
+  describeNumberChainStatus,
   getNumberChainStatus,
   handleNumberChainMessage,
+  processNumberChainReactionOutbox,
   startNumberChain,
   stopNumberChain,
 };

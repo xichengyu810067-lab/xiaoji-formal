@@ -11,13 +11,18 @@ const {
   getBankRates,
   getRateHistory,
   listFixedDeposits,
+  readBalanceSummary,
   setDemandRate,
   setFixedRate,
   withdraw,
 } = require('../services/bankService');
 const { ensureModerationAccess } = require('../utils/moderation');
+const { reportInteractionSecurityAlert } = require('../utils/securityAlert');
 const { ensureBotOwner } = require('../utils/ownerOnly');
-const { formatCoins, replyCoinError } = require('../utils/coinPresentation');
+const { formatCoins, formatFixedDepositStatus, formatMemberName, formatRateKey, replyCoinError } = require('../utils/coinPresentation');
+const { fitListText, omittedLine } = require('../utils/replyLengthGuard');
+
+const sourceLabels = Object.freeze({ wallet: '錢包', bank: '活存' });
 
 function formatRate(rate) {
   return `${(Number(rate || 0) * 100).toFixed(4)}%`;
@@ -25,7 +30,7 @@ function formatRate(rate) {
 
 function formatTimestamp(isoString) {
   if (!isoString) {
-    return 'N/A';
+    return '無';
   }
 
   return `<t:${Math.floor(new Date(isoString).getTime() / 1000)}:F>`;
@@ -33,7 +38,7 @@ function formatTimestamp(isoString) {
 
 function formatBalance(summary) {
   return [
-    `使用者：<@${summary.userId}> (${summary.userId})`,
+    `使用者：<@${summary.userId}>`,
     `錢包吉幣：${formatCoins(summary.walletBalance)}`,
     `活存金額：${formatCoins(summary.bankBalance)}`,
     `活存小數利息：${Number(summary.interestRemainder || 0).toFixed(4)} 吉幣`,
@@ -45,13 +50,29 @@ function formatBalance(summary) {
 }
 
 function formatFixedDeposit(item) {
-  return [
+  const lines = [
     `#${item.id} <@${item.userId}>`,
     `本金：${formatCoins(item.principal)}｜期間：${item.termDays} 天｜利率：${formatRate(item.rate)}`,
-    `狀態：${item.displayStatus}｜來源：${item.source}`,
+    `狀態：${formatFixedDepositStatus(item.displayStatus)}｜來源：${sourceLabels[item.source] || item.source}`,
     `建立：${formatTimestamp(item.createdAt)}｜到期：${formatTimestamp(item.maturityAt)}`,
-    `預估利息：${formatCoins(item.expectedInterest)}｜可領合計：${formatCoins(item.claimableAmount)}`,
-  ].join('\n');
+  ];
+  // A cancelled deposit no longer earns interest or pays anything out, so its estimate lines are left out.
+  if (item.status !== 'cancelled') {
+    lines.push(`預估利息：${formatCoins(item.expectedInterest)}｜可領合計：${formatCoins(item.claimableAmount)}`);
+  }
+  return lines.join('\n');
+}
+
+// A list of blocks (one per member or deposit) or lines (one per rate change) in one message. Nothing in a row is free
+// text, so when the rows do not fit, the last ones are left out with a line that says how many and where to read them.
+function rowsText({ header, rows, render, unit, hint, separator = '\n' }) {
+  return fitListText({
+    header,
+    items: rows,
+    render: (row) => render(row),
+    separator,
+    note: (count) => omittedLine(count, { unit, hint }),
+  });
 }
 
 function formatRateList(rates) {
@@ -60,7 +81,7 @@ function formatRateList(rates) {
     ...FIXED_TERMS.map((term) => `${term} 天定存整期利率：${formatRate(rates.fixedRates[term])}`),
     rates.activeEvents.length
       ? `活動利率：${rates.activeEvents
-          .map((event) => `${event.rateKey} 到 ${formatTimestamp(event.eventEndsAt)}`)
+          .map((event) => `${formatRateKey(event.rateKey)} 到 ${formatTimestamp(event.eventEndsAt)}`)
           .join('；')}`
       : '活動利率：無',
   ].join('\n');
@@ -73,6 +94,20 @@ async function requireBankAdmin(interaction) {
   });
 
   return access.ok;
+}
+
+// Wallet, bank and fixed deposits are one person's global data, so a lookup of one user is only for a member of
+// this server. Answers the command with the refusal and returns false when the user is not one.
+async function requireGuildMember(interaction, user) {
+  const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+
+  if (member) {
+    return true;
+  }
+
+  reportInteractionSecurityAlert('personal-data', interaction);
+  await interaction.reply({ content: '只能查詢目前在此伺服器的成員。', ephemeral: true });
+  return false;
 }
 
 const termChoices = FIXED_TERMS.map((term) => ({ name: `${term} 天`, value: term }));
@@ -158,7 +193,7 @@ module.exports = {
     .addSubcommand((subcommand) =>
       subcommand
         .setName('rate-set-demand')
-        .setDescription('管理員設定活存每日利率')
+        .setDescription('設定活存每日利率（限小吉擁有者）')
         .addNumberOption((option) =>
           option.setName('rate-percent').setDescription('百分比，例如 0.03 代表 0.03%').setRequired(true).setMinValue(0).setMaxValue(1)
         )
@@ -168,7 +203,7 @@ module.exports = {
     .addSubcommand((subcommand) =>
       subcommand
         .setName('rate-set-fixed')
-        .setDescription('管理員設定定存整期利率')
+        .setDescription('設定定存整期利率（限小吉擁有者）')
         .addIntegerOption((option) => option.setName('term-days').setDescription('定存期間').setRequired(true).addChoices(...termChoices))
         .addNumberOption((option) =>
           option.setName('rate-percent').setDescription('百分比，例如 2 代表 2%').setRequired(true).setMinValue(0).setMaxValue(30)
@@ -201,7 +236,9 @@ module.exports = {
       if (subcommand === 'balance-user') {
         if (!(await requireBankAdmin(interaction))) return;
         const user = interaction.options.getUser('user', true);
-        const summary = await getBalanceSummary(interaction.guildId, user.id);
+        if (!(await requireGuildMember(interaction, user))) return;
+        // Looking at somebody else must not file them under this guild, so the read-only summary is used.
+        const summary = await readBalanceSummary(interaction.guildId, user.id);
         await interaction.reply({ content: `**使用者銀行概況**\n${formatBalance(summary)}`, ephemeral: true });
         return;
       }
@@ -212,7 +249,14 @@ module.exports = {
           limit: interaction.options.getInteger('limit') || 10,
         });
         await interaction.reply({
-          content: ['**全服銀行概況**', ...rows.map((row) => formatBalance(row))].join('\n\n'),
+          content: rowsText({
+            header: '**全服銀行概況**',
+            rows,
+            render: formatBalance,
+            unit: '位成員的概況',
+            hint: '可用 /bank balance-user 查看指定成員',
+            separator: '\n\n',
+          }),
           ephemeral: true,
         });
         return;
@@ -266,9 +310,12 @@ module.exports = {
       if (subcommand === 'fixed-user') {
         if (!(await requireBankAdmin(interaction))) return;
         const user = interaction.options.getUser('user', true);
+        if (!(await requireGuildMember(interaction, user))) return;
         const rows = await listFixedDeposits(interaction.guildId, { userId: user.id, limit: 10 });
         await interaction.reply({
-          content: rows.length ? [`**${user.tag} 的定存列表**`, ...rows.map(formatFixedDeposit)].join('\n\n') : '查無定存紀錄。',
+          content: rows.length
+            ? [`**${formatMemberName(user, interaction.options.getMember?.('user'))} 的定存列表**`, ...rows.map(formatFixedDeposit)].join('\n\n')
+            : '查無定存紀錄。',
           ephemeral: true,
         });
         return;
@@ -278,7 +325,16 @@ module.exports = {
         if (!(await requireBankAdmin(interaction))) return;
         const rows = await listFixedDeposits(interaction.guildId, { limit: interaction.options.getInteger('limit') || 10 });
         await interaction.reply({
-          content: rows.length ? ['**全服定存列表**', ...rows.map(formatFixedDeposit)].join('\n\n') : '查無定存紀錄。',
+          content: rows.length
+            ? rowsText({
+              header: '**全服定存列表**',
+              rows,
+              render: formatFixedDeposit,
+              unit: '筆定存',
+              hint: '可用 /bank fixed-user 查看指定成員的定存',
+              separator: '\n\n',
+            })
+            : '查無定存紀錄。',
           ephemeral: true,
         });
         return;
@@ -338,11 +394,18 @@ module.exports = {
       if (subcommand === 'rate-history') {
         if (!(await requireBankAdmin(interaction))) return;
         const rows = await getRateHistory(interaction.guildId, { limit: interaction.options.getInteger('limit') || 10 });
-        const lines = rows.map(
-          (row) =>
-            `#${row.id} ${row.rateKey}：${formatRate(row.oldRate)} -> ${formatRate(row.newRate)} by <@${row.operatorId}> at ${formatTimestamp(row.createdAt)}${row.isEvent ? `｜活動到 ${formatTimestamp(row.eventEndsAt)}` : ''}`
-        );
-        await interaction.reply({ content: lines.length ? `**利率調整紀錄**\n${lines.join('\n')}` : '尚無利率調整紀錄。', ephemeral: true });
+        await interaction.reply({
+          content: rows.length
+            ? rowsText({
+              header: '**利率調整紀錄**',
+              rows,
+              render: (row) =>
+                `#${row.id} ${formatRateKey(row.rateKey)}：${formatRate(row.oldRate)} -> ${formatRate(row.newRate)}｜操作者 <@${row.operatorId}>｜${formatTimestamp(row.createdAt)}${row.isEvent ? `｜活動到 ${formatTimestamp(row.eventEndsAt)}` : ''}`,
+              unit: '筆調整紀錄',
+            })
+            : '尚無利率調整紀錄。',
+          ephemeral: true,
+        });
       }
     } catch (error) {
       await replyCoinError(interaction, error);

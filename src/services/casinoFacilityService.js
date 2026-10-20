@@ -8,11 +8,15 @@ const {
 } = require('./coinService');
 const {
   ChipLedgerType,
+  assertPayoutWithinLimit,
   creditChipsWithApi,
   debitChipsForCasinoWithApi,
   normalizeAmount,
 } = require('./chipService');
+const { applyGameLaunchOnce } = require('../systems/games/gameLaunchReceipt');
 
+// A won tower fight pays back twice the wager; a bet is refused before the fight when that is above the chip limit.
+const DUEL_WIN_MULTIPLIER = 2;
 const MAX_LODGING_NIGHTS = 30;
 const DEFAULT_HISTORY_LIMIT = 10;
 const MAX_HISTORY_LIMIT = 25;
@@ -174,10 +178,10 @@ function getNextTowerFloor(api, guildId, userId) {
 async function getCasinoLobby() {
   return {
     areas: [
-      { name: '決鬥塔台', command: '/duel-tower weapons / enter / history', description: '使用吉幣商店的對戰技能道具進行塔台決鬥。' },
+      { name: '決鬥塔台', command: '/board start、/duel-tower weapons / profile / history', description: '使用吉幣商店的對戰技能道具進行塔台決鬥。' },
       { name: '酒水吧檯與餐廳', command: '/casino-venue', description: '點飲料與餐點，指定調酒師、廚師與服務生。' },
       { name: '住宿', command: '/casino-lobby stay', description: '使用籌碼登記賭場客房。' },
-      { name: '下注區', command: '/casino dice / slots / blackjack / roulette / baccarat / poker', description: '所有賭場遊戲優先使用籌碼。' },
+      { name: '下注區', command: '/board start', description: '從統一遊戲目錄選擇賭場遊戲；所有賭場遊戲優先使用籌碼。' },
       { name: '貸幣兌換區', command: '/exchange', description: '吉幣與籌碼兌換，以及籌碼換回吉幣。' },
       { name: '當鋪', command: '/pawn', description: '典當或贖回奢侈品商店街商品。' },
       { name: '奢侈品商店街', command: '/luxury', description: '獨立於吉幣商店的名牌包、項鍊、首飾、手錶等商品。' },
@@ -274,8 +278,11 @@ async function getDuelTowerProfile(guildId, userId) {
   });
 }
 
-async function enterDuelTower(guildId, userId, { weaponItemId, wager, rng = defaultRng, date = new Date() } = {}) {
-  return withCoinTransaction((api) => {
+async function enterDuelTower(guildId, userId, { weaponItemId, wager, rng = defaultRng, date = new Date(),
+  interactionId = null } = {}) {
+  return withCoinTransaction((api) => applyGameLaunchOnce(api, {
+    interactionId, kind: 'duel-tower', userId, guildId, payload: { weaponItemId, wager },
+  }, () => {
     const settings = ensureGuildSettings(api, guildId);
     assertEconomyEnabled(settings);
     ensurePlayer(api, guildId, userId);
@@ -291,6 +298,7 @@ async function enterDuelTower(guildId, userId, { weaponItemId, wager, rng = defa
     }
 
     const wagerAmount = normalizeAmount(wager, '決鬥籌碼');
+    assertPayoutWithinLimit(wagerAmount, DUEL_WIN_MULTIPLIER);
     const floor = getNextTowerFloor(api, guildId, userId);
     const timestamp = nowIso(date);
     const weapon = mapWeapon(weaponRow);
@@ -312,7 +320,7 @@ async function enterDuelTower(guildId, userId, { weaponItemId, wager, rng = defa
       payoutAmount = wagerAmount;
     } else if (playerPower > opponentPower) {
       status = 'win';
-      payoutAmount = wagerAmount * 2;
+      payoutAmount = wagerAmount * DUEL_WIN_MULTIPLIER;
     }
 
     const payout =
@@ -365,7 +373,7 @@ async function enterDuelTower(guildId, userId, { weaponItemId, wager, rng = defa
       balanceAfter: payout.balanceAfter,
       autoTopUpAmount: debit.autoTopUpAmount,
     };
-  });
+  }));
 }
 
 async function getDuelTowerHistory(guildId, userId, { limit = DEFAULT_HISTORY_LIMIT } = {}) {

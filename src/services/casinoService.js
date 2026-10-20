@@ -7,13 +7,20 @@ const {
 } = require('discord.js');
 const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
 const { CoinServiceError, ensureGuildSettings } = require('./coinService');
-const { ChipLedgerType, creditChipsWithApi, debitChipsForCasinoWithApi, ensureChipAccount } = require('./chipService');
+const {
+  ChipLedgerType,
+  assertPayoutWithinLimit,
+  creditChipsWithApi,
+  debitChipsForCasinoWithApi,
+  ensureChipAccount,
+} = require('./chipService');
 const { CasinoLedgerType, insertCasinoLedger } = require('../systems/economy/casinoLedger');
 const { LOAN_INTEREST_RATE, LOAN_RELIEF_STEP_RATIO, MIN_LOAN_INTEREST_RATE,
   applyCasinoLoanRelief, applyLoanInterest, borrowCasinoLoan, collectCasinoDebt,
-  getCasinoDebtStatus, getCasinoLoanStatus, processCasinoLoanInterest,
-  repayCasinoLoan } = require('../systems/economy/loans');
+  getCasinoLoanStatus, processCasinoLoanInterest,
+  readCasinoDebtStatus, repayCasinoLoan } = require('../systems/economy/loans');
 const { formatChips } = require('../utils/coinPresentation');
+const { applyGameLaunchOnce } = require('../systems/games/gameLaunchReceipt');
 
 const MAX_CASINO_AMOUNT = 9_000_000_000;
 const BLACKJACK_TTL_MS = 10 * 60 * 1000;
@@ -43,6 +50,13 @@ const BlackjackStatus = Object.freeze({
   SETTLED: 'settled',
   EXPIRED_REFUNDED: 'expired_refunded',
 });
+
+// The best multiplier of a slots round, of a poker win and of a blackjack natural. A bet is refused before
+// the round when its best payout would be above what a chip balance can be credited with, so these follow
+// the payout code below.
+const SLOT_BEST_MULTIPLIER = 10;
+const POKER_WIN_MULTIPLIER = 2;
+const BLACKJACK_NATURAL_MULTIPLIER = 2.5;
 
 const SLOT_SYMBOLS = Object.freeze(['櫻桃', '檸檬', '鈴鐺', '星星', '七']);
 const CARD_RANKS = Object.freeze(['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']);
@@ -241,8 +255,10 @@ function settleImmediateGame(api, { guildId, userId, gameType, betAmount, payout
   };
 }
 
-function playDice(guildId, userId, { amount, choice, rng = defaultRng, date = new Date() } = {}) {
-  return withCoinTransaction((api) => {
+function playDice(guildId, userId, { amount, choice, rng = defaultRng, date = new Date(), interactionId = null } = {}) {
+  return withCoinTransaction((api) => applyGameLaunchOnce(api, {
+    interactionId, kind: 'casino-dice', userId, guildId, payload: { amount, choice },
+  }, () => {
     ensureEconomyEnabled(api, guildId);
     applyLoanInterest(api, guildId, userId, date);
     const betAmount = normalizeAmount(amount, '下注金額');
@@ -252,13 +268,14 @@ function playDice(guildId, userId, { amount, choice, rng = defaultRng, date = ne
       throw new CoinServiceError('INVALID_DICE_CHOICE', '骰子下注只能選 big、small 或 seven。');
     }
 
+    const multiplier = normalizedChoice === 'seven' ? 5 : 2;
+    assertPayoutWithinLimit(betAmount, multiplier);
     const dice = [rng(6) + 1, rng(6) + 1];
     const sum = dice[0] + dice[1];
     const win =
       (normalizedChoice === 'big' && sum >= 8 && sum <= 12) ||
       (normalizedChoice === 'small' && sum >= 2 && sum <= 6) ||
       (normalizedChoice === 'seven' && sum === 7);
-    const multiplier = normalizedChoice === 'seven' ? 5 : 2;
     const payoutAmount = win ? betAmount * multiplier : 0;
 
     return settleImmediateGame(api, {
@@ -270,14 +287,17 @@ function playDice(guildId, userId, { amount, choice, rng = defaultRng, date = ne
       result: { choice: normalizedChoice, dice, sum, win, multiplier: win ? multiplier : 0 },
       timestamp: nowIso(date),
     });
-  });
+  }));
 }
 
-function playSlots(guildId, userId, { amount, rng = defaultRng, date = new Date() } = {}) {
-  return withCoinTransaction((api) => {
+function playSlots(guildId, userId, { amount, rng = defaultRng, date = new Date(), interactionId = null } = {}) {
+  return withCoinTransaction((api) => applyGameLaunchOnce(api, {
+    interactionId, kind: 'casino-slots', userId, guildId, payload: { amount },
+  }, () => {
     ensureEconomyEnabled(api, guildId);
     applyLoanInterest(api, guildId, userId, date);
     const betAmount = normalizeAmount(amount, '下注金額');
+    assertPayoutWithinLimit(betAmount, SLOT_BEST_MULTIPLIER);
     const reels = [SLOT_SYMBOLS[rng(SLOT_SYMBOLS.length)], SLOT_SYMBOLS[rng(SLOT_SYMBOLS.length)], SLOT_SYMBOLS[rng(SLOT_SYMBOLS.length)]];
     const counts = new Map();
 
@@ -289,7 +309,7 @@ function playSlots(guildId, userId, { amount, rng = defaultRng, date = new Date(
     let multiplier = 0;
 
     if (maxMatches === 3) {
-      multiplier = reels[0] === '七' ? 10 : 5;
+      multiplier = reels[0] === '七' ? SLOT_BEST_MULTIPLIER : 5;
     } else if (maxMatches === 2) {
       multiplier = 2;
     }
@@ -305,7 +325,7 @@ function playSlots(guildId, userId, { amount, rng = defaultRng, date = new Date(
       result: { reels, multiplier, win: multiplier > 0 },
       timestamp: nowIso(date),
     });
-  });
+  }));
 }
 
 function getRouletteColor(number) {
@@ -316,8 +336,10 @@ function getRouletteColor(number) {
   return ROULETTE_RED_NUMBERS.has(number) ? 'red' : 'black';
 }
 
-function playRoulette(guildId, userId, { amount, choice, rng = defaultRng, date = new Date() } = {}) {
-  return withCoinTransaction((api) => {
+function playRoulette(guildId, userId, { amount, choice, rng = defaultRng, date = new Date(), interactionId = null } = {}) {
+  return withCoinTransaction((api) => applyGameLaunchOnce(api, {
+    interactionId, kind: 'casino-roulette', userId, guildId, payload: { amount, choice },
+  }, () => {
     ensureEconomyEnabled(api, guildId);
     applyLoanInterest(api, guildId, userId, date);
     const betAmount = normalizeAmount(amount, '下注金額');
@@ -327,6 +349,8 @@ function playRoulette(guildId, userId, { amount, choice, rng = defaultRng, date 
       throw new CoinServiceError('INVALID_ROULETTE_CHOICE', '輪盤下注只能選 red、black、odd、even 或 zero。');
     }
 
+    const multiplier = normalizedChoice === 'zero' ? 36 : 2;
+    assertPayoutWithinLimit(betAmount, multiplier);
     const number = rng(37);
     const color = getRouletteColor(number);
     const win =
@@ -335,7 +359,6 @@ function playRoulette(guildId, userId, { amount, choice, rng = defaultRng, date 
       (normalizedChoice === 'odd' && number > 0 && number % 2 === 1) ||
       (normalizedChoice === 'even' && number > 0 && number % 2 === 0) ||
       (normalizedChoice === 'zero' && number === 0);
-    const multiplier = normalizedChoice === 'zero' ? 36 : 2;
     const payoutAmount = win ? betAmount * multiplier : 0;
 
     return settleImmediateGame(api, {
@@ -347,7 +370,7 @@ function playRoulette(guildId, userId, { amount, choice, rng = defaultRng, date 
       result: { choice: normalizedChoice, number, color, win, multiplier: win ? multiplier : 0 },
       timestamp: nowIso(date),
     });
-  });
+  }));
 }
 
 function createDeck(rng = defaultRng) {
@@ -455,8 +478,10 @@ function drawBaccaratHands(deck) {
   return { playerHand, bankerHand };
 }
 
-function playBaccarat(guildId, userId, { amount, choice, rng = defaultRng, date = new Date() } = {}) {
-  return withCoinTransaction((api) => {
+function playBaccarat(guildId, userId, { amount, choice, rng = defaultRng, date = new Date(), interactionId = null } = {}) {
+  return withCoinTransaction((api) => applyGameLaunchOnce(api, {
+    interactionId, kind: 'casino-baccarat', userId, guildId, payload: { amount, choice },
+  }, () => {
     ensureEconomyEnabled(api, guildId);
     applyLoanInterest(api, guildId, userId, date);
     const betAmount = normalizeAmount(amount, '下注金額');
@@ -466,13 +491,14 @@ function playBaccarat(guildId, userId, { amount, choice, rng = defaultRng, date 
       throw new CoinServiceError('INVALID_BACCARAT_CHOICE', '百家樂下注只能選 player、banker 或 tie。');
     }
 
+    const multiplier = normalizedChoice === 'tie' ? 8 : 2;
+    assertPayoutWithinLimit(betAmount, multiplier);
     const deck = createDeck(rng);
     const { playerHand, bankerHand } = drawBaccaratHands(deck);
     const playerValue = getBaccaratValue(playerHand);
     const bankerValue = getBaccaratValue(bankerHand);
     const outcome = playerValue === bankerValue ? 'tie' : playerValue > bankerValue ? 'player' : 'banker';
     const win = normalizedChoice === outcome;
-    const multiplier = normalizedChoice === 'tie' ? 8 : 2;
     const payoutAmount = win ? betAmount * multiplier : 0;
 
     return settleImmediateGame(api, {
@@ -493,7 +519,7 @@ function playBaccarat(guildId, userId, { amount, choice, rng = defaultRng, date 
       },
       timestamp: nowIso(date),
     });
-  });
+  }));
 }
 
 function getPokerRankValue(card) {
@@ -586,11 +612,14 @@ function comparePokerRanks(left, right) {
   return 0;
 }
 
-function playPoker(guildId, userId, { amount, rng = defaultRng, date = new Date() } = {}) {
-  return withCoinTransaction((api) => {
+function playPoker(guildId, userId, { amount, rng = defaultRng, date = new Date(), interactionId = null } = {}) {
+  return withCoinTransaction((api) => applyGameLaunchOnce(api, {
+    interactionId, kind: 'casino-poker', userId, guildId, payload: { amount },
+  }, () => {
     ensureEconomyEnabled(api, guildId);
     applyLoanInterest(api, guildId, userId, date);
     const betAmount = normalizeAmount(amount, '下注金額');
+    assertPayoutWithinLimit(betAmount, POKER_WIN_MULTIPLIER);
     const deck = createDeck(rng);
     const playerHand = [drawCard(deck), drawCard(deck), drawCard(deck), drawCard(deck), drawCard(deck)];
     const dealerHand = [drawCard(deck), drawCard(deck), drawCard(deck), drawCard(deck), drawCard(deck)];
@@ -616,7 +645,7 @@ function playPoker(guildId, userId, { amount, rng = defaultRng, date = new Date(
       },
       timestamp: nowIso(date),
     });
-  });
+  }));
 }
 
 function isNaturalBlackjack(hand) {
@@ -819,8 +848,11 @@ function expireUserBlackjackSessions(api, guildId, userId, date = new Date()) {
   return rows.map((row) => expireBlackjackSessionRow(api, row, date));
 }
 
-function startBlackjack(guildId, userId, { amount, rng = defaultRng, deck = null, date = new Date(), channelId = null } = {}) {
-  return withCoinTransaction((api) => {
+function startBlackjack(guildId, userId, { amount, rng = defaultRng, deck = null, date = new Date(), channelId = null,
+  interactionId = null } = {}) {
+  return withCoinTransaction((api) => applyGameLaunchOnce(api, {
+    interactionId, kind: 'casino-blackjack', userId, guildId, channelId, payload: { amount },
+  }, () => {
     ensureEconomyEnabled(api, guildId);
     applyLoanInterest(api, guildId, userId, date);
     expireUserBlackjackSessions(api, guildId, userId, date);
@@ -835,6 +867,7 @@ function startBlackjack(guildId, userId, { amount, rng = defaultRng, deck = null
     }
 
     const betAmount = normalizeAmount(amount, '下注金額');
+    assertPayoutWithinLimit(betAmount, BLACKJACK_NATURAL_MULTIPLIER);
     const timestamp = nowIso(date);
     const bet = debitChipsForCasinoWithApi(api, guildId, userId, betAmount, {
       timestamp,
@@ -883,7 +916,7 @@ function startBlackjack(guildId, userId, { amount, rng = defaultRng, deck = null
       autoTopUpAmount: bet.autoTopUpAmount,
       coinBalanceAfter: bet.coinBalanceAfter,
     };
-  });
+  }));
 }
 
 function getBlackjackSession(api, guildId, userId, sessionId) {
@@ -898,6 +931,33 @@ function getBlackjackSession(api, guildId, userId, sessionId) {
   }
 
   return row;
+}
+
+async function getActiveBlackjackSession(guildId, userId, { date = new Date() } = {}) {
+  return withCoinDatabase((api) => mapBlackjackSession(api.get(
+    `SELECT * FROM casino_blackjack_sessions
+     WHERE guild_id = ? AND user_id = ? AND status = ? AND expires_at > ?
+     ORDER BY id DESC LIMIT 1`,
+    [guildId, userId, BlackjackStatus.ACTIVE, nowIso(date)]
+  )));
+}
+
+// The dealer draws to 17 or more and the round is settled. Standing and reaching 21 both end here.
+function playDealerAndSettleBlackjack(api, row, date) {
+  const session = mapBlackjackSession(row);
+
+  while (getHandValue(session.dealerHand) < 17) {
+    session.dealerHand.push(drawCard(session.deck));
+  }
+
+  const timestamp = nowIso(date);
+  api.run(
+    'UPDATE casino_blackjack_sessions SET deck_json = ?, dealer_hand_json = ?, updated_at = ? WHERE id = ?',
+    [serializeJson(session.deck), serializeJson(session.dealerHand), timestamp, session.id]
+  );
+
+  const updatedRow = api.get('SELECT * FROM casino_blackjack_sessions WHERE id = ?', [session.id]);
+  return settleBlackjackSession(api, updatedRow, { date });
 }
 
 function hitBlackjack(guildId, userId, sessionId, { date = new Date() } = {}) {
@@ -922,8 +982,15 @@ function hitBlackjack(guildId, userId, sessionId, { date = new Date() } = {}) {
 
     const updatedRow = api.get('SELECT * FROM casino_blackjack_sessions WHERE id = ?', [session.id]);
 
-    if (getHandValue(session.playerHand) >= 21) {
+    const playerValue = getHandValue(session.playerHand);
+
+    // Going over 21 loses whatever the dealer holds. Exactly 21 plays the dealer out like standing does.
+    if (playerValue > 21) {
       return settleBlackjackSession(api, updatedRow, { date });
+    }
+
+    if (playerValue === 21) {
+      return playDealerAndSettleBlackjack(api, updatedRow, date);
     }
 
     return {
@@ -945,20 +1012,7 @@ function standBlackjack(guildId, userId, sessionId, { date = new Date() } = {}) 
       return { ...expireBlackjackSessionRow(api, row, date), expired: true };
     }
 
-    const session = mapBlackjackSession(row);
-
-    while (getHandValue(session.dealerHand) < 17) {
-      session.dealerHand.push(drawCard(session.deck));
-    }
-
-    const timestamp = nowIso(date);
-    api.run(
-      'UPDATE casino_blackjack_sessions SET deck_json = ?, dealer_hand_json = ?, updated_at = ? WHERE id = ?',
-      [serializeJson(session.deck), serializeJson(session.dealerHand), timestamp, session.id]
-    );
-
-    const updatedRow = api.get('SELECT * FROM casino_blackjack_sessions WHERE id = ?', [session.id]);
-    return settleBlackjackSession(api, updatedRow, { date });
+    return playDealerAndSettleBlackjack(api, row, date);
   });
 }
 
@@ -1109,8 +1163,8 @@ module.exports = {
   drawBaccaratHands,
   formatCard,
   formatHand,
-  getCasinoDebtStatus,
   getCasinoLoanStatus,
+  getActiveBlackjackSession,
   getHandValue,
   handleBlackjackButton,
   hitBlackjack,
@@ -1122,6 +1176,7 @@ module.exports = {
   playSlots,
   processCasinoLoanInterest,
   processExpiredBlackjackSessions,
+  readCasinoDebtStatus,
   repayCasinoLoan,
   standBlackjack,
   startBlackjack,

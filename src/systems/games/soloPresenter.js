@@ -94,7 +94,8 @@ function buildSoloMessagePayload(session, { renderPng = renderSoloPng } = {}) {
   if (!Buffer.isBuffer(png) || png.length < 8) throw new GameError('RENDER_FAILED', 'Solo game PNG is missing.');
   const name = `solo-${session.id}-r${session.revision}.png`;
   const active = session.status === 'active';
-  const rewardText = active ? '' : session.status === 'expired' ? '' : session.rewardStatus === 'granted'
+  // A game that timed out or that its owner ended early never reaches the reward step, so it says nothing about one.
+  const rewardText = active || session.status === 'expired' || session.status === 'cancelled' ? '' : session.rewardStatus === 'granted'
     ? Number.isSafeInteger(session.rewardDebtOffset) && Number.isSafeInteger(session.rewardNetAmount)
       ? session.rewardDebtOffset > 0
         ? `｜獎勵 ${session.rewardAmount} 吉幣（抵欠款 ${session.rewardDebtOffset}，錢包入帳 ${session.rewardNetAmount}）`
@@ -103,7 +104,7 @@ function buildSoloMessagePayload(session, { renderPng = renderSoloPng } = {}) {
     : session.rewardStatus === 'no_reward' ? '｜本局沒有獎勵' : '｜獎勵待確認';
   const progress = session.gameType === 'sudoku' ? sudokuProgress(session.state) : null;
   const progressText = active && progress ? `｜已填 ${progress.filled}/81` : '';
-  const guidance = progress?.fullButUnsolved ? '\n盤面已填滿但尚未通關；請檢查每列、每欄與每個九宮格的重複數字。' : '';
+  const guidance = progress?.fullButUnsolved && session.status !== 'cancelled' ? '\n盤面已填滿但尚未通關；請檢查每列、每欄與每個九宮格的重複數字。' : '';
   const moveVerb = { tetris: 'move.t', 'number-match': 'move.n', sudoku: 'move.s' }[session.gameType];
   const controls = active ? [{ type: 1, components: [
     { type: 2, custom_id: buildSoloCustomId({ sessionId: session.id, revision: session.revision, verb: moveVerb }), label: '輸入一步', style: 1 },
@@ -111,7 +112,7 @@ function buildSoloMessagePayload(session, { renderPng = renderSoloPng } = {}) {
     { type: 2, custom_id: buildSoloCustomId({ sessionId: session.id, revision: session.revision, verb: 'refresh' }), label: '重新整理', style: 2 },
   ] }] : [];
   return {
-    content: `${LABELS[session.gameType]}・${DIFFICULTIES[session.difficulty]}｜${active ? '進行中' : session.status === 'expired' ? '已逾時' : '已結束'}${progressText}${rewardText}｜第 ${session.revision} 版\n只有建立者可以操作。${session.gameType === 'sudoku' ? '\n座標：上方 A–I 是欄，左側 1–9 是列；A1 是左上角。' : ''}${guidance}`,
+    content: `${LABELS[session.gameType]}・${DIFFICULTIES[session.difficulty]}｜${active ? '進行中' : session.status === 'expired' ? '已逾時' : session.status === 'cancelled' ? '已提前結束，沒有獎勵' : '已結束'}${progressText}${rewardText}｜第 ${session.revision} 版\n只有建立者可以操作。${session.gameType === 'sudoku' ? '\n座標：上方 A–I 是欄，左側 1–9 是列；A1 是左上角。' : ''}${guidance}`,
     files: [{ attachment: png, name }],
     embeds: [{ image: { url: `attachment://${name}` } }],
     components: controls,

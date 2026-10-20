@@ -132,6 +132,12 @@ function tryConsumeGuildQuota(guildId, amount = 1) {
     throw new Error('Quota amount must be a positive integer.');
   }
 
+  // No quota file means no guild has a limit. Every AI call comes through here, so it does not create
+  // the file just to find that out.
+  if (!fs.existsSync(quotaPath)) {
+    return { ok: true };
+  }
+
   const quotas = readAllQuotas();
   const current = normalizeQuota(quotas[guildId]);
 

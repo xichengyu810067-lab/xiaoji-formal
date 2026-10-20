@@ -15,8 +15,10 @@ const {
   serveVenueOrder,
   splitSteps,
 } = require('../services/venueService');
+const { CoinServiceError } = require('../services/coinService');
 const { formatChips, replyCoinError } = require('../utils/coinPresentation');
 const { ensureModerationAccess } = require('../utils/moderation');
+const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 const { verifyVenueMembers } = require('../platform/venueMembership');
 
 const itemTypeChoices = [
@@ -44,18 +46,27 @@ function formatTimestamp(isoString) {
   return `<t:${timestamp}:F>`;
 }
 
-function formatSteps(steps) {
+// The lines before the steps, then the steps numbered one to a line. A recipe is at most a thousand characters, but a
+// thousand characters can be hundreds of short steps, so when the lines do not fit one message each step is shortened
+// and the last steps are left out with a line that says how many.
+function stepsReply(headerLines, steps) {
   const parts = splitSteps(steps);
 
   if (!parts.length) {
-    return '沒有製作步驟。';
+    return [...headerLines, '沒有製作步驟。'].join('\n');
   }
 
-  return parts.map((step, index) => `${index + 1}. ${step}`).join('\n');
+  return fitListText({
+    header: headerLines,
+    items: parts,
+    render: (step, { textLimit, index }) => `${index + 1}. ${clipText(step, textLimit)}`,
+    note: (count) => omittedLine(count, { unit: '個步驟' }),
+  });
 }
 
-function formatMenuItem(item) {
-  return `#${item.id}｜${itemTypeLabels[item.itemType]}｜${item.name}`;
+// textLimit is how many characters the name may take when a long list has to be shortened.
+function formatMenuItem(item, { textLimit = Infinity } = {}) {
+  return `#${item.id}｜${itemTypeLabels[item.itemType]}｜${clipText(item.name, textLimit)}`;
 }
 
 function formatOrderItemLine(item) {
@@ -74,16 +85,25 @@ function formatOrderWaiterLine(order) {
   return [`服務生：${waiter}`, `小費：${formatChips(order.tipAmount)}`, `小費狀態：${order.tipStatus}`].join('｜');
 }
 
-function formatHistoryItem(item) {
+function formatHistoryItem(item, { textLimit = Infinity } = {}) {
   const maker = item.makerIsNpc ? '小吉場館人員' : item.makerUserId ? `<@${item.makerUserId}>` : '未指派';
   return [
     `#${item.id}`,
     itemTypeLabels[item.itemType] || item.itemType,
-    item.itemName,
+    clipText(item.itemName, textLimit),
     statusLabels[item.status] || item.status,
     `製作者：${maker}`,
     `建立：${formatTimestamp(item.createdAt)}`,
   ].join('｜');
+}
+
+// Discord's user picker lists every member of the server, bots included, and a bot can neither serve a table nor cook.
+// A bot picked for a role is refused before anything is looked up, and the reply names the role.
+function requireHumanStaff(user, role) {
+  if (user?.bot) {
+    throw new CoinServiceError('VENUE_STAFF_IS_BOT', `${role}不能是機器人，請改選真人成員。`);
+  }
+  return user;
 }
 
 async function ensureAdmin(interaction) {
@@ -198,8 +218,15 @@ module.exports = {
         const type = interaction.options.getString('type');
         const rows = await listVenueMenu(guildId, { itemType: type });
         await interaction.reply({
+          // Members add menu items, so the menu has no upper size: names are shortened to fit one message, and the
+          // last items are left out with a line that says how many.
           content: rows.length
-            ? ['**小吉賭場｜餐廳與吧檯菜單**', ...rows.map(formatMenuItem)].join('\n')
+            ? fitListText({
+              header: '**小吉賭場｜餐廳與吧檯菜單**',
+              items: rows,
+              render: (item, { textLimit }) => formatMenuItem(item, { textLimit }),
+              note: (count) => omittedLine(count, { unit: '個菜單項目', hint: type ? '' : '可用 type 選項只看餐點或飲料' }),
+            })
             : '目前沒有可用菜單項目。',
           ephemeral: true,
         });
@@ -214,7 +241,7 @@ module.exports = {
           createdBy: interaction.user.id,
         });
         await interaction.reply({
-          content: [`已新增菜單：${formatMenuItem(item)}`, '**製作方式**', formatSteps(item.steps)].join('\n'),
+          content: stepsReply([`已新增菜單：${formatMenuItem(item)}`, '**製作方式**'], item.steps),
           ephemeral: true,
         });
         return;
@@ -237,9 +264,15 @@ module.exports = {
       if (subcommand === 'order') {
         const mealId = interaction.options.getInteger('meal');
         const drinkId = interaction.options.getInteger('drink');
-        const chefId = interaction.options.getUser('chef')?.id || null;
-        const bartenderId = interaction.options.getUser('bartender')?.id || null;
-        const waiterId = interaction.options.getUser('waiter', true).id;
+        const chef = interaction.options.getUser('chef');
+        const bartender = interaction.options.getUser('bartender');
+        const waiter = interaction.options.getUser('waiter', true);
+        requireHumanStaff(waiter, '服務生');
+        if (chef) requireHumanStaff(chef, '廚師');
+        if (bartender) requireHumanStaff(bartender, '調酒師');
+        const chefId = chef?.id || null;
+        const bartenderId = bartender?.id || null;
+        const waiterId = waiter.id;
         const membership = await verifyVenueMembers(interaction.guild, {
           userIds: [waiterId, chefId, bartenderId],
           completeRoster: Boolean((mealId && !chefId) || (drinkId && !bartenderId)),
@@ -273,7 +306,7 @@ module.exports = {
       if (subcommand === 'recipe') {
         const item = await getVenueRecipe(guildId, interaction.user.id, interaction.options.getInteger('order-item-id', true));
         await interaction.reply({
-          content: [`**${item.itemName}｜製作方式**`, formatSteps(item.standardSteps)].join('\n'),
+          content: stepsReply([`**${item.itemName}｜製作方式**`], item.standardSteps),
           ephemeral: true,
         });
         return;
@@ -284,13 +317,12 @@ module.exports = {
           steps: interaction.options.getString('steps', true),
         });
         await interaction.reply({
-          content: [
+          content: stepsReply([
             `**小吉賭場｜${result.item.itemName} 已完成**`,
             `製作者：${interaction.user}`,
             `訂單項目：#${result.item.id}`,
             '**製作過程**',
-            formatSteps(result.item.actualSteps),
-          ].join('\n'),
+          ], result.item.actualSteps),
           allowedMentions: { users: [interaction.user.id, result.order.customerId] },
         });
         return;
@@ -316,7 +348,7 @@ module.exports = {
           return;
         }
 
-        const target = interaction.options.getUser('user', true);
+        const target = requireHumanStaff(interaction.options.getUser('user', true), '新的製作者');
         const membership = await verifyVenueMembers(interaction.guild, { userIds: [target.id] });
         const item = await reassignVenueOrderItem(guildId, interaction.options.getInteger('order-item-id', true), target.id, {
           operatorId: interaction.user.id,
@@ -336,7 +368,7 @@ module.exports = {
           return;
         }
 
-        const target = interaction.options.getUser('user', true);
+        const target = requireHumanStaff(interaction.options.getUser('user', true), '新的服務生');
         const membership = await verifyVenueMembers(interaction.guild, { userIds: [target.id] });
         const order = await reassignVenueWaiter(guildId, interaction.options.getInteger('order-id', true), target.id, {
           operatorId: interaction.user.id,
@@ -370,7 +402,12 @@ module.exports = {
         });
         await interaction.reply({
           content: rows.length
-            ? ['**小吉賭場｜近期餐廳與吧檯訂單**', ...rows.map(formatHistoryItem)].join('\n')
+            ? fitListText({
+              header: '**小吉賭場｜近期餐廳與吧檯訂單**',
+              items: rows,
+              render: (item, { textLimit }) => formatHistoryItem(item, { textLimit }),
+              note: (count) => omittedLine(count, { unit: '筆訂單項目' }),
+            })
             : '目前沒有餐廳與吧檯訂單紀錄。',
           ephemeral: true,
         });
