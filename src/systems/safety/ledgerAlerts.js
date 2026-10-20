@@ -107,7 +107,7 @@ const HINTS = Object.freeze({
   LEDGER_BOT_MISMATCH: '登入身分與開啟帳本時使用的身分不一致。無法用 Bot token 讀取身分時，小吉會改用 .env 的 DISCORD_CLIENT_ID（或 CLIENT_ID），而且只開啟既有的帳本、不建立新帳本；請確認它是這個機器人的應用程式 ID。',
   LEDGER_IN_USE: '帳本被另一個程序占用，可能有第二個小吉正在執行。請只保留一個執行中的小吉。',
 });
-const DEFAULT_HINT = `請在主機執行 ${STATUS_COMMAND} 查看，並依 README 的異常處理說明處置；不要刪除或重建帳本檔案。`;
+const DEFAULT_HINT = `請在主機執行 ${STATUS_COMMAND} 查看，並依維運文件（docs/OPERATIONS.md）的異常處理說明處置；不要刪除或重建帳本檔案。`;
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');

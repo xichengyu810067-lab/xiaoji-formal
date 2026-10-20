@@ -724,7 +724,7 @@ class OwnerSafetyNotifier {
       return Object.freeze({ enabled: true, code: 'OWNER_SAFETY_READY' });
     } catch (error) {
       this.disabled = true;
-      // The mapped ledger code (for example SIDE_EFFECT_FORMAT_OUTDATED) names the README step.
+      // The mapped ledger code (for example SIDE_EFFECT_FORMAT_OUTDATED) names the operations guide step.
       this.log('OWNER_SAFETY_LEDGER_UNAVAILABLE', error);
       this.#escalations.openFailed(OWNER_PURPOSE_ID, error);
       // Unlike another purpose's refusal, this one is escalated (exit code 3): every other

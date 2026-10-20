@@ -1,8 +1,8 @@
 'use strict';
 
 // Documents and the website must follow the command catalog: docs/COMMANDS.md is generated from
-// it, the README command section and the website feature list are checked against it. The document
-// and README checks live in scripts/command-doc-checks.js so `npm run check` runs the same code.
+// it, the operations guide command section and the website feature list are checked against it. The document
+// and operations guide checks live in scripts/command-doc-checks.js so `npm run check` runs the same code.
 // The website check there reads every page and script under website/ for command mentions.
 
 const assert = require('node:assert/strict');
@@ -15,8 +15,8 @@ const {
   extractWebsiteText,
   findCommandDocsIssues,
   findMentions,
-  findReadmeCommandSection,
-  findReadmeIssues,
+  findOperationsCommandSection,
+  findOperationsIssues,
   findRemovedMentions,
   findStaleMentions,
   findWebsiteIssues,
@@ -194,34 +194,34 @@ test('the command document never shows owner-only paths or removed commands', ()
   }
 });
 
-test('the README command section lists the live commands and no removed path', () => {
-  const readme = readText('README.md');
-  assert.deepEqual(findReadmeIssues(readme), []);
-  const mentioned = new Set(findMentions(findReadmeCommandSection(readme)).map((mention) => mention.command));
+test('the operations guide command section lists the live commands and no removed path', () => {
+  const readme = readText('docs/OPERATIONS.md');
+  assert.deepEqual(findOperationsIssues(readme), []);
+  const mentioned = new Set(findMentions(findOperationsCommandSection(readme)).map((mention) => mention.command));
   assert.ok(mentioned.has('server'));
   assert.ok(mentioned.has('board'));
   assert.deepEqual(findRemovedMentions(readme), []);
 });
 
-test('the README check catches a missing command, a removed command and a missing section', () => {
-  const readme = readText('README.md');
+test('the operations guide check catches a missing command, a removed command and a missing section', () => {
+  const readme = readText('docs/OPERATIONS.md');
   const withoutServer = readme.replace('`/server`、', '');
   assert.notEqual(withoutServer, readme);
-  assert.deepEqual(findReadmeIssues(withoutServer), ['公開指令 section does not list /server']);
+  assert.deepEqual(findOperationsIssues(withoutServer), ['公開指令 section does not list /server']);
 
   const oldCommand = readme.replace('`/board start`', '`/games menu`');
-  assert.deepEqual(findReadmeIssues(oldCommand), ['公開指令 section: /games menu: /games was removed']);
+  assert.deepEqual(findOperationsIssues(oldCommand), ['公開指令 section: /games menu: /games was removed']);
 
   const setupMention = `${readme}\n舊流程請見 /casino dice。\n`;
-  assert.deepEqual(findReadmeIssues(setupMention), ['outside the 公開指令 section: /casino dice: /casino dice was removed']);
+  assert.deepEqual(findOperationsIssues(setupMention), ['outside the 公開指令 section: /casino dice: /casino dice was removed']);
 
-  assert.deepEqual(findReadmeIssues('# 小吉\n\n沒有指令段落。\n'), ['README.md has no "公開指令" section']);
-  assert.equal(findReadmeCommandSection('## 公開指令\n- `/ping`\n'), '- `/ping`\n', 'the heading may start the file');
-  assert.equal(findReadmeCommandSection('# 小吉\n\n## 公開指令\n- `/ping`\n\n## 其他\n- `/games`\n'), '- `/ping`\n');
+  assert.deepEqual(findOperationsIssues('# 小吉\n\n沒有指令段落。\n'), ['docs/OPERATIONS.md has no "公開指令" section']);
+  assert.equal(findOperationsCommandSection('## 公開指令\n- `/ping`\n'), '- `/ping`\n', 'the heading may start the file');
+  assert.equal(findOperationsCommandSection('# 小吉\n\n## 公開指令\n- `/ping`\n\n## 其他\n- `/games`\n'), '- `/ping`\n');
 });
 
-test('the README check requires every command the given catalog lists in help', () => {
-  const readme = readText('README.md');
+test('the operations guide check requires every command the given catalog lists in help', () => {
+  const readme = readText('docs/OPERATIONS.md');
   const catalog = clone({ COMMAND_ALIASES, COMMAND_AUDIENCES, COMMAND_CATALOG, COMMAND_GROUPS, REMOVED_COMMANDS });
   catalog.COMMAND_CATALOG.push({
     name: 'brand-new', description: '新指令', group: 'general', audience: 'public', listInHelp: true, subcommands: [], subcommandAudiences: {},
@@ -229,10 +229,10 @@ test('the README check requires every command the given catalog lists in help', 
   catalog.COMMAND_CATALOG.push({
     name: 'owner-tool', description: '擁有者工具', group: 'general', audience: 'owner', listInHelp: false, subcommands: [], subcommandAudiences: {},
   });
-  assert.deepEqual(findReadmeIssues(readme, catalog), ['公開指令 section does not list /brand-new']);
+  assert.deepEqual(findOperationsIssues(readme, catalog), ['公開指令 section does not list /brand-new']);
 });
 
-test('npm run check passes with the real README and command document', () => {
+test('npm run check passes with the real operations guide and command document', () => {
   assert.equal(checkFailure(), null);
 });
 
@@ -249,38 +249,38 @@ test('npm run check fails with a clear message when docs/COMMANDS.md is out of d
   assert.equal(fs.existsSync(missingDocs), false);
 });
 
-test('npm run check fails with a clear message when the README command section drifts', (t) => {
-  const readme = readText('README.md');
-  const check = (text) => checkFailure({ readmePath: writeTemporary(t, 'README.md', text) });
+test('npm run check fails with a clear message when the operations guide command section drifts', (t) => {
+  const readme = readText('docs/OPERATIONS.md');
+  const check = (text) => checkFailure({ operationsPath: writeTemporary(t, 'OPERATIONS.md', text) });
 
-  assert.equal(check(readme), null, 'an unchanged copy of the README passes');
+  assert.equal(check(readme), null, 'an unchanged copy of the operations guide passes');
   assert.equal(check(readme.replaceAll('\n', '\r\n')), null, 'a CRLF copy passes too');
   assert.equal(
     check(readme.replace('`/server`、', '')),
-    'README.md does not match the command catalog:\n- 公開指令 section does not list /server',
+    'docs/OPERATIONS.md does not match the command catalog:\n- 公開指令 section does not list /server',
   );
   assert.equal(
     check(readme.replace('`/board start`', '`/games menu`')),
-    'README.md does not match the command catalog:\n- 公開指令 section: /games menu: /games was removed',
+    'docs/OPERATIONS.md does not match the command catalog:\n- 公開指令 section: /games menu: /games was removed',
   );
   assert.equal(
     check(`${readme}\n舊流程請見 /word-chain start。\n`),
-    'README.md does not match the command catalog:\n- outside the 公開指令 section: /word-chain start: /word-chain start was removed',
+    'docs/OPERATIONS.md does not match the command catalog:\n- outside the 公開指令 section: /word-chain start: /word-chain start was removed',
   );
   assert.equal(
     check('# 小吉\n\n沒有指令段落。\n'),
-    'README.md does not match the command catalog:\n- README.md has no "公開指令" section',
+    'docs/OPERATIONS.md does not match the command catalog:\n- docs/OPERATIONS.md has no "公開指令" section',
   );
   assert.match(
-    checkFailure({ readmePath: path.join(temporaryDirectory(t), 'README.md') }),
-    /^README\.md could not be checked against the command catalog: ENOENT/u,
+    checkFailure({ operationsPath: path.join(temporaryDirectory(t), 'OPERATIONS.md') }),
+    /^docs\/OPERATIONS\.md could not be checked against the command catalog: ENOENT/u,
   );
 });
 
 test('npm run check reports both document problems together and still checks the catalog', (t) => {
-  const readme = readText('README.md');
+  const readme = readText('docs/OPERATIONS.md');
   const failure = checkFailure({
-    readmePath: writeTemporary(t, 'README.md', readme.replace('`/server`、', '')),
+    operationsPath: writeTemporary(t, 'OPERATIONS.md', readme.replace('`/server`、', '')),
     commandDocsPath: writeTemporary(t, 'COMMANDS.md', 'old\n'),
   });
   assert.ok(failure.includes('docs/COMMANDS.md is out of date: line 1 should be "# 公開指令" but is "old"'));
@@ -479,6 +479,7 @@ test('the public export ships the generator, the document checks and the tests t
     'test/leaderboardCommand.test.js',
     'docs/COMMANDS.md',
     'README.md',
+    'docs/OPERATIONS.md',
   ]) {
     assert.ok(files.includes(file), `${file} must be in the public export`);
   }

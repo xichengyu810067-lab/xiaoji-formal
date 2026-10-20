@@ -1074,9 +1074,9 @@ test('the example environment and the readme explain the owner guild without nam
   assert.match(text, /never globally/u);
   assert.match(text, /Administrators only/u);
   assert.doesNotMatch(text, /\d{16}/u, 'no guild ID is written in the example');
-  const readme = fs.readFileSync(path.join(PROJECT_ROOT, 'README.md'), 'utf8');
+  const readme = fs.readFileSync(path.join(PROJECT_ROOT, 'docs', 'OPERATIONS.md'), 'utf8');
   assert.ok(readme.includes(OWNER_GUILD_ENV));
-  assert.ok(!/XIAOJI_OWNER_GUILD_ID=\d/u.test(readme), 'the readme gives no real value');
+  assert.ok(!/XIAOJI_OWNER_GUILD_ID=\d/u.test(readme), 'the operations guide gives no real value');
 });
 
 test('the public export lists this test', () => {

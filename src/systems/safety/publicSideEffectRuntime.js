@@ -402,7 +402,7 @@ class PublicSideEffectRuntime {
         slot.disabled = true;
         disabled.push(purposeId);
         // The mapped ledger code (for example SIDE_EFFECT_FORMAT_OUTDATED or
-        // SIDE_EFFECT_LEDGER_QUARANTINED) tells the operator which README step applies.
+        // SIDE_EFFECT_LEDGER_QUARANTINED) tells the operator which operations guide step applies.
         this.log(purposeId, 'LEDGER_UNAVAILABLE', error);
         this.#escalations.openFailed(purposeId, error);
         this.#notifyDisabled(purposeId, 'PUBLIC_EFFECT_LEDGER_UNAVAILABLE');

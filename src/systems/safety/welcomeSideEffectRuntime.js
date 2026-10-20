@@ -189,7 +189,7 @@ class WelcomeSideEffectRuntime {
       return Object.freeze({ enabled: true, code: 'WELCOME_LEDGER_READY' });
     } catch (error) {
       this.disabled = true;
-      // The mapped ledger code (for example SIDE_EFFECT_FORMAT_OUTDATED) names the README step.
+      // The mapped ledger code (for example SIDE_EFFECT_FORMAT_OUTDATED) names the operations guide step.
       this.log('WELCOME_LEDGER_UNAVAILABLE', error);
       this.#escalations.openFailed(PURPOSE_ID, error);
       this.#refused('WELCOME_LEDGER_UNAVAILABLE');
