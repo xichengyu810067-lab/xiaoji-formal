@@ -249,6 +249,7 @@
     "test/subcommandAccess.test.js",
     "test/commandDefaultPermissions.test.js",
     "test/ownerGuildDeployment.test.js",
+    "test/archivePreflightPath.test.js",
     "test/readmePlainLanguage.test.js",
     "test/economyReadOnlyQueries.test.js",
     "test/support/coinDatabaseProbe.js",
