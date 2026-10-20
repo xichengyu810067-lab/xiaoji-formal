@@ -1,7 +1,21 @@
-const { withCoinTransaction } = require('../../services/coinDatabase');
-const { CoinServiceError, TransactionType, ensureGuildSettings, ensurePlayer, getLocalDate, addDays } = require('./coinService');
-const { mutateWalletWithApi } = require('./coinWalletService');
-const { ChipLedgerType, creditChipsWithApi, debitChipsForCasinoWithApi, ensureChipAccount } = require('./chipService');
+const { withCoinDatabase, withCoinTransaction } = require('../../services/coinDatabase');
+const {
+  CoinServiceError,
+  TransactionType,
+  addDays,
+  ensureGuildSettings,
+  ensurePlayer,
+  getLocalDate,
+  readGuildEconomyEnabledWithApi,
+} = require('./coinService');
+const { mutateWalletWithApi, readWalletBalancesWithApi } = require('./coinWalletService');
+const {
+  ChipLedgerType,
+  creditChipsWithApi,
+  debitChipsForCasinoWithApi,
+  ensureChipAccount,
+  readChipBalanceWithApi,
+} = require('./chipService');
 const { CasinoLedgerType, insertCasinoLedger } = require('./casinoLedger');
 
 const MAX_CASINO_AMOUNT = 9_000_000_000;
@@ -71,22 +85,17 @@ function getActiveLoanRow(api, guildId, userId) {
   return rows[0] || null;
 }
 
-function applyLoanInterestForRow(api, loanRow, date = new Date()) {
-  if (!loanRow || loanRow.status !== 'active') {
-    return { loan: loanRow ? mapLoan(loanRow) : null, interestAmount: 0, daysApplied: 0 };
-  }
-
+// What accruing the daily interest does to one active loan row on `date`, computed without storing anything.
+// The stored accrual (applyLoanInterestForRow) and the read-only debt status both take their figures from
+// here, so the two cannot disagree. Interest compounds once per day since last_interest_date, rounded up.
+function projectLoanInterest(loanRow, date = new Date()) {
   const today = getLocalDate(date);
   let cursor = addDays(loanRow.last_interest_date, 1);
-
-  if (cursor > today) {
-    return { loan: mapLoan(loanRow), interestAmount: 0, daysApplied: 0 };
-  }
-
-  let debt = Number(loanRow.current_debt_amount || 0);
-  const beforeDebt = debt;
-  let daysApplied = 0;
+  const beforeDebt = Number(loanRow.current_debt_amount || 0);
   const rate = Number(loanRow.interest_rate || LOAN_INTEREST_RATE);
+
+  let debt = beforeDebt;
+  let daysApplied = 0;
 
   while (cursor <= today) {
     debt = Math.ceil(debt * (1 + rate));
@@ -94,8 +103,21 @@ function applyLoanInterestForRow(api, loanRow, date = new Date()) {
     cursor = addDays(cursor, 1);
   }
 
+  return { today, beforeDebt, debt, interestAmount: debt - beforeDebt, daysApplied, rate };
+}
+
+function applyLoanInterestForRow(api, loanRow, date = new Date()) {
+  if (!loanRow || loanRow.status !== 'active') {
+    return { loan: loanRow ? mapLoan(loanRow) : null, interestAmount: 0, daysApplied: 0 };
+  }
+
+  const { today, beforeDebt, debt, interestAmount, daysApplied, rate } = projectLoanInterest(loanRow, date);
+
+  if (daysApplied === 0) {
+    return { loan: mapLoan(loanRow), interestAmount: 0, daysApplied: 0 };
+  }
+
   const timestamp = nowIso(date);
-  const interestAmount = debt - beforeDebt;
   api.run(
     'UPDATE casino_loans SET current_debt_amount = ?, last_interest_date = ?, updated_at = ? WHERE id = ?',
     [debt, today, timestamp, loanRow.id]
@@ -122,6 +144,27 @@ function applyLoanInterestForRow(api, loanRow, date = new Date()) {
 
 function applyLoanInterest(api, guildId, userId, date = new Date()) {
   return applyLoanInterestForRow(api, getActiveLoanRow(api, guildId, userId), date);
+}
+
+// The loan as accruing its interest would leave it, and the interest that adds, without storing anything.
+// When daysApplied is more than 0 the loan returned is an estimate (試算): its current debt, last interest date
+// and update time are what the stored accrual would write, not what the row holds. Whoever shows it must say so.
+function projectLoan(loanRow, date = new Date()) {
+  if (!loanRow || loanRow.status !== 'active') {
+    return { loan: loanRow ? mapLoan(loanRow) : null, interestAmount: 0, daysApplied: 0 };
+  }
+
+  const { today, debt, interestAmount, daysApplied } = projectLoanInterest(loanRow, date);
+
+  if (daysApplied === 0) {
+    return { loan: mapLoan(loanRow), interestAmount: 0, daysApplied: 0 };
+  }
+
+  return {
+    loan: mapLoan({ ...loanRow, current_debt_amount: debt, last_interest_date: today, updated_at: nowIso(date) }),
+    interestAmount,
+    daysApplied,
+  };
 }
 
 function getFixedDepositSummary(api, guildId, userId, date = new Date()) {
@@ -278,25 +321,39 @@ function getCasinoLoanStatus(guildId, userId, { date = new Date() } = {}) {
   });
 }
 
-function getCasinoDebtStatus(guildId, userId, { date = new Date() } = {}) {
-  return withCoinTransaction((api) => {
-    ensureEconomyEnabled(api, guildId);
-    const player = ensurePlayer(api, guildId, userId);
-    const chipAccount = ensureChipAccount(api, guildId, userId);
-    const interest = applyLoanInterest(api, guildId, userId, date);
-    const loan = interest.loan || mapLoan(getActiveLoanRow(api, guildId, userId));
+// This reader only reads, in no transaction, so the database file is not rewritten either:
+// a player without rows reads as all zeros, and interest that has accrued but is not stored yet is counted
+// in the debt it shows. That interest comes back as pendingInterest and pendingDays; the daily accrual or
+// the next borrow, repay, relief or collect stores it.
+//
+// Everything read here except the switch is global, because the loan, the wallet, the bank, the chips and
+// the fixed deposits belong to the user. The guild only supplies the coin switch (coin_guild_settings), so the
+// answer is the same for every guild whose coin system is on. A guild without a settings row counts as on.
+function readCasinoDebtStatus(guildId, userId, { date = new Date() } = {}) {
+  return withCoinDatabase((api) => {
+    if (!guildId) throw new CoinServiceError('GUILD_REQUIRED', '這個指令只能在伺服器內使用。');
+    if (!userId) throw new CoinServiceError('USER_REQUIRED', '找不到目標使用者。');
+
+    const switchValue = readGuildEconomyEnabledWithApi(api, guildId);
+    if (switchValue !== undefined && !switchValue) {
+      throw new CoinServiceError('COIN_DISABLED', '這個伺服器的吉幣系統目前停用。');
+    }
+
+    const { walletBalance, bankBalance } = readWalletBalancesWithApi(api, userId);
+    const chipBalance = readChipBalanceWithApi(api, userId);
+    const projected = projectLoan(getActiveLoanRow(api, guildId, userId), date);
     const fixed = getFixedDepositSummary(api, guildId, userId, date);
-    const collectableAmount = player.balance + player.bankBalance;
+    const collectableAmount = walletBalance + bankBalance;
 
     return {
-      loan,
-      interestApplied: interest.interestAmount,
-      daysApplied: interest.daysApplied,
-      walletBalance: player.balance,
-      bankBalance: player.bankBalance,
-      chipBalance: chipAccount.balance,
+      loan: projected.loan,
+      pendingInterest: projected.interestAmount,
+      pendingDays: projected.daysApplied,
+      walletBalance,
+      bankBalance,
+      chipBalance,
       collectableAmount,
-      maxCollectableAmount: loan ? Math.min(loan.currentDebtAmount, collectableAmount) : 0,
+      maxCollectableAmount: projected.loan ? Math.min(projected.loan.currentDebtAmount, collectableAmount) : 0,
       ...fixed,
     };
   });
@@ -491,8 +548,9 @@ module.exports = {
   applyLoanInterest,
   borrowCasinoLoan,
   collectCasinoDebt,
-  getCasinoDebtStatus,
   getCasinoLoanStatus,
   processCasinoLoanInterest,
+  projectLoanInterest,
+  readCasinoDebtStatus,
   repayCasinoLoan,
 };

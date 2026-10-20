@@ -63,12 +63,13 @@ function withMockedEconomyCommand(callback) {
   patch(moderationPath, {
     ensureModerationAccess: async () => ({ ok: true }),
   });
+  // The report looks at somebody else, so it uses the read-only lookups and this server's purchases.
   patch(coinServicePath, {
-    getPurchaseHistory: async () => [],
-    getInventory: async () => [],
+    getAllPurchaseHistory: async () => [],
+    readInventory: async () => [],
   });
   patch(bankServicePath, {
-    getBalanceSummary: async () => ({
+    readBalanceSummary: async () => ({
       userId: 'member-123',
       walletBalance: 100,
       bankBalance: 200,

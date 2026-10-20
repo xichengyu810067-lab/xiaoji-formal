@@ -50,6 +50,22 @@ function normalizeAmount(value, label = '金額') {
   return amount;
 }
 
+// A payout above the chip limit cannot be credited, which would roll back a round that was already won. A
+// game refuses a bet before the round when the best payout of the game it asks for would be above that limit.
+function assertPayoutWithinLimit(betAmount, bestMultiplier) {
+  if (Math.floor(betAmount * bestMultiplier) <= MAX_CHIP_AMOUNT) {
+    return;
+  }
+
+  const largestBet = Math.floor(MAX_CHIP_AMOUNT / bestMultiplier);
+  throw new CoinServiceError(
+    'CASINO_BET_TOO_LARGE',
+    `下注金額太大：這個玩法最高賠 ${bestMultiplier} 倍，單注最多只能下 ${largestBet.toLocaleString('zh-TW')}，` +
+      `才不會超過派彩上限 ${MAX_CHIP_AMOUNT.toLocaleString('zh-TW')}。`,
+    { largestBet, bestMultiplier }
+  );
+}
+
 function normalizeLimit(limit) {
   const value = Number(limit || DEFAULT_HISTORY_LIMIT);
 
@@ -128,6 +144,17 @@ function ensureChipAccount(api, guildId, userId, timestamp = nowIso()) {
   );
 
   return mapChipAccount(api.get('SELECT * FROM chip_accounts_global WHERE user_id = ?', [userId]), guildId);
+}
+
+// Read-only: one user's chip balance. Unlike ensureChipAccount it creates nothing, so a user without a chip
+// account reads as 0 and no wallet, guild or chip row appears.
+function readChipBalanceWithApi(api, userId) {
+  return Number(api.get('SELECT balance FROM chip_accounts_global WHERE user_id = ?', [userId])?.balance || 0);
+}
+
+// Read-only: one user's chip balance as a plain lookup (see readChipBalanceWithApi), for the owner's lookup.
+async function readChipBalance(userId) {
+  return withCoinDatabase((api) => readChipBalanceWithApi(api, userId));
 }
 
 function writeChipBalance(api, guildId, userId, balance, timestamp = nowIso()) {
@@ -502,6 +529,7 @@ module.exports = {
   ChipLedgerType,
   DEBT_OFFSET_CHIP_LEDGER_TYPES,
   MAX_CHIP_AMOUNT,
+  assertPayoutWithinLimit,
   buyChips,
   buyChipsWithApi,
   calculateCashoutFee,
@@ -515,4 +543,6 @@ module.exports = {
   getChipHistory,
   insertChipLedger,
   normalizeAmount,
+  readChipBalance,
+  readChipBalanceWithApi,
 };

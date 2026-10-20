@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { buyChips, cashoutChips, getChipBalance, getChipHistory, MAX_CHIP_AMOUNT } = require('../services/chipService');
 const { getPlayerBalance } = require('../services/coinService');
 const { formatChips, formatCoins, replyCoinError } = require('../utils/coinPresentation');
+const { fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 const ledgerTypeLabels = {
   buy: '手動買入籌碼',
@@ -12,6 +13,7 @@ const ledgerTypeLabels = {
   refund: '退款',
   loan_borrow: '貸幣借款',
   loan_repay: '貸幣還款',
+  lodging: '住宿',
 };
 
 function formatSignedChips(amount) {
@@ -124,7 +126,14 @@ module.exports = {
           limit: interaction.options.getInteger('limit') || 10,
         });
         await interaction.reply({
-          content: rows.length ? ['**小吉兌換區｜籌碼流水**', ...rows.map(formatHistoryRow)].join('\n') : '目前沒有籌碼流水。',
+          content: rows.length
+            ? fitListText({
+              header: '**小吉兌換區｜籌碼流水**',
+              items: rows,
+              render: (row) => formatHistoryRow(row),
+              note: (count) => omittedLine(count, { unit: '筆籌碼流水' }),
+            })
+            : '目前沒有籌碼流水。',
           ephemeral: true,
         });
       }

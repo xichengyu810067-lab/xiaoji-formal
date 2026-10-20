@@ -6,6 +6,7 @@ const {
   purchaseLuxuryItem,
 } = require('../services/luxuryService');
 const { formatCoins, replyCoinError } = require('../utils/coinPresentation');
+const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 function formatStock(stock) {
   return stock === null || stock === undefined ? '不限' : String(stock);
@@ -15,12 +16,13 @@ function formatLimit(limit) {
   return limit === null || limit === undefined ? '不限' : String(limit);
 }
 
-function formatLuxuryItemLine(item) {
+// textLimit is how many characters the name and the description may take when a long list has to be shortened.
+function formatLuxuryItemLine(item, { textLimit = Infinity } = {}) {
   const enabled = item.enabled ? '' : '（已下架）';
   return [
-    `#${item.id} **${item.name}**${enabled}`,
+    `#${item.id} **${clipText(item.name, textLimit)}**${enabled}`,
     `${formatCoins(item.price)}｜庫存 ${formatStock(item.stock)}｜購買上限 ${formatLimit(item.purchaseLimit)}`,
-    item.description || '沒有描述',
+    clipText(item.description || '沒有描述', textLimit),
   ].join('\n');
 }
 
@@ -28,9 +30,9 @@ function formatInventoryLine(item) {
   return `#${item.itemId} **${item.itemName}** x${item.quantity}`;
 }
 
-function formatPurchaseLine(purchase) {
+function formatPurchaseLine(purchase, { textLimit = Infinity } = {}) {
   const timestamp = Math.floor(new Date(purchase.createdAt).getTime() / 1000);
-  return `#${purchase.id} ${purchase.itemName} x${purchase.quantity}｜單價 ${formatCoins(purchase.unitPrice)}｜總價 ${formatCoins(purchase.totalPrice)}｜<t:${timestamp}:R>`;
+  return `#${purchase.id} ${clipText(purchase.itemName, textLimit)} x${purchase.quantity}｜單價 ${formatCoins(purchase.unitPrice)}｜總價 ${formatCoins(purchase.totalPrice)}｜<t:${timestamp}:R>`;
 }
 
 module.exports = {
@@ -76,9 +78,17 @@ module.exports = {
         const result = await listLuxuryItems(interaction.guildId, {
           page: interaction.options.getInteger('page') || 1,
         });
+        // A page of long names and descriptions is shortened to fit one message, and an item that still does not
+        // fit is left out with a line that says how many.
         await interaction.reply({
           content: result.items.length
-            ? [`**奢侈品商店街｜第 ${result.page} 頁**`, ...result.items.map(formatLuxuryItemLine)].join('\n\n')
+            ? fitListText({
+              header: `**奢侈品商店街｜第 ${result.page} 頁**`,
+              items: result.items,
+              render: (item, { textLimit }) => formatLuxuryItemLine(item, { textLimit }),
+              separator: '\n\n',
+              note: (count) => omittedLine(count, { unit: '筆商品' }),
+            })
             : '目前沒有上架中的奢侈品。',
           ephemeral: true,
         });
@@ -122,7 +132,14 @@ module.exports = {
           limit: interaction.options.getInteger('limit') || 10,
         });
         await interaction.reply({
-          content: purchases.length ? ['**奢侈品商店街｜購買紀錄**', ...purchases.map(formatPurchaseLine)].join('\n') : '目前沒有奢侈品購買紀錄。',
+          content: purchases.length
+            ? fitListText({
+              header: '**奢侈品商店街｜購買紀錄**',
+              items: purchases,
+              render: (purchase, { textLimit }) => formatPurchaseLine(purchase, { textLimit }),
+              note: (count) => omittedLine(count, { unit: '筆購買紀錄' }),
+            })
+            : '目前沒有奢侈品購買紀錄。',
           ephemeral: true,
         });
       }

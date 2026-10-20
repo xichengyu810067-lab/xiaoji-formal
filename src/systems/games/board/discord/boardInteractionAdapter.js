@@ -1,4 +1,4 @@
-const { BoardCoreError, cloneJson, requireIdentifier } = require('../../../../games/contracts');
+const { BoardCoreError, cloneJson, requireIdentifier } = require('../core/contracts');
 const { parseBoardCustomId } = require('./boardCustomId');
 
 function getInteractionIdentity(interaction) {
@@ -98,7 +98,9 @@ function createDiscordBoardInteractionAdapter({ service, store, actionParsers = 
       }
       if (!decoded.verb.startsWith('act.')) throw new BoardCoreError('INVALID_CUSTOM_ID', 'Board interaction verb is unsupported.');
       const controlId = decoded.verb.slice(4);
-      const parser = actionParsers[session.gameKey]?.[controlId];
+      // The action name comes from the button id, so only parsers the table defines count.
+      const gameParsers = Object.hasOwn(actionParsers, session.gameKey) ? actionParsers[session.gameKey] : null;
+      const parser = gameParsers && Object.hasOwn(gameParsers, controlId) ? gameParsers[controlId] : null;
       if (typeof parser !== 'function') throw new BoardCoreError('ACTION_NOT_AVAILABLE', 'This board action is not available.');
       const publicResult = await service.readSession({ sessionId: session.id, actorId: identity.actorId });
       const action = parser({ interaction, publicView: cloneJson(publicResult.game), session: cloneJson(publicResult.session) });

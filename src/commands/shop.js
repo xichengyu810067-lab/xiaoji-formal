@@ -13,6 +13,7 @@ const {
   replyCoinError,
 } = require('../utils/coinPresentation');
 const { ensureModerationAccess } = require('../utils/moderation');
+const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 function formatTimestamp(isoString) {
   if (!isoString) {
@@ -23,17 +24,29 @@ function formatTimestamp(isoString) {
   return `<t:${timestamp}:F> (<t:${timestamp}:R>)`;
 }
 
-function formatPurchaseLine(purchase) {
+// textLimit is how many characters the item name may take when a long list has to be shortened.
+function formatPurchaseLine(purchase, { textLimit = Infinity } = {}) {
   return [
     `#${purchase.id}`,
     `<@${purchase.userId}>`,
-    `${purchase.itemName} x${purchase.quantity}`,
+    `${clipText(purchase.itemName, textLimit)} x${purchase.quantity}`,
     formatCoins(purchase.totalPrice),
     formatItemType(purchase.itemType),
     purchase.status,
     purchase.expiresAt ? `期限 ${formatTimestamp(purchase.expiresAt)}` : '期限 無',
     formatTimestamp(purchase.createdAt),
   ].join('｜');
+}
+
+// A list of purchases is one message: long item names are shortened, and rows that still do not fit are left out with
+// a line that says how many.
+function purchaseListText(header, purchases, hint = '') {
+  return fitListText({
+    header,
+    items: purchases,
+    render: (purchase, { textLimit }) => formatPurchaseLine(purchase, { textLimit }),
+    note: (count) => omittedLine(count, { unit: '筆購買紀錄', hint }),
+  });
 }
 
 async function ensureAdmin(interaction) {
@@ -107,8 +120,16 @@ module.exports = {
           return;
         }
 
+        // A page of long names and descriptions is shortened to fit one message, and an item that still does not
+        // fit is left out with a line that says how many.
         await interaction.reply({
-          content: [`**吉幣商店｜第 ${result.page} 頁**`, ...result.items.map(formatShopItemLine)].join('\n\n'),
+          content: fitListText({
+            header: `**吉幣商店｜第 ${result.page} 頁**`,
+            items: result.items,
+            render: (item, { textLimit }) => formatShopItemLine(item, { textLimit }),
+            separator: '\n\n',
+            note: (count) => omittedLine(count, { unit: '筆商品' }),
+          }),
           ephemeral: true,
         });
         return;
@@ -140,7 +161,7 @@ module.exports = {
 
         await interaction.reply({
           content: purchases.length
-            ? [`**${interaction.user.username} 的購買紀錄**`, ...purchases.map(formatPurchaseLine)].join('\n')
+            ? purchaseListText(`**${interaction.user.username} 的購買紀錄**`, purchases)
             : '你目前沒有購買紀錄。',
           ephemeral: true,
         });
@@ -154,7 +175,7 @@ module.exports = {
 
         await interaction.reply({
           content: purchases.length
-            ? [`**${formatUser(user)} 的購買紀錄**`, ...purchases.map(formatPurchaseLine)].join('\n')
+            ? purchaseListText(`**${formatUser(user)} 的購買紀錄**`, purchases)
             : `${formatUser(user)} 目前沒有購買紀錄。`,
           ephemeral: true,
         });
@@ -166,7 +187,9 @@ module.exports = {
         const purchases = await getAllPurchaseHistory(interaction.guildId, { limit });
 
         await interaction.reply({
-          content: purchases.length ? ['**全伺服器購買紀錄**', ...purchases.map(formatPurchaseLine)].join('\n') : '目前沒有購買紀錄。',
+          content: purchases.length
+            ? purchaseListText('**全伺服器購買紀錄**', purchases, '可用 /shop purchases-user 查看指定成員')
+            : '目前沒有購買紀錄。',
           ephemeral: true,
         });
       }

@@ -53,7 +53,7 @@ function initializePublicData() {
       admissionTargets.some((filePath) => isInsideProject(filePath, realProjectRoot)) ||
       !reminder.protectedTarget || !calendar.protectedTarget ||
       !path.isAbsolute(coinPath) || (archivePath && !path.isAbsolute(archivePath))) {
-    throw new Error('首次安裝須設定專案外受保護的個人資料路徑、兩個審核絕對路徑與絕對 COIN_DB_PATH。');
+    throw new Error('首次安裝須設定專案外受保護的個人資料路徑、舊版審核紀錄與白名單的兩個絕對路徑與絕對 COIN_DB_PATH。');
   }
   const allLocations = [...admissionTargets, realTargetLocation(reminder.filePath),
     realTargetLocation(calendar.filePath), realTargetLocation(coinPath),
@@ -81,7 +81,7 @@ function initializePublicData() {
   }
   const reminderReceipt = createProvenance('reminders', reminder.filePath);
   const calendarReceipt = createProvenance('calendar', calendar.filePath);
-  process.stdout.write('審核、白名單、提醒與行事曆資料已首次建立。請將以下 SHA-256 明確保存到 .env：\n');
+  process.stdout.write('舊版審核紀錄、白名單、提醒與行事曆資料已首次建立。請將以下 SHA-256 明確保存到 .env：\n');
   process.stdout.write(`XIAOJI_REMINDERS_PROVENANCE_SHA256=${reminderReceipt.sha256}\n`);
   process.stdout.write(`XIAOJI_CALENDAR_PROVENANCE_SHA256=${calendarReceipt.sha256}\n`);
 }

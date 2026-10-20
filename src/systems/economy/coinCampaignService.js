@@ -1,6 +1,12 @@
 const crypto = require('node:crypto');
 const { withCoinDatabase, withCoinTransaction } = require('../../services/coinDatabase');
-const { grantRewardOnceV2WithApi, getRewardReceiptV2, makeRewardKey } = require('../../services/featurePlatformService');
+// The reward ledger belongs to featurePlatformService; this module reads and writes the
+// ledger only through its transaction ports.
+const { grantRewardOnceV2WithApi, getRewardReceiptV2, makeRewardKey,
+  getRewardReceiptByKeyWithApi, importOwnerCampaignReceiptWithApi, getOwnerCampaignReceiptWithApi,
+  getOwnerCampaignReceiptTransactionWithApi, hasOwnerCampaignReceiptWithApi,
+  listOwnerCampaignReceiptAmountsWithApi, listLegacyRewardGrantsByUserWithApi,
+} = require('../../services/featurePlatformService');
 const { isBotOwner } = require('../../utils/ownerOnly');
 
 class CoinCampaignError extends Error {
@@ -94,9 +100,7 @@ function historyReviewSource(api, campaignId, userIds) {
   const adminLogs = [];
   const recipientSourceSha256 = {};
   for (const userId of ids) {
-    const ownReceipt = api.get(`SELECT transaction_id, metadata_json FROM reward_grants_v2
-      WHERE kind = 'owner-campaign' AND canonical_source_id = ?
-        AND reward_kind = 'campaign' AND user_id = ?`, [campaignId, userId]);
+    const ownReceipt = getOwnerCampaignReceiptTransactionWithApi(api, campaignId, userId);
     let ownNewTransactionId = null;
     if (ownReceipt) {
       let metadata;
@@ -106,7 +110,7 @@ function historyReviewSource(api, campaignId, userIds) {
     }
     const userTransactions = api.all('SELECT * FROM coin_transactions WHERE user_id = ? ORDER BY id', [userId])
       .filter((row) => Number(row.id) !== ownNewTransactionId);
-    const userLegacyGrants = api.all('SELECT * FROM reward_grants WHERE user_id = ? ORDER BY id', [userId]);
+    const userLegacyGrants = listLegacyRewardGrantsByUserWithApi(api, userId);
     const userAdminLogs = api.all('SELECT * FROM coin_admin_logs WHERE target_user_id = ? ORDER BY id', [userId]);
     transactions.push(...userTransactions);
     legacyGrants.push(...userLegacyGrants);
@@ -312,9 +316,7 @@ async function reviewOwnerCampaignHistory(input) {
         [campaignId, decision.userId])) {
         throw new CoinCampaignError('INVALID_HISTORY', 'Recipient is not in the campaign snapshot.');
       }
-      const receipt = api.get(`SELECT * FROM reward_grants_v2 WHERE kind = 'owner-campaign'
-        AND canonical_source_id = ? AND reward_kind = 'campaign' AND user_id = ?`,
-      [campaignId, decision.userId]);
+      const receipt = getOwnerCampaignReceiptWithApi(api, campaignId, decision.userId);
       let imported = false;
       if (receipt) {
         let metadata;
@@ -402,9 +404,7 @@ async function previewOwnerCampaign(input) {
       [key.campaignId, key.sourceGuildId, key.audienceType, key.roleId, userId, timestamp]);
     }
     const recipients = getAudienceRecipients(api, key).map((row) => row.user_id);
-    const claimed = api.all(`SELECT user_id, amount FROM reward_grants_v2
-      WHERE kind = 'owner-campaign' AND canonical_source_id = ? AND reward_kind = 'campaign'`,
-    [key.campaignId]);
+    const claimed = listOwnerCampaignReceiptAmountsWithApi(api, key.campaignId);
     if (claimed.some((row) => Number(row.amount) !== amount)) {
       throw new CoinCampaignError('CAMPAIGN_RECEIPT_CONFLICT', '活動收據金額與活動設定不同，必須先對帳。');
     }
@@ -414,11 +414,20 @@ async function previewOwnerCampaign(input) {
       WHERE campaign_id = ?`, [key.campaignId]).map((row) => row.user_id));
     const pendingAmount = (recipients.length - alreadyGranted) * amount;
     if (!Number.isSafeInteger(pendingAmount)) throw new CoinCampaignError('AMOUNT_OVERFLOW', 'Campaign total exceeds the supported range.');
+    let pendingDebtOffset = 0;
+    for (const userId of recipients) {
+      if (claimedSet.has(userId)) continue;
+      const debt = Number(api.get('SELECT amount FROM coin_debts WHERE user_id = ?', [userId])?.amount || 0);
+      pendingDebtOffset += Math.min(debt, amount);
+      if (!Number.isSafeInteger(pendingDebtOffset)) {
+        throw new CoinCampaignError('AMOUNT_OVERFLOW', 'Campaign debt offset exceeds the supported range.');
+      }
+    }
     return {
       ...key, amount, snapshotCount: memberIds.length, cumulativeRecipients: recipients.length,
       newRecipients, alreadyGranted, pending: recipients.length - alreadyGranted,
       historyUnreviewed: recipients.filter((userId) => !reviewed.has(userId)).length,
-      pendingAmount,
+      pendingAmount, pendingDebtOffset, pendingNetAmount: pendingAmount - pendingDebtOffset,
       previewToken: previewToken(key.campaignId, amount, recipients),
     };
   });
@@ -439,16 +448,23 @@ async function getOwnerCampaignPreview(input) {
   });
 }
 
+// `input.paymentGate` (optional) ties every payment of this run to the state of the request that runs it, inside the
+// payment's own transaction (see roleAddPaymentGate in coinAdminAddService): `open(api)` runs before the payment and
+// throws to stop the run, and `paid(api)` runs right after a new payment, so the payment and the state it records
+// commit or roll back together. Both are synchronous. A stop ends the run with its error instead of counting as a
+// failed recipient; the payments made before it stand.
 async function applyOwnerCampaign(input) {
+  const gate = input.paymentGate ?? null;
+  if (gate !== null && (typeof gate.open !== 'function' || typeof gate.paid !== 'function')) {
+    throw new CoinCampaignError('INVALID_ARGUMENT', 'Payment gate is invalid.');
+  }
   const preview = await getOwnerCampaignPreview(input);
   const historyState = await withCoinDatabase((api) => {
     const unreviewed = [];
     const stale = [];
     const pending = [];
     for (const userId of preview.recipients) {
-      const receipt = api.get(`SELECT 1 FROM reward_grants_v2 WHERE kind = 'owner-campaign'
-        AND canonical_source_id = ? AND reward_kind = 'campaign' AND user_id = ?`,
-      [preview.campaignId, userId]);
+      const receipt = hasOwnerCampaignReceiptWithApi(api, preview.campaignId, userId);
       if (!receipt) pending.push(userId);
       const review = api.get(`SELECT source_sha256 FROM coin_owner_campaign_history_reviews
         WHERE campaign_id = ? AND user_id = ?`, [preview.campaignId, userId]);
@@ -479,19 +495,34 @@ async function applyOwnerCampaign(input) {
     throw new CoinCampaignError('INVALID_MEMBERS', 'Complete current member snapshot is required.');
   }
   const present = new Set(input.presentMemberIds.map((id) => textId(id, 'memberId')));
-  const existingRecipients = await withCoinDatabase((api) => api.all(
-    `SELECT user_id, amount FROM reward_grants_v2 WHERE kind = 'owner-campaign'
-     AND canonical_source_id = ? AND reward_kind = 'campaign'`, [preview.campaignId]
-  ));
+  const existingRecipients = await withCoinDatabase((api) =>
+    listOwnerCampaignReceiptAmountsWithApi(api, preview.campaignId));
   if (existingRecipients.some((row) => Number(row.amount) !== preview.amount)) {
     throw new CoinCampaignError('CAMPAIGN_RECEIPT_CONFLICT', '活動收據金額與活動設定不同，必須先對帳。');
   }
   const alreadyClaimed = new Set(existingRecipients.map((row) => row.user_id));
   const result = { campaignId: preview.campaignId, audienceType: preview.audienceType,
     total: preview.recipients.length, granted: 0, alreadyGranted: 0, leftGuild: [],
-    historyBlocked: [], failed: [], amountGranted: 0, remaining: 0 };
+    historyBlocked: [], failed: [], amountGranted: 0, grossAmountGranted: 0,
+    debtOffset: 0, netAmountGranted: 0, remaining: 0 };
   const unreviewedSet = new Set(historyState.unreviewed);
   const staleSet = new Set(historyState.stale);
+  let stop = null;
+  // Runs one gate step inside the payment's transaction. A step that returns a promise would finish outside that
+  // transaction, so it is refused: the run stops, the payment rolls back, and the step's late outcome is ignored.
+  const gated = (step) => {
+    try {
+      const outcome = step();
+      if (outcome !== null && (typeof outcome === 'object' || typeof outcome === 'function') &&
+          typeof outcome.then === 'function') {
+        Promise.resolve(outcome).catch(() => {});
+        throw new CoinCampaignError('INVALID_ARGUMENT', 'Payment gate steps must be synchronous.');
+      }
+    } catch (error) {
+      stop = { error };
+      throw error;
+    }
+  };
   let attempted = 0;
   for (const userId of preview.recipients) {
     if (alreadyClaimed.has(userId)) {
@@ -519,20 +550,27 @@ async function applyOwnerCampaign(input) {
       actorUserId: input.actorUserId, metadata: { audienceType: preview.audienceType } };
     try {
       const grant = await withCoinTransaction((api) => {
+        if (gate) gated(() => gate.open(api));
         const review = api.get(`SELECT source_sha256 FROM coin_owner_campaign_history_reviews
           WHERE campaign_id = ? AND user_id = ?`, [preview.campaignId, userId]);
         if (!review || historyReviewSource(api, preview.campaignId, [userId])
           .recipientSourceSha256[userId] !== review.source_sha256) {
           throw new CoinCampaignError('CAMPAIGN_HISTORY_CHANGED', `${userId} 的交易來源在發幣前變更。`);
         }
-        return grantRewardOnceV2WithApi(api, rewardInput);
+        const granted = grantRewardOnceV2WithApi(api, rewardInput);
+        if (gate && !granted.alreadyGranted) gated(() => gate.paid(api));
+        return granted;
       });
       if (grant.alreadyGranted) result.alreadyGranted += 1;
       else {
         result.granted += 1;
         result.amountGranted += preview.amount;
+        result.grossAmountGranted += grant.grossAmount;
+        result.debtOffset += grant.debtOffset;
+        result.netAmountGranted += grant.netAmount;
       }
     } catch (error) {
+      if (stop) throw stop.error;
       try {
         const receipt = await getRewardReceiptV2({ rewardKey });
         if (receipt && receipt.amount === preview.amount && receipt.userId === userId) {
@@ -609,21 +647,18 @@ async function importOwnerCampaignHistory(input) {
       const rewardKey = campaignReceiptKey(campaignId, record.userId);
       const payloadHash = crypto.createHash('sha256')
         .update(JSON.stringify(['owner-campaign', campaignId, 'campaign', record.userId, amount])).digest('hex');
-      const existing = api.get('SELECT * FROM reward_grants_v2 WHERE reward_key = ?', [rewardKey]);
+      const existing = getRewardReceiptByKeyWithApi(api, rewardKey);
       if (existing) {
         if (existing.payload_hash !== payloadHash || Number(existing.transaction_id) !== record.transactionId) {
           throw new CoinCampaignError('HISTORY_EVIDENCE_CONFLICT', 'Existing receipt differs from reviewed evidence.');
         }
         continue;
       }
-      api.run(`INSERT INTO reward_grants_v2
-        (reward_key, operation_id, kind, canonical_source_id, reward_kind, user_id,
-         source_guild_id, amount, payload_hash, metadata_json, debt_offset, net_amount,
-         transaction_id, created_at)
-        VALUES (?, ?, 'owner-campaign', ?, 'campaign', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [rewardKey, rewardKey, campaignId, record.userId, transaction.guild_id, amount,
-        payloadHash, JSON.stringify({ imported: true, evidenceHash: record.evidenceHash }),
-        offset, net, record.transactionId, timestamp]);
+      importOwnerCampaignReceiptWithApi(api, {
+        rewardKey, canonicalSourceId: campaignId, userId: record.userId, sourceGuildId: transaction.guild_id,
+        amount, payloadHash, metadataJson: JSON.stringify({ imported: true, evidenceHash: record.evidenceHash }),
+        debtOffset: offset, netAmount: net, transactionId: record.transactionId, createdAt: timestamp,
+      });
       imported += 1;
     }
     return { campaignId, imported, alreadyRecorded: records.length - imported };

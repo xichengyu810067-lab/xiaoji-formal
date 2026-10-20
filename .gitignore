@@ -43,6 +43,11 @@ youtube-cookies*.txt
 /files-tab.png
 /coverage/
 
+# Live attack launcher per-run output (tools/live-test/attack-launcher.js default --out).
+# Holds the run config, STOP flag and the message inventory, which carry private guild and channel
+# IDs; never commit it.
+live-attack-runs/
+
 # Xiaoji website build caches and generated output.
 /website/dist/
 /website/.vite/
@@ -53,6 +58,10 @@ youtube-cookies*.txt
 /cloudflare/status-worker/.dev.vars
 /cloudflare/status-worker/.env
 /cloudflare/status-worker/.wrangler/
+# Wherever they sit: the public export refuses these names, so a local copy must not trip it.
+.dev.vars*
+!.dev.vars.example
+.wrangler/
 
 # Local append-only Codex issue and authorization log.
 /question.md

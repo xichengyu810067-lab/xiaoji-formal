@@ -1,22 +1,43 @@
-const { BoardCoreError } = require('../../../../games/contracts');
+const { BoardCoreError } = require('../core/contracts');
 const { parseBoardCustomId } = require('./boardCustomId');
 const { assertSessionBoundary, getInteractionIdentity, getModalValue } = require('./boardInteractionAdapter');
 
 const RATE_LIMIT_MESSAGE = '小吉有點累了，請稍後再跟我聊天';
+const LOCAL_BUSY_MESSAGE = '小吉正在處理其他提問，或你剛剛送出了相同的內容，棋局已保留，請稍後再試。';
 const JUDGE_UNAVAILABLE_MESSAGE = '小吉暫時無法判題，棋局已保留，請稍後再試。';
 const REVEAL_UNAVAILABLE_MESSAGE = '小吉暫時無法揭曉湯底，請稍後再試。';
+// The judge's anti-spam gate held a question back (aiSpamGuard.js): nothing was judged or counted.
+const SPAM_BLOCKED_MESSAGES = Object.freeze({
+  meaningless: '這個提問看不出內容，請換個方式描述，棋局已保留。',
+  repeat: '這個問題剛剛已經問過了，請換個問題，棋局已保留。',
+  user_rate: '提問太快了，請稍等一下再問，棋局已保留。',
+});
+const SPAM_BLOCKED_DEFAULT_MESSAGE = SPAM_BLOCKED_MESSAGES.user_rate;
+
+// The corpus could not be read right now (missing or unreadable file). It may be fixed without a
+// restart, so the session is kept and the player is asked to try again.
+const CORPUS_READ_FAILURE_CODES = new Set(['CORPUS_UNAVAILABLE', 'CORPUS_PERMISSION_DENIED']);
 
 const SAFE_JUDGE_FAILURE_CODES = new Set([
   'JUDGE_UNAVAILABLE',
   'JUDGE_TIMEOUT',
   'JUDGE_INVALID_OUTPUT',
   'JUDGE_INVALID_RESULT',
-  'CORPUS_UNAVAILABLE',
+  ...CORPUS_READ_FAILURE_CODES,
 ]);
 
 function safeJudgeFailure(error) {
+  if (error?.code === 'JUDGE_SPAM_BLOCKED') {
+    const content = Object.hasOwn(SPAM_BLOCKED_MESSAGES, error.reason)
+      ? SPAM_BLOCKED_MESSAGES[error.reason] : SPAM_BLOCKED_DEFAULT_MESSAGE;
+    return { ok: false, ephemeral: true, content, preserveSession: true, code: error.code };
+  }
   if (error?.code === 'JUDGE_RATE_LIMITED') {
     return { ok: false, ephemeral: true, content: RATE_LIMIT_MESSAGE, preserveSession: true, code: error.code };
+  }
+  // The shared provider guard held the request back; nothing was judged or committed.
+  if (error?.code === 'JUDGE_LOCAL_BUSY') {
+    return { ok: false, ephemeral: true, content: LOCAL_BUSY_MESSAGE, preserveSession: true, code: error.code };
   }
   if (SAFE_JUDGE_FAILURE_CODES.has(error?.code)) {
     return { ok: false, ephemeral: true, content: JUDGE_UNAVAILABLE_MESSAGE, preserveSession: true, code: error.code };
@@ -55,7 +76,7 @@ function createTurtleSoupDiscordAdapter({ workflow, revealService, service, stor
             actorId: identity.actorId,
           });
         } catch (error) {
-          if (error?.code === 'CORPUS_UNAVAILABLE') {
+          if (CORPUS_READ_FAILURE_CODES.has(error?.code)) {
             return { ok: false, ephemeral: true, content: REVEAL_UNAVAILABLE_MESSAGE, preserveSession: true, code: error.code };
           }
           throw error;
@@ -97,9 +118,11 @@ function createTurtleSoupDiscordAdapter({ workflow, revealService, service, stor
 
 module.exports = {
   JUDGE_UNAVAILABLE_MESSAGE,
+  LOCAL_BUSY_MESSAGE,
   RATE_LIMIT_MESSAGE,
   REVEAL_UNAVAILABLE_MESSAGE,
   SAFE_JUDGE_FAILURE_CODES,
+  SPAM_BLOCKED_MESSAGES,
   createTurtleSoupDiscordAdapter,
   judgmentReply,
   safeJudgeFailure,

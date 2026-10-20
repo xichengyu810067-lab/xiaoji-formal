@@ -1,5 +1,5 @@
 const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
-const { setGuildWelcomeChannel } = require('../utils/guildConfig');
+const { setWelcomeChannel } = require('../services/welcomeService');
 const {
   ensureModerationAccess,
   handleCommandError,
@@ -11,6 +11,10 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('set-welcome')
     .setDescription('設定新人歡迎頻道')
+    // Hides the command from members without Manage Server. The check in execute stays the real guard.
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    // default_member_permissions does not apply in DMs, so a command that is only for servers is kept out of them.
+    .setDMPermission(false)
     .addChannelOption((option) =>
       option
         .setName('channel')
@@ -51,7 +55,7 @@ module.exports = {
         return;
       }
 
-      setGuildWelcomeChannel(interaction.guildId, channel.id);
+      setWelcomeChannel(interaction.guildId, channel.id);
       await interaction.reply({ content: `新人歡迎頻道已設定為 ${channel}。`, ephemeral: true });
       await getClientExtensionHost(interaction.client).runHook('publicCommandCompleted', {
         interaction,

@@ -1,7 +1,6 @@
 const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { FEATURE_KEY, selectReleaseChannel } = require('../services/releaseAnnouncementService');
 const { getGuildFeatureSetting, setGuildFeatureSetting } = require('../services/featurePlatformService');
-const { isGuildApproved } = require('../services/auditService');
 const { ensureModerationAccess, handleCommandError, replyEphemeral } = require('../utils/moderation');
 
 const REQUIRED_BOT_PERMISSIONS = [
@@ -21,6 +20,8 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('release-announcements')
     .setDescription('設定小吉正式 GitHub Release 公告頻道')
+    // Hides the command from members without Administrator. The checks in execute stay the real guard.
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
     .addSubcommand((subcommand) => subcommand
       .setName('set')
@@ -36,10 +37,6 @@ module.exports = {
     try {
       if (!interaction.inGuild() || !interaction.guild || !interaction.guildId) {
         await replyEphemeral(interaction, '正式版本公告只能在伺服器內設定。');
-        return;
-      }
-      if (!isGuildApproved(interaction.guildId)) {
-        await replyEphemeral(interaction, '此伺服器尚未通過使用審核。');
         return;
       }
       const action = interaction.options.getSubcommand();

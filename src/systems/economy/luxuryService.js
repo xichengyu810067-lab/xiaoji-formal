@@ -9,6 +9,7 @@ const {
   nowIso,
 } = require('./coinService');
 const { mutateWalletWithApi } = require('./coinWalletService');
+const { LuxuryReason } = require('./transactionReasons');
 
 const MAX_LUXURY_AMOUNT = 9_000_000_000;
 const DEFAULT_PAGE_SIZE = 10;
@@ -188,17 +189,20 @@ function updateLuxuryInventory(api, guildId, userId, item, quantity, timestamp) 
   );
 }
 
+// The table only keeps positive quantities (CHECK quantity > 0), so a stack that is used up completely is
+// deleted instead of being updated down to zero.
 function decrementLuxuryInventory(api, guildId, userId, itemId, quantity) {
+  api.run('DELETE FROM luxury_global_inventory WHERE user_id = ? AND item_id = ? AND quantity <= ?', [
+    userId,
+    itemId,
+    quantity,
+  ]);
   api.run(
     `UPDATE luxury_global_inventory
      SET quantity = quantity - ?, updated_at = ?
-     WHERE user_id = ? AND item_id = ?`,
-    [quantity, nowIso(), userId, itemId]
+     WHERE user_id = ? AND item_id = ? AND quantity > ?`,
+    [quantity, nowIso(), userId, itemId, quantity]
   );
-  api.run('DELETE FROM luxury_global_inventory WHERE user_id = ? AND item_id = ? AND quantity <= 0', [
-    userId,
-    itemId,
-  ]);
 }
 
 function assertInventoryQuantity(api, guildId, userId, itemId, quantity) {
@@ -244,7 +248,7 @@ async function createLuxuryItem(guildId, input) {
 
     insertPriceHistory(api, guildId, id, price, {
       operatorId: input.createdBy,
-      reason: 'initial price',
+      reason: LuxuryReason.INITIAL_PRICE,
       timestamp,
     });
     insertAdminLog(api, {

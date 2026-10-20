@@ -3,6 +3,7 @@ const { handleWordChainMessage } = require('./wordChainService');
 const { handleNumberChainMessage } = require('./numberChainService');
 const { handleDailyRiddleMessage } = require('./dailyRiddleService');
 const { handleDailyDiscussionMessage } = require('./dailyDiscussionService');
+const { getTestControlPolicy } = require('../platform/testControlPolicy');
 
 function createMessageFeatureRouter({ handlers = {}, loadSetting = getGuildFeatureSetting } = {}) {
   const orderedHandlers = FEATURE_KEYS.filter((featureKey) => typeof handlers[featureKey] === 'function').map((featureKey) => [
@@ -23,6 +24,8 @@ function createMessageFeatureRouter({ handlers = {}, loadSetting = getGuildFeatu
     }
 
     for (const [featureKey, handler] of orderedHandlers) {
+      const testPolicy = getTestControlPolicy(message.client);
+      if (testPolicy && !testPolicy.allowsMessageFeature(featureKey)) continue;
       const setting = await loadSetting(message.guildId, featureKey);
 
       const isDirectChannelFeature = featureKey === 'word_chain' || featureKey === 'number_chain';

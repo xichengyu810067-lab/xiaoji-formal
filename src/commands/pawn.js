@@ -6,15 +6,17 @@ const {
   redeemPawnRecord,
 } = require('../services/luxuryService');
 const { formatCoins, replyCoinError } = require('../utils/coinPresentation');
+const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 function formatTimestamp(isoString) {
   const timestamp = Math.floor(new Date(isoString).getTime() / 1000);
   return `<t:${timestamp}:R>`;
 }
 
-function formatPawnRecord(record) {
+// textLimit is how many characters the item name may take when a long list has to be shortened.
+function formatPawnRecord(record, { textLimit = Infinity } = {}) {
   return [
-    `#${record.id} ${record.itemName} x${record.quantity}`,
+    `#${record.id} ${clipText(record.itemName, textLimit)} x${record.quantity}`,
     `剩餘可贖回：${record.remainingQuantity}`,
     `當入單價：${formatCoins(record.pawnUnitPrice)}｜當鋪入帳：${formatCoins(record.payoutAmount)}`,
     `已贖回：${record.redeemedQuantity}｜已支付：${formatCoins(record.redeemedAmount)}｜狀態：${record.status}｜${formatTimestamp(record.createdAt)}`,
@@ -114,7 +116,13 @@ module.exports = {
         });
         await interaction.reply({
           content: rows.length
-            ? [`**小吉當鋪｜${subcommand === 'active' ? '可贖回紀錄' : '歷史紀錄'}**`, ...rows.map(formatPawnRecord)].join('\n\n')
+            ? fitListText({
+              header: `**小吉當鋪｜${subcommand === 'active' ? '可贖回紀錄' : '歷史紀錄'}**`,
+              items: rows,
+              render: (record, { textLimit }) => formatPawnRecord(record, { textLimit }),
+              separator: '\n\n',
+              note: (count) => omittedLine(count, { unit: '筆當鋪紀錄' }),
+            })
             : subcommand === 'active'
               ? '目前沒有可贖回的當鋪紀錄。'
               : '目前沒有當鋪紀錄。',

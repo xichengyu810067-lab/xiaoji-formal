@@ -1,6 +1,12 @@
 const { createHash, randomUUID } = require('node:crypto');
 const { ChannelType, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { isGuildApproved } = require('./auditService');
+const { runWithBackgroundContext } = require('../platform/hostOperationContext');
+const {
+  OFFICIAL_RELEASE_REPOSITORY,
+  inspectReleaseUrl,
+  parseStableSemverTag,
+} = require('../platform/linkPolicy');
+const { cachedBotMember, resolveBotMember } = require('../utils/botMember');
 const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
 const {
   getGuildFeatureSetting,
@@ -9,7 +15,7 @@ const {
 } = require('./featurePlatformService');
 
 const FEATURE_KEY = 'release_announcements';
-const DEFAULT_REPOSITORY = 'xichengyu810067-lab/xiaoji-formal';
+const DEFAULT_REPOSITORY = OFFICIAL_RELEASE_REPOSITORY;
 const DEFAULT_POLL_INTERVAL_MS = 15 * 60 * 1000;
 const MIN_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_POLL_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -73,26 +79,19 @@ function readReleaseAnnouncementConfig(env = process.env) {
     dispatchEnabled: dispatchSetting === 'true' || dispatchSetting === '1' };
 }
 
-function parseStableSemver(tagName) {
-  const match = String(tagName || '').match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/);
-  if (!match) return null;
-  const parts = match.slice(1, 4).map(Number);
-  if (parts.some((part) => !Number.isSafeInteger(part) || part > 2_147_483_647) || parts[0] < 1) return null;
-  return { major: parts[0], minor: parts[1], patch: parts[2], normalized: `${parts[0]}.${parts[1]}.${parts[2]}` };
-}
+// The release tag and release URL rules are shared with the chat output policy (src/platform/linkPolicy.js).
+const parseStableSemver = parseStableSemverTag;
+
+const RELEASE_URL_REFUSALS = Object.freeze({
+  unparsable: 'Release URL is invalid.',
+  undecodable: 'Release URL path is invalid.',
+  mismatch: 'Release URL does not match the configured repository and tag.',
+});
 
 function validateReleaseUrl(value, { owner, repo }, tagName) {
-  let url;
-  try { url = new URL(String(value || '')); }
-  catch (_error) { throw new ReleaseAnnouncementError('RELEASE_INVALID', 'Release URL is invalid.'); }
-  let decodedPath;
-  try { decodedPath = decodeURIComponent(url.pathname); }
-  catch (_error) { throw new ReleaseAnnouncementError('RELEASE_INVALID', 'Release URL path is invalid.'); }
-  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password ||
-      url.search || url.hash || decodedPath !== `/${owner}/${repo}/releases/tag/${tagName}`) {
-    throw new ReleaseAnnouncementError('RELEASE_INVALID', 'Release URL does not match the configured repository and tag.');
-  }
-  return `https://github.com/${owner}/${repo}/releases/tag/${encodeURIComponent(tagName)}`;
+  const { href, problem } = inspectReleaseUrl(value, { owner, repo }, tagName);
+  if (!href) throw new ReleaseAnnouncementError('RELEASE_INVALID', RELEASE_URL_REFUSALS[problem]);
+  return href;
 }
 
 function normalizeRelease(raw, repositoryConfig) {
@@ -280,7 +279,7 @@ async function persistReleasesAndDeliveries(releases, guildIds, now = new Date()
           status = 'pending', attempt_count = 0, next_attempt_at = excluded.next_attempt_at,
           lease_owner = NULL, lease_until = NULL, last_error = NULL, updated_at = excluded.updated_at
         WHERE release_announcement_deliveries.status = 'suppressed'
-          AND release_announcement_deliveries.last_error IN ('GUILD_NOT_APPROVED', 'DESTINATION_NOT_CONFIGURED')`, [
+          AND release_announcement_deliveries.last_error IN ('GUILD_UNAVAILABLE', 'DESTINATION_NOT_CONFIGURED')`, [
         release.releaseId, guildId, timestamp, deliveryNonce(release.repository, release.releaseId, guildId), timestamp, timestamp,
       ]);
     }
@@ -359,13 +358,16 @@ async function quarantineExpiredProcessing(now = new Date()) {
     WHERE status = 'processing' AND (lease_until IS NULL OR lease_until <= ?)`, [timestamp, timestamp]));
 }
 
-async function markDeliverySuppressed(delivery, reason = 'GUILD_NOT_APPROVED', now = new Date()) {
+// A row suppressed for a guild that was not available (GUILD_UNAVAILABLE) or had no destination
+// (DESTINATION_NOT_CONFIGURED) is queued again when the guild is back or the destination is set. Rows an
+// earlier version suppressed as GUILD_NOT_APPROVED are left as they are and never queued again.
+async function markDeliverySuppressed(delivery, reason = 'GUILD_UNAVAILABLE', now = new Date()) {
   const timestamp = new Date(now).toISOString();
   return withCoinTransaction((api) => api.run(`UPDATE release_announcement_deliveries
     SET status = 'suppressed', lease_owner = NULL, lease_until = NULL,
       last_error = ?, updated_at = ?
     WHERE release_id = ? AND guild_id = ? AND status = 'processing' AND lease_owner = ?`, [
-    reason === 'DESTINATION_NOT_CONFIGURED' ? reason : 'GUILD_NOT_APPROVED',
+    reason === 'DESTINATION_NOT_CONFIGURED' ? reason : 'GUILD_UNAVAILABLE',
     timestamp, delivery.release_id, delivery.guild_id, delivery.lease_owner,
   ]));
 }
@@ -386,7 +388,8 @@ function assertTickActive(options) {
   }
 }
 
-function hasChannelPermissions(channel, guild, botMember = guild.members?.me) {
+// A partial member of the bot (no roles) is no member here (botMember.js).
+function hasChannelPermissions(channel, guild, botMember = cachedBotMember(guild)) {
   if (!channel || channel.guildId !== guild.id || channel.isThread?.() ||
       ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) return false;
   const permissions = channel.permissionsFor?.(botMember);
@@ -403,11 +406,9 @@ async function selectReleaseChannel(guild, { settingReader = getGuildFeatureSett
   const resolvedSetting = setting || await settingReader(guild.id, FEATURE_KEY);
   if (!isExplicitReleaseDestination(resolvedSetting)) return null;
   const preferred = guild.channels?.cache?.get?.(resolvedSetting.channelId) || null;
-  let botMember = guild.members?.me;
-  if (!botMember && guild.members?.fetchMe) {
-    try { botMember = await guild.members.fetchMe(); }
-    catch (_error) { return null; }
-  }
+  // The cached member when it is whole, otherwise fetched; one that cannot be had is no announcement.
+  const botMember = await resolveBotMember(guild);
+  if (!botMember) return null;
   return hasChannelPermissions(preferred, guild, botMember) ? preferred : null;
 }
 
@@ -434,7 +435,6 @@ async function processReleaseAnnouncementTick(client, options = {}) {
   const now = options.now instanceof Date ? new Date(options.now) : new Date();
   const healthReporter = options.healthReporter || setFeatureHealth;
   const usageRecorder = options.usageRecorder || recordFeatureUsage;
-  const auditChecker = options.auditChecker || isGuildApproved;
   const settingReader = options.settingReader || getGuildFeatureSetting;
   let config;
   try {
@@ -442,23 +442,23 @@ async function processReleaseAnnouncementTick(client, options = {}) {
     const releases = await fetchGithubReleases(config, options);
     if (!releases.length) {
       await healthReporter(FEATURE_KEY, 'broken', { detail: 'no_stable_release', now });
-      return { ok: false, releases: 0, approvedGuilds: 0, delivered: 0, failed: 0, suppressed: 0 };
+      return { ok: false, releases: 0, eligibleGuilds: 0, delivered: 0, failed: 0, suppressed: 0 };
     }
     if (typeof options.shouldContinue === 'function' && !options.shouldContinue()) {
-      return { ok: true, releases: releases.length, approvedGuilds: 0, delivered: 0, failed: 0, suppressed: 0, interrupted: true };
+      return { ok: true, releases: releases.length, eligibleGuilds: 0, delivered: 0, failed: 0, suppressed: 0, interrupted: true };
     }
     const guilds = [];
     const candidates = [...(client?.guilds?.cache?.values?.() || [])]
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
     for (const guild of candidates) {
-      if (guild?.available === false || !auditChecker(guild.id)) continue;
+      if (guild?.available === false) continue;
       const setting = await settingReader(guild.id, FEATURE_KEY);
       if (isExplicitReleaseDestination(setting)) guilds.push(guild);
     }
     const persistence = await persistReleasesAndDeliveries(releases, guilds.map((guild) => guild.id), now);
     if (!persistence.authoritativeCurrent) {
       await healthReporter(FEATURE_KEY, 'broken', { detail: 'release_cursor_unavailable', now });
-      return { ok: false, releases: releases.length, approvedGuilds: guilds.length, delivered: 0, failed: 0, suppressed: 0 };
+      return { ok: false, releases: releases.length, eligibleGuilds: guilds.length, delivered: 0, failed: 0, suppressed: 0 };
     }
     const workerId = options.workerId || randomUUID();
     await quarantineExpiredProcessing(now);
@@ -476,8 +476,8 @@ async function processReleaseAnnouncementTick(client, options = {}) {
       const guild = client.guilds.cache.get(delivery.guild_id);
       let sendStarted = false;
       try {
-        if (!guild || guild.available === false || !auditChecker(delivery.guild_id)) {
-          throw new ReleaseAnnouncementError('GUILD_NOT_APPROVED', 'Guild is not approved.');
+        if (!guild || guild.available === false) {
+          throw new ReleaseAnnouncementError('GUILD_UNAVAILABLE', 'Guild is not available.');
         }
         const setting = await settingReader(delivery.guild_id, FEATURE_KEY);
         if (!isExplicitReleaseDestination(setting)) {
@@ -486,8 +486,8 @@ async function processReleaseAnnouncementTick(client, options = {}) {
         const channel = await selectReleaseChannel(guild, { ...options, setting });
         if (!channel) throw new ReleaseAnnouncementError('CHANNEL_UNAVAILABLE', 'No safe release announcement channel is available.');
         const currentGuild = client.guilds.cache.get(delivery.guild_id);
-        if (currentGuild !== guild || currentGuild?.available === false || !auditChecker(delivery.guild_id)) {
-          throw new ReleaseAnnouncementError('GUILD_NOT_APPROVED', 'Guild is not approved.');
+        if (currentGuild !== guild || currentGuild?.available === false) {
+          throw new ReleaseAnnouncementError('GUILD_UNAVAILABLE', 'Guild is not available.');
         }
         const currentSetting = await settingReader(delivery.guild_id, FEATURE_KEY);
         if (!isExplicitReleaseDestination(currentSetting) || currentSetting.channelId !== channel.id) {
@@ -509,7 +509,7 @@ async function processReleaseAnnouncementTick(client, options = {}) {
           await markDeliveryInterrupted(delivery, now).catch(() => {});
           interrupted = true;
           break;
-        } else if (error?.code === 'GUILD_NOT_APPROVED' || error?.code === 'DESTINATION_NOT_CONFIGURED') {
+        } else if (error?.code === 'GUILD_UNAVAILABLE' || error?.code === 'DESTINATION_NOT_CONFIGURED') {
           await markDeliverySuppressed(delivery, error.code, now).catch(() => {});
           suppressed += 1;
         } else {
@@ -532,10 +532,10 @@ async function processReleaseAnnouncementTick(client, options = {}) {
       detail: failed > 0 ? 'delivery_failed' : unhealthyBacklog > 0 ? 'delivery_backlog' : null,
       now,
     });
-    return { ok: failed === 0, releases: releases.length, approvedGuilds: guilds.length, delivered, failed, suppressed, interrupted };
+    return { ok: failed === 0, releases: releases.length, eligibleGuilds: guilds.length, delivered, failed, suppressed, interrupted };
   } catch (_error) {
     await healthReporter(FEATURE_KEY, 'broken', { detail: 'github_sync_failed', now }).catch(() => {});
-    return { ok: false, releases: 0, approvedGuilds: 0, delivered: 0, failed: 1, suppressed: 0 };
+    return { ok: false, releases: 0, eligibleGuilds: 0, delivered: 0, failed: 1, suppressed: 0 };
   }
 }
 
@@ -548,14 +548,17 @@ function startReleaseAnnouncementScheduler(client, options = {}) {
   const clearIntervalFn = options.clearIntervalFn || clearInterval;
   const state = { timer: null, inFlight: null, stopped: false, clearIntervalFn,
     dispatchEnabled: options.dispatchEnabled ?? config.dispatchEnabled ?? true };
+  // Every poll, whether from the interval, the first run or enableDispatch, is its own
+  // background job run.
   const run = () => {
     if (state.stopped || !state.dispatchEnabled || state.inFlight) return state.inFlight;
     const callerGuard = options.shouldContinue;
-    state.inFlight = Promise.resolve(processReleaseAnnouncementTick(client, {
-      ...options,
-      config,
-      shouldContinue: () => !state.stopped && (typeof callerGuard !== 'function' || callerGuard()),
-    }))
+    state.inFlight = Promise.resolve(runWithBackgroundContext('release-announcement.poll', () =>
+      processReleaseAnnouncementTick(client, {
+        ...options,
+        config,
+        shouldContinue: () => !state.stopped && (typeof callerGuard !== 'function' || callerGuard()),
+      })))
       .catch(() => null)
       .finally(() => { state.inFlight = null; });
     return state.inFlight;

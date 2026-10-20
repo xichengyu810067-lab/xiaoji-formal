@@ -7,7 +7,7 @@ const {
   cloneJson,
   digestRequest,
   stableJson,
-} = require('../../../../games/contracts');
+} = require('../core/contracts');
 const { TurtleSoupError } = require('./errors');
 
 function normalizeTime(clock) {

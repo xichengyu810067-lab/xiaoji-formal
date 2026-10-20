@@ -2,20 +2,29 @@ const { Events } = require('discord.js');
 const { handleBlackjackButton } = require('../services/casinoService');
 const { handlePollButton } = require('../services/pollService');
 const { replyEphemeral } = require('../utils/moderation');
-const { isGuildApproved } = require('../services/auditService');
-const { isBotOwner } = require('../utils/ownerOnly');
 const { recordPublicInteraction } = require('../services/publicStatusService');
 const logger = require('../utils/logger');
 const { getClientExtensionHost } = require('../extensions/extensionHost');
-const { getBoardRuntime } = require('../games/boardRuntimeRegistry');
+const { getBoardRuntime } = require('../systems/games/board/core/boardRuntimeRegistry');
 const { getSoloRuntime } = require('../systems/games/soloRuntimeRegistry');
+const { authorizeInteraction } = require('../platform/testControlIngress');
 
-const AUDIT_PENDING_MESSAGE = '小吉在這個伺服器尚未通過機器人擁有者的審核，暫時無法提供服務。請耐心等待批准。';
+// An AutocompleteInteraction has no reply()/followUp(); the only valid answer is a suggestion list. The interaction
+// may already be gone (Discord code 10062, "Unknown interaction") or answered. None of that may escape as an
+// unhandled rejection, so a failed respond is swallowed and only its code is logged.
+async function respondWithNoSuggestions(interaction, context) {
+  try {
+    await interaction.respond([]);
+  } catch (error) {
+    logger.warn(`${context}。code=${error?.code ?? error?.name ?? 'unknown'}`);
+  }
+}
 
 module.exports = {
   name: Events.InteractionCreate,
 
   async execute(interaction) {
+    if (!authorizeInteraction(interaction)) return;
     const extensionHost = getClientExtensionHost(interaction.client);
     const extensionGuard = await extensionHost.guardInteraction({
       interaction,
@@ -26,10 +35,19 @@ module.exports = {
     const extensionResult = await extensionHost.runHook('interactionCreate', { interaction }, { stopOnHandled: true });
     if (extensionResult.some((item) => item.result?.handled)) return;
 
-    const isOwner = isBotOwner(interaction.user.id);
-
-    if (interaction.guildId && !isOwner && !isGuildApproved(interaction.guildId)) {
-      await replyEphemeral(interaction, AUDIT_PENDING_MESSAGE);
+    if (interaction.isButton() && interaction.customId?.startsWith('coin-admin|1|add|')) {
+      const command = interaction.client.commands.get('coin-admin');
+      if (!command?.handleComponent) {
+        await replyEphemeral(interaction, '加幣面板暫時無法使用，請重新執行 /coin-admin add。');
+        return;
+      }
+      try {
+        await command.handleComponent(interaction);
+        await recordPublicInteraction();
+      } catch (error) {
+        logger.error('/coin-admin component failed', error);
+        await replyEphemeral(interaction, '加幣面板處理失敗，請稍後再試。');
+      }
       return;
     }
 
@@ -68,6 +86,21 @@ module.exports = {
       return;
     }
 
+    if (interaction.isAutocomplete?.()) {
+      const command = interaction.client.commands.get(interaction.commandName);
+      if (!command?.autocomplete) {
+        await respondWithNoSuggestions(interaction, '沒有自動完成處理器時的空清單回應失敗');
+        return;
+      }
+      try {
+        await extensionHost.runCommand(command, 'autocomplete', interaction);
+      } catch (error) {
+        logger.error(`/${interaction.commandName} autocomplete failed`, error);
+        if (!interaction.responded) await respondWithNoSuggestions(interaction, '自動完成失敗後的空清單回應失敗');
+      }
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) {
       return;
     }
@@ -81,7 +114,7 @@ module.exports = {
 
     try {
       logger.info(`[COMMAND_REPLY] executing /${interaction.commandName}`);
-      await command.execute(interaction);
+      await extensionHost.runCommand(command, 'execute', interaction);
       await recordPublicInteraction();
     } catch (error) {
       logger.error(`/${interaction.commandName} failed`, error);

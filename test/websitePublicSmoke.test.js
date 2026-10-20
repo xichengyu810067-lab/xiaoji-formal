@@ -12,6 +12,9 @@ test('official pages link to the public release and retain the feature list', ()
   assert.match(homepage, /data-metric="version"/);
   assert.match(statusPage, /逐項即時狀態/);
   assert.ok(PUBLIC_FEATURE_CATALOG.some((item) => item.key === 'sudoku'));
+  assert.deepEqual(PUBLIC_FEATURE_CATALOG.find((item) => item.key === 'welcome'), {
+    key: 'welcome', name: '新人歡迎', category: '社群服務',
+  });
   assert.ok(PUBLIC_SYSTEM_CATALOG.some((system) =>
     system.features.some((feature) => feature.name === '文字接龍')));
 });

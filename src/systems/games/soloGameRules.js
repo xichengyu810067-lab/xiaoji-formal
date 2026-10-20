@@ -63,7 +63,7 @@ function applyTetrisAction(state, action) {
   const piece = Math.floor(seededNumber(state.seed, state.pieceIndex) * TETROMINOES.length);
   const shape = rotateShape(TETROMINOES[piece], ((action.rotation % 4) + 4) % 4);
   const width = Math.max(...shape.map(([x]) => x)) + 1;
-  if (action.column < 0 || action.column + width > 10) throw new GameError('INVALID_ACTION', 'Piece is outside the board.');
+  if (action.column < 0 || action.column + width > 10) throw new GameError('INVALID_ACTION', '方塊會超出棋盤，請改選較左邊的欄位或換個旋轉。');
   const canPlace = (row) => shape.every(([x, y]) => row + y < 20 && !state.board[row + y]?.[action.column + x]);
   if (!canPlace(0)) return { ...state, gameOver: true };
   let row = 0;
@@ -104,7 +104,7 @@ function applyNumberMatchAction(state, action) {
   }
   const { first, second } = action;
   if (first < 0 || second < 0 || first >= state.board.length || second >= state.board.length || first === second) {
-    throw new GameError('INVALID_ACTION', 'Pair is outside the board.');
+    throw new GameError('INVALID_ACTION', '請選棋盤內兩個不同的格子。');
   }
   const rowDistance = Math.abs(Math.floor(first / state.columns) - Math.floor(second / state.columns));
   const columnDistance = Math.abs((first % state.columns) - (second % state.columns));

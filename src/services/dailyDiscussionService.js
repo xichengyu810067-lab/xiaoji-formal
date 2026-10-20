@@ -1,10 +1,12 @@
 const { createHash, randomUUID } = require('node:crypto');
 const { EmbedBuilder } = require('discord.js');
 const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
+const { ensureGuildEconomyRowWithApi, readGuildEconomyEnabledWithApi } = require('./coinService');
 const { grantRewardOnce, setFeatureHealth } = require('./featurePlatformService');
 const { corpusVersion, selectDiscussionForDate, topics } = require('./dailyDiscussionCorpus');
 const { getNextTaipeiOccurrence, getTaipeiDateKey, getTaipeiDayRange } = require('../utils/taipeiClock');
 const logger = require('../utils/logger');
+const { runWithBackgroundContext } = require('../platform/hostOperationContext');
 
 const FEATURE_KEY = 'daily_discussion';
 const EVENT_KIND = 'discussion';
@@ -14,6 +16,9 @@ const MAX_HISTORY_PAGES = 20;
 const HISTORY_PAGE_SIZE = 100;
 const SCHEDULER_INTERVAL_MS = 60_000;
 const LEASE_MS = 15 * 60_000;
+// The boundary timer and the 60-second watchdog always run a little after the exact start of the window, so a post
+// made within this grace after the start is on time, not late.
+const ON_TIME_GRACE_MS = 2 * 60_000;
 const graphemeSegmenter = new Intl.Segmenter('zh-TW', { granularity: 'grapheme' });
 let schedulerState = null;
 
@@ -79,6 +84,13 @@ function stableMarker(kind, guildId, localDate, topicId) {
     .digest('hex')
     .slice(0, 24);
   return `xiaoji-daily-discussion:${kind}:${digest}`;
+}
+
+// What members read in the footer of the public post. The stable marker stays in the event row as an internal key and
+// is never shown. The footer names the day, which is unique to the post: one for each guild and day, found again by
+// the footer when a post was sent but not yet recorded.
+function publishFooter(event) {
+  return `每日議題・${event.localDate}`;
 }
 
 function mapEvent(row) {
@@ -226,7 +238,10 @@ function messageFooter(message) {
   return message?.embeds?.[0]?.footer?.text || message?.embeds?.[0]?.data?.footer?.text || null;
 }
 
-async function findMarkedMessage(channel, marker, botUserId, { lowerBound, maxPages = MAX_HISTORY_PAGES } = {}) {
+// `markers` are the footers that tell a post of this event: the footer shown today and, for a post sent before the
+// footer was changed, the stable marker it carried then.
+async function findMarkedMessage(channel, markers, botUserId, { lowerBound, maxPages = MAX_HISTORY_PAGES } = {}) {
+  const accepted = new Set([markers].flat());
   if (!channel?.messages?.fetch) throw new DailyDiscussionError('READ_HISTORY_UNAVAILABLE', 'Message history is unavailable.');
   const lowerBoundMs = requireNow(lowerBound).getTime();
   let before;
@@ -234,7 +249,7 @@ async function findMarkedMessage(channel, marker, botUserId, { lowerBound, maxPa
     const page = collectionValues(await channel.messages.fetch({ limit: HISTORY_PAGE_SIZE, ...(before ? { before } : {}) }));
     const match = page.find((message) => {
       const createdMs = new Date(message.createdAt || message.createdTimestamp).getTime();
-      return createdMs >= lowerBoundMs && message?.author?.id === botUserId && messageFooter(message) === marker;
+      return createdMs >= lowerBoundMs && message?.author?.id === botUserId && accepted.has(messageFooter(message));
     });
     if (match) return { complete: true, message: match, reason: null };
     if (page.length < HISTORY_PAGE_SIZE) return { complete: true, message: null, reason: null };
@@ -279,7 +294,7 @@ function buildDiscussionEmbed(event, topic) {
       { name: '參加方式', value: '請到本訊息的討論串發表有實質內容的意見、討論或辯論；當日有效參與者可獲得 30 吉幣。' },
       { name: '安全提醒', value: topic.safetyReminder }
     )
-    .setFooter({ text: event.publishMarker });
+    .setFooter({ text: publishFooter(event) });
 }
 
 async function persistPublishedEvent(eventId, announcementMessageId, threadId, status, now, leaseOwner) {
@@ -414,7 +429,7 @@ async function publishDailyDiscussion(
     ? await channel.messages.fetch(event.announcementMessageId).catch(() => null)
     : null;
   if (!announcement) {
-    const markerResult = await findMarkedMessage(channel, event.publishMarker, client.user.id, {
+    const markerResult = await findMarkedMessage(channel, [publishFooter(event), event.publishMarker], client.user.id, {
       lowerBound: event.createdAt,
       maxPages: maxMarkerPages,
     });
@@ -451,7 +466,7 @@ async function publishDailyDiscussion(
 
     const persistNow = operationNow();
     await revalidatePublishLease(event.id, normalizedLeaseOwner, persistNow);
-    const status = date.getTime() > new Date(event.windowStartAt).getTime() ? 'published_late' : 'published';
+    const status = date.getTime() - new Date(event.windowStartAt).getTime() > ON_TIME_GRACE_MS ? 'published_late' : 'published';
     const persisted = await persistPublishedEvent(
       event.id,
       announcement.id,
@@ -722,12 +737,8 @@ async function settleDailyDiscussion(
 
   const economyEnabled = await withCoinTransaction((api) => {
     const timestamp = date.toISOString();
-    api.run(
-      `INSERT INTO coin_guild_settings (guild_id, created_at, updated_at)
-       VALUES (?, ?, ?) ON CONFLICT(guild_id) DO NOTHING`,
-      [settling.guildId, timestamp, timestamp]
-    );
-    return Number(api.get('SELECT enabled FROM coin_guild_settings WHERE guild_id = ?', [settling.guildId])?.enabled) === 1;
+    ensureGuildEconomyRowWithApi(api, settling.guildId, timestamp);
+    return Number(readGuildEconomyEnabledWithApi(api, settling.guildId)) === 1;
   });
   if (!economyEnabled) {
     const error = new DailyDiscussionError('COIN_DISABLED', 'Guild coin system is disabled.');
@@ -851,7 +862,7 @@ async function processDailyDiscussionTick(
   const date = requireNow(now);
   const localDate = getTaipeiDateKey(date);
   const currentWindow = getDiscussionWindow(localDate);
-  const summary = { localDate, claimed: 0, published: 0, missed: 0, settled: 0, blocked: 0, failed: 0, deferred: 0 };
+  const summary = { localDate, claimed: 0, published: 0, missed: 0, settled: 0, blocked: 0, failed: 0, deferred: 0, skipped: 0 };
 
   await processDueDiscussionEvents(client, date, maxGuilds, hooks, guildId, summary);
   const settings = await listEnabledDiscussionSettings(localDate, maxGuilds, guildId);
@@ -867,7 +878,11 @@ async function processDailyDiscussionTick(
       now: date,
     });
     if (claimed.claimed) summary.claimed += 1;
-    if (!claimed.claimed) continue;
+    if (!claimed.claimed) {
+      // Another tick or run already holds or has finished today's event; say so instead of looking like nothing happened.
+      summary.skipped += 1;
+      continue;
+    }
     try {
       await publishDailyDiscussion(client, claimed.event, { now: date, leaseOwner: claimed.leaseOwner, ...hooks });
       summary.published += 1;
@@ -902,11 +917,12 @@ async function startDailyDiscussionScheduler(client, options = {}) {
     tick = processDailyDiscussionTick,
   } = options;
   let tickRunning = false;
+  // Every tick (the first one, boundary and watchdog runs) is its own background job run.
   const runTick = async () => {
     if (tickRunning) return;
     tickRunning = true;
     try {
-      await tick(client, { now: nowFn() });
+      await runWithBackgroundContext('daily-discussion.tick', () => tick(client, { now: nowFn() }));
     } finally {
       tickRunning = false;
     }

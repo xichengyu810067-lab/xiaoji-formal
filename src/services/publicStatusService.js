@@ -28,15 +28,15 @@ const PUBLIC_FEATURES = Object.freeze([
   publicFeature('poll', { commands: ['poll'] }),
   publicFeature('weather', { commands: ['weather'] }),
   publicFeature('economy', { commands: ['coins', 'daily', 'economy'], critical: true, requiresDatabase: true }),
-  publicFeature('word_chain', { commands: ['word-chain'], healthKey: 'word_chain' }),
-  publicFeature('number_chain', { commands: ['number-chain'], healthKey: 'number_chain' }),
-  publicFeature('daily_riddle', { commands: ['daily-riddle'], healthKey: 'daily_riddle' }),
+  publicFeature('word_chain', { commands: ['board', 'word-chain'], healthKey: 'word_chain' }),
+  publicFeature('number_chain', { commands: ['board', 'number-chain'], healthKey: 'number_chain' }),
+  publicFeature('daily_riddle', { commands: ['board', 'daily-riddle'], healthKey: 'daily_riddle' }),
   publicFeature('daily_discussion', { commands: ['daily-discussion'], healthKey: 'daily_discussion' }),
   publicFeature('chat_style', { commands: ['chat-style'], healthKey: 'conversation_style' }),
   publicFeature('romance', { commands: ['romance'], healthKey: 'romance' }),
-  publicFeature('tetris', { commands: ['games'], healthKey: 'tetris', requiresHealth: true }),
-  publicFeature('number_match', { commands: ['games'], healthKey: 'number_match', requiresHealth: true }),
-  publicFeature('sudoku', { commands: ['games'], healthKey: 'sudoku', requiresHealth: true }),
+  publicFeature('tetris', { commands: ['board'], healthKey: 'tetris', requiresHealth: true }),
+  publicFeature('number_match', { commands: ['board'], healthKey: 'number_match', requiresHealth: true }),
+  publicFeature('sudoku', { commands: ['board'], healthKey: 'sudoku', requiresHealth: true }),
   publicFeature('official_website', { healthKey: 'public_website', staticReady: true }),
   publicFeature('status_website', { healthKey: 'status_website', staticReady: true }),
 ]);
@@ -82,6 +82,19 @@ function getProbeStatus(feature, client, ready) {
   return areCommandsLoaded(client, feature.commands) ? 'normal' : 'broken';
 }
 
+// What the protected side effects say about a feature's card (welcome, word_chain,
+// number_chain; see src/systems/safety/ledgerAlerts.js): maintenance under the kill switch
+// or a test-control policy, broken when its ledger failed closed or stopped while
+// running, or null. It can only lower a card that would otherwise be normal.
+function protectedEffectStatus(client, key) {
+  try {
+    const status = client?.protectedEffects?.featureStatus?.(key);
+    return status === 'broken' || status === 'maintenance' ? status : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildFeatureStatuses(
   client,
   healthRows,
@@ -100,6 +113,8 @@ function buildFeatureStatuses(
     } else if (override?.status === 'normal' && probeStatus === 'normal') {
       status = 'normal';
     }
+
+    if (status === 'normal') status = protectedEffectStatus(client, feature.key) || status;
 
     if (!healthAvailable && feature.healthKey && status === 'normal') {
       status = 'maintenance';
