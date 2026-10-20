@@ -5,7 +5,7 @@
     // Left empty until 1.2.0 is deployed; the factory then renders the pending-notice text.
     // On deployment day: set the real date here, run `node scripts/render-policy-publication.js`,
     // and set XIAOJI_ARCHIVE_POLICY_VERSION=1.2.0 in the host .env (otherwise archive capture stays off).
-    effectiveDate: '2026 年 10 月 21 日',
+    effectiveDate: null,
   });
 
   if (typeof module === 'object' && module.exports) {
