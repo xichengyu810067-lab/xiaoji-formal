@@ -1,4 +1,4 @@
-const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
+const { readCoinSchemaVersionWithApi, withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
 const {
   CoinServiceError,
   ensureGuildSettings,
@@ -12,11 +12,42 @@ const {
   debitChipsForCasinoWithApi,
 } = require('./chipService');
 const {
-  TASK_STATUS,
   WAITER_JOB_NAMES,
   createWorkPenaltyWithApi,
 } = require('./workService');
 const { getActiveCycleForUser, verifySavedSnapshot } = require('../systems/work/jobCycle');
+// Work-table SQL lives in the work system; these ports run inside this
+// file's own coin transactions.
+const {
+  cancelPendingLegacyWaiterTasksWithApi,
+  cancelWaiterTaskForCancelledOrderWithApi,
+  closeOverdueMakerTaskWithApi,
+  closeWaiterTaskForTipRefundWithApi,
+  findUnsnapshottedLegacyJobWithApi,
+  getActiveJobCycleWithApi,
+  getActiveJobRowWithApi,
+  getAssignedJobRowWithApi,
+  getFrozenLegacyTaskSnapshotWithApi,
+  getGuildJobRowWithApi,
+  getLeastBusyLegacyMakerJobWithApi,
+  getLegacyJobSnapshotWithApi,
+  insertCompletedLegacyVenueWorkTaskWithApi,
+  insertPendingVenueWorkTaskWithApi,
+  listActiveWaiterJobRowsWithApi,
+  listGlobalMakerCyclesByLoadWithApi,
+  listLegacyJobSnapshotsWithApi,
+  listPendingVenueWorkTasksWithApi,
+  markVenueWorkTaskCanceledWithApi,
+  markVenueWorkTaskCompletedWithApi,
+  recordLegacyVenueTaskCompletionWithApi,
+} = require('../systems/work/venueTasks');
+// Venue item counts for the least-busy maker ranking of venueTasks, and the orders the 24-hour
+// sweep closes.
+const { countMakerItemsInWindowWithApi, listVenueSweepDueOrdersWithApi } = require('../systems/casino/venueOrders');
+
+function isGlobalWorkSchema(api) {
+  return readCoinSchemaVersionWithApi(api) >= 22;
+}
 
 const VenueItemType = Object.freeze({
   MEAL: 'meal',
@@ -125,10 +156,6 @@ function normalizeSteps(steps) {
   }
 
   return parts.join('\n');
-}
-
-function serializeArray(value) {
-  return JSON.stringify(Array.isArray(value) ? value : []);
 }
 
 function getTaiwanDayRange(date = new Date()) {
@@ -260,16 +287,9 @@ function getMenuItem(api, guildId, itemId, itemType = null) {
   return mapMenuItem(row);
 }
 
-function getActiveJobRow(api, guildId, userId, jobName) {
-  return api.get(
-    'SELECT * FROM coin_jobs WHERE guild_id = ? AND user_id = ? AND job_name = ? AND status = ? ORDER BY id DESC LIMIT 1',
-    [guildId, userId, jobName, 'active']
-  );
-}
-
 function ensureMakerJob(api, guildId, userId, itemType) {
   const jobName = VENUE_JOB_BY_TYPE[itemType];
-  const row = getActiveJobRow(api, guildId, userId, jobName);
+  const row = getActiveJobRowWithApi(api, guildId, userId, jobName);
 
   if (!row) {
     throw new CoinServiceError(
@@ -281,19 +301,9 @@ function ensureMakerJob(api, guildId, userId, itemType) {
   return row;
 }
 
+// Pre-v22 only: the user's active guild-scoped waiter job, the uniform waiter first.
 function ensureWaiterJob(api, guildId, userId) {
-  const placeholders = WAITER_JOB_NAMES.map(() => '?').join(', ');
-  const rows = api.all(
-    `SELECT *
-     FROM coin_jobs
-     WHERE guild_id = ?
-       AND user_id = ?
-       AND job_name IN (${placeholders})
-       AND status = 'active'
-     ORDER BY CASE job_name WHEN '制服服務生' THEN 0 ELSE 1 END, id DESC
-     LIMIT 1`,
-    [guildId, userId, ...WAITER_JOB_NAMES]
-  );
+  const [row] = listActiveWaiterJobRowsWithApi(api, guildId, userId, WAITER_JOB_NAMES);
 
   if (!row) {
     throw new CoinServiceError('VENUE_WAITER_JOB_REQUIRED', '點餐必須指定目前在職的服務生或制服服務生。');
@@ -302,19 +312,11 @@ function ensureWaiterJob(api, guildId, userId) {
   return row;
 }
 
-function isGlobalWorkSchema(api) {
-  return Number(api.get("SELECT value FROM coin_metadata WHERE key = 'schema_version'")?.value) >= 22;
-}
-
 function ensureVenueCutoverReady(api) {
-  if (api.get(
-    `SELECT 1 AS found FROM coin_jobs j
-     LEFT JOIN coin_work_legacy_snapshots s ON s.job_id = j.id
-     WHERE j.status IN ('active', 'failed') AND j.is_paid = 0 AND s.job_id IS NULL LIMIT 1`
-  )) {
+  if (findUnsnapshottedLegacyJobWithApi(api)) {
     throw new CoinServiceError('VENUE_LEGACY_SNAPSHOT_REQUIRED', '舊工作快照尚未完成，暫停新增場館任務。');
   }
-  for (const snapshot of api.all('SELECT * FROM coin_work_legacy_snapshots ORDER BY job_id')) {
+  for (const snapshot of listLegacyJobSnapshotsWithApi(api)) {
     verifySavedSnapshot(api, snapshot);
   }
 }
@@ -343,18 +345,16 @@ function getLeastBusyGlobalMaker(api, guildId, itemType, timestamp, membership) 
   }
   const visible = new Set(membership.verifiedUserIds);
   const range = getTaiwanDayRange(new Date(timestamp));
-  const cycles = api.all(
-    `SELECT c.*, COUNT(i.id) AS assigned_count
-     FROM coin_primary_jobs_global p
-     JOIN coin_primary_job_cycles c ON c.cycle_id = p.next_cycle_id AND c.user_id = p.user_id
-     LEFT JOIN casino_venue_order_items i ON i.guild_id = ? AND i.maker_user_id = p.user_id
-       AND i.item_type = ? AND i.maker_is_npc = 0 AND i.created_at >= ? AND i.created_at < ?
-     WHERE p.state = 'active' AND p.job_name = ? AND c.status = 'active'
-       AND c.starts_at <= ? AND c.ends_at > ?
-     GROUP BY c.cycle_id
-     ORDER BY assigned_count ASC, c.starts_at ASC, c.cycle_id ASC`,
-    [guildId, itemType, range.startIso, range.endIso, VENUE_JOB_BY_TYPE[itemType], timestamp, timestamp]
-  );
+  const cycles = listGlobalMakerCyclesByLoadWithApi(api, {
+    jobName: VENUE_JOB_BY_TYPE[itemType],
+    timestamp,
+    makerLoads: countMakerItemsInWindowWithApi(api, {
+      guildId,
+      itemType,
+      startIso: range.startIso,
+      endIso: range.endIso,
+    }),
+  });
   return cycles.find((cycle) => visible.has(cycle.user_id)) || null;
 }
 
@@ -372,69 +372,16 @@ function normalizeTipAmount(amount, waiterJobName) {
   return tipAmount;
 }
 
-function insertPendingVenueWorkTask(api, { guildId, userId, jobRow, taskType, description, createdAt, dueAt, channelId = null, messageId = null }) {
-  const globalCycleId = jobRow.cycle_id || null;
-  const globalSchema = isGlobalWorkSchema(api);
-  api.run(
-    `INSERT INTO coin_work_tasks
-      (
-        guild_id, user_id, job_id, ${globalSchema ? 'global_cycle_id,' : ''} job_name, task_type, status, description,
-        attachment_urls, expected_channel_id, expected_channel_name, message_id,
-        external_server_count, external_server_ids, created_at, due_at, updated_at
-      )
-     VALUES (?, ?, ?, ${globalSchema ? '?, ' : ''}?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-    [
-      guildId,
-      userId,
-      globalCycleId ? null : jobRow.id,
-      ...(globalSchema ? [globalCycleId] : []),
-      jobRow.job_name,
-      taskType,
-      TASK_STATUS.PENDING,
-      description,
-      serializeArray([]),
-      channelId,
-      jobRow.job_name,
-      messageId,
-      serializeArray([]),
-      createdAt,
-      dueAt,
-      createdAt,
-    ]
-  );
-  if (!globalCycleId) {
-    api.run('UPDATE coin_jobs SET today_task_count = today_task_count + 1, updated_at = ? WHERE id = ?', [createdAt, jobRow.id]);
-  }
-  return Number(api.get('SELECT last_insert_rowid() AS id').id);
-}
-
 function getPendingVenueWorkTask(api, { guildId, userId, jobId = null, globalCycleId = null, taskType, messageId }) {
   const globalSchema = isGlobalWorkSchema(api);
-  const rows = api.all(
-    `SELECT *
-     FROM coin_work_tasks
-     WHERE guild_id = ?
-       AND user_id = ?
-       AND job_id IS ?
-       ${globalSchema ? 'AND global_cycle_id IS ?' : ''}
-       AND task_type = ?
-       AND status = 'pending'
-       AND completed_at IS NULL
-       AND message_id = ?
-     ORDER BY created_at ASC, id ASC
-     LIMIT 2`,
-    [guildId, userId, jobId, ...(globalSchema ? [globalCycleId] : []), taskType, messageId]
-  );
+  const rows = listPendingVenueWorkTasksWithApi(api, { guildId, userId, jobId, globalCycleId, taskType, messageId, globalSchema });
   if (rows.length > 1) throw new CoinServiceError('VENUE_TASK_CONFLICT', '場館原始待辦不只一筆，暫停處理。');
   const row = rows[0] || null;
-  if (row && isGlobalWorkSchema(api) && jobId != null) {
-    const snapshot = api.get('SELECT * FROM coin_work_legacy_snapshots WHERE job_id = ?', [jobId]);
+  if (row && globalSchema && jobId != null) {
+    const snapshot = getLegacyJobSnapshotWithApi(api, jobId);
     if (!snapshot) throw new CoinServiceError('VENUE_LEGACY_SNAPSHOT_REQUIRED', '原場館待辦缺少舊工作快照。');
     verifySavedSnapshot(api, snapshot);
-    const frozen = api.get(
-      "SELECT snapshot_json FROM coin_work_legacy_snapshot_items WHERE job_id = ? AND item_kind = 'task' AND item_id = ?",
-      [jobId, row.id]
-    );
+    const frozen = getFrozenLegacyTaskSnapshotWithApi(api, jobId, row.id);
     if (!frozen || JSON.parse(frozen.snapshot_json).status !== 'pending') {
       throw new CoinServiceError('VENUE_LEGACY_TASK_NOT_FROZEN', '原場館待辦未列入切換快照。');
     }
@@ -449,38 +396,29 @@ function completePendingVenueWorkTask(api, { guildId, userId, jobId = null, glob
     return null;
   }
 
-  api.run(
-    `UPDATE coin_work_tasks
-     SET status = ?, description = ?, completed_at = ?, updated_at = ?
-     WHERE guild_id = ? AND id = ? AND status = 'pending' AND completed_at IS NULL`,
-    [TASK_STATUS.COMPLETED, description, completedAt, completedAt, guildId, row.id]
-  );
-  if (Number(api.get('SELECT changes() AS count').count) !== 1) {
+  if (markVenueWorkTaskCompletedWithApi(api, { guildId, taskId: row.id, description, completedAt }) !== 1) {
     throw new CoinServiceError('VENUE_TASK_CONFLICT', '場館待辦狀態已變更，暫停完成。');
   }
   if (jobId != null) {
-    api.run(
-      `UPDATE coin_jobs
-       SET last_contribution_at = ?,
-           today_completed_task_count = today_completed_task_count + 1,
-           updated_at = ?
-       WHERE id = ?`,
-      [completedAt, completedAt, jobId]
-    );
+    recordLegacyVenueTaskCompletionWithApi(api, { jobId, completedAt });
   }
 
   return Number(row.id);
 }
 
-function cancelPendingVenueWorkTask(api, assignment, timestamp) {
+// The operation that cancels the original task, as its refusal messages name it.
+const VENUE_TASK_CANCEL_ACTIONS = Object.freeze({
+  reassign: '改派',
+  cancel: '取消',
+});
+
+function cancelPendingVenueWorkTask(api, assignment, timestamp, action) {
+  const actionLabel = VENUE_TASK_CANCEL_ACTIONS[action];
+  if (!actionLabel) throw new TypeError(`cancelPendingVenueWorkTask requires a known action, got ${String(action)}.`);
   const row = getPendingVenueWorkTask(api, assignment);
-  if (!row) throw new CoinServiceError('VENUE_TASK_MISSING', '原場館待辦無法核對，暫停改派。');
-  api.run(
-    "UPDATE coin_work_tasks SET status = 'canceled', updated_at = ? WHERE id = ? AND status = 'pending' AND completed_at IS NULL",
-    [timestamp, row.id]
-  );
-  if (Number(api.get('SELECT changes() AS count').count) !== 1) {
-    throw new CoinServiceError('VENUE_TASK_CONFLICT', '原場館待辦狀態已變更，暫停改派。');
+  if (!row) throw new CoinServiceError('VENUE_TASK_MISSING', `原場館待辦無法核對，暫停${actionLabel}。`);
+  if (markVenueWorkTaskCanceledWithApi(api, { taskId: row.id, timestamp }) !== 1) {
+    throw new CoinServiceError('VENUE_TASK_CONFLICT', `原場館待辦狀態已變更，暫停${actionLabel}。`);
   }
 }
 
@@ -488,24 +426,16 @@ function getLeastBusyMaker(api, guildId, itemType, date = new Date()) {
   const jobName = VENUE_JOB_BY_TYPE[itemType];
   const range = getTaiwanDayRange(date);
 
-  return api.get(
-    `SELECT j.*, COUNT(i.id) AS assigned_count
-     FROM coin_jobs j
-     LEFT JOIN casino_venue_order_items i
-       ON i.guild_id = j.guild_id
-      AND i.maker_user_id = j.user_id
-      AND i.item_type = ?
-      AND i.maker_is_npc = 0
-      AND i.created_at >= ?
-      AND i.created_at < ?
-     WHERE j.guild_id = ?
-       AND j.job_name = ?
-       AND j.status = 'active'
-     GROUP BY j.id
-     ORDER BY assigned_count ASC, j.created_at ASC, j.id ASC
-     LIMIT 1`,
-    [itemType, range.startIso, range.endIso, guildId, jobName]
-  );
+  return getLeastBusyLegacyMakerJobWithApi(api, {
+    guildId,
+    jobName,
+    makerLoads: countMakerItemsInWindowWithApi(api, {
+      guildId,
+      itemType,
+      startIso: range.startIso,
+      endIso: range.endIso,
+    }),
+  });
 }
 
 function countRecentOrders(api, guildId, customerId, date = new Date()) {
@@ -557,40 +487,82 @@ function getOrderItems(api, guildId, orderId) {
     .map(mapOrderItem);
 }
 
-function refundOrderTipIfEscrowed(api, orderRow, { reason, timestamp = nowIso() } = {}) {
-  const order = mapOrder(orderRow);
-  if (order.tipStatus !== 'escrowed' || order.tipAmount <= 0) {
-    return null;
-  }
+// Chip-ledger reasons of the 24-hour refund, by the cause closeWaiterTaskForTipRefundWithApi
+// takes.
+const OVERDUE_TIP_REFUND_REASONS = Object.freeze({
+  waiter_overdue: (orderId) => `場館訂單 #${orderId} 服務生逾期未送達，退還小費。`,
+  maker_overdue: (orderId) => `場館訂單 #${orderId} 餐飲製作逾期由小吉接手，退還小費。`,
+});
 
-  const refund = creditChipsWithApi(api, order.guildId, order.customerId, order.tipAmount, {
+function hasEscrowedTip(order) {
+  return order.tipStatus === 'escrowed' && order.tipAmount > 0;
+}
+
+function changedOneRow(api) {
+  return Number(api.get('SELECT changes() AS count').count) === 1;
+}
+
+// Both refunds below first move the order out of 'escrowed' with a guarded update and credit
+// the customer only when that update changed the row, so one tip is refunded at most once even
+// when the caller holds an outdated order row.
+function creditTipRefund(api, order, { reason, timestamp }) {
+  return creditChipsWithApi(api, order.guildId, order.customerId, order.tipAmount, {
     entryType: ChipLedgerType.TIP_REFUND,
-    reason: reason || `場館訂單 #${order.id} 小費退還`,
+    reason,
     metadata: { orderId: order.id, waiterUserId: order.waiterUserId },
     timestamp,
   });
+}
+
+// The 24-hour sweep closes an unserved order: the system finishes it (served_by 'system'), the
+// escrowed tip goes back to the customer and the waiter task is closed with the cause, which is
+// 'maker_overdue' when NPC staff had to make an item, else 'waiter_overdue'.  Returns the
+// credit, or null when the tip is not escrowed.
+function refundOverdueOrderTip(api, orderRow, { cause, timestamp }) {
+  const order = mapOrder(orderRow);
+  if (!hasEscrowedTip(order)) return null;
+  const reason = OVERDUE_TIP_REFUND_REASONS[cause];
+  if (!reason) throw new TypeError(`refundOverdueOrderTip requires a known cause, got ${String(cause)}.`);
   api.run(
     `UPDATE casino_venue_orders
      SET tip_status = 'refunded', tip_refunded_at = ?, served_at = COALESCE(served_at, ?), served_by = COALESCE(served_by, 'system'), updated_at = ?
-     WHERE guild_id = ? AND id = ?`,
+     WHERE guild_id = ? AND id = ? AND tip_status = 'escrowed'`,
     [timestamp, timestamp, timestamp, order.guildId, order.id]
   );
-  api.run(
-    `UPDATE coin_work_tasks
-     SET status = ?, completed_at = ?, review_reason = ?, updated_at = ?
-     WHERE guild_id = ? AND message_id = ? AND status = ? AND completed_at IS NULL`,
-    [
-      TASK_STATUS.SYSTEM_COMPLETED,
-      timestamp,
-      '服務生逾期未送達，由小吉完成並退還小費。',
-      timestamp,
-      order.guildId,
-      `venue-order-${order.id}`,
-      TASK_STATUS.PENDING,
-    ]
-  );
-
+  if (!changedOneRow(api)) return null;
+  const refund = creditTipRefund(api, order, { reason: reason(order.id), timestamp });
+  closeWaiterTaskForTipRefundWithApi(api, { guildId: order.guildId, orderId: order.id, timestamp, cause });
   return refund;
+}
+
+// A cancelled order: nothing was served, so served_at and served_by stay empty; the escrowed tip
+// goes back to the customer and the waiter task is cancelled.  Returns the credit, or null when
+// the tip is not escrowed.
+function refundCancelledOrderTip(api, orderRow, { timestamp }) {
+  const order = mapOrder(orderRow);
+  if (!hasEscrowedTip(order)) return null;
+  api.run(
+    `UPDATE casino_venue_orders
+     SET tip_status = 'refunded', tip_refunded_at = ?, updated_at = ?
+     WHERE guild_id = ? AND id = ? AND tip_status = 'escrowed'`,
+    [timestamp, timestamp, order.guildId, order.id]
+  );
+  if (!changedOneRow(api)) return null;
+  const refund = creditTipRefund(api, order, { reason: `場館訂單 #${order.id} 已取消，退還小費。`, timestamp });
+  cancelWaiterTaskForCancelledOrderWithApi(api, { guildId: order.guildId, orderId: order.id, timestamp });
+  return refund;
+}
+
+// Whether NPC staff made an item of this order because its maker was 24 hours late.  Items that
+// NPC staff made when the order was placed (no maker available) have no maker_user_id.
+function hasItemTakenOverFromLateMaker(api, guildId, orderId) {
+  return Boolean(api.get(
+    `SELECT 1 AS found
+     FROM casino_venue_order_items
+     WHERE guild_id = ? AND order_id = ? AND maker_is_npc = 1 AND maker_user_id IS NOT NULL
+     LIMIT 1`,
+    [guildId, orderId]
+  ));
 }
 
 function payoutOrderTip(api, orderRow, { timestamp = nowIso() } = {}) {
@@ -628,6 +600,14 @@ function payoutOrderTip(api, orderRow, { timestamp = nowIso() } = {}) {
   return { payout, taskId };
 }
 
+// The job a venue:make admin log names: a guild-scoped job row by its id; a primary cycle row,
+// which has no id column, by jobId null and its cycle id.
+function makerJobAttribution(makerJobRow) {
+  return makerJobRow.cycle_id
+    ? { jobId: null, globalCycleId: makerJobRow.cycle_id }
+    : { jobId: makerJobRow.id };
+}
+
 function insertVenueWorkTask(api, item, makerJobRow, actualSteps, timestamp) {
   const taskType = item.itemType === VenueItemType.MEAL ? 'casino_venue_meal' : 'casino_venue_drink';
   const description = `${item.itemName} 製作完成\n${normalizeSteps(actualSteps)}`;
@@ -654,7 +634,7 @@ function insertVenueWorkTask(api, item, makerJobRow, actualSteps, timestamp) {
         orderItemId: item.id,
         itemType: item.itemType,
         itemName: item.itemName,
-        jobId: makerJobRow.id,
+        ...makerJobAttribution(makerJobRow),
         taskId: existingTaskId,
       },
       createdAt: timestamp,
@@ -666,40 +646,14 @@ function insertVenueWorkTask(api, item, makerJobRow, actualSteps, timestamp) {
     throw new CoinServiceError('VENUE_TASK_MISSING', '製作者原始待辦無法核對，暫停完成。');
   }
 
-  api.run(
-    `INSERT INTO coin_work_tasks
-      (
-        guild_id, user_id, job_id, job_name, task_type, status, description,
-        attachment_urls, expected_channel_id, expected_channel_name, message_id,
-        external_server_count, external_server_ids, created_at, due_at, completed_at, updated_at
-      )
-     VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, NULL, ?, NULL, 0, ?, ?, ?, ?, ?)`,
-    [
-      item.guildId,
-      item.makerUserId,
-      makerJobRow.id,
-      makerJobRow.job_name,
-      taskType,
-      description,
-      serializeArray([]),
-      makerJobRow.job_name,
-      serializeArray([]),
-      timestamp,
-      timestamp,
-      timestamp,
-      timestamp,
-    ]
-  );
-  api.run(
-    `UPDATE coin_jobs
-     SET last_contribution_at = ?,
-         today_task_count = today_task_count + 1,
-         today_completed_task_count = today_completed_task_count + 1,
-         updated_at = ?
-     WHERE id = ?`,
-    [timestamp, timestamp, makerJobRow.id]
-  );
-  const taskId = Number(api.get('SELECT last_insert_rowid() AS id').id);
+  const taskId = insertCompletedLegacyVenueWorkTaskWithApi(api, {
+    guildId: item.guildId,
+    makerUserId: item.makerUserId,
+    makerJobRow,
+    taskType,
+    description,
+    timestamp,
+  });
   insertAdminLog(api, {
     guildId: item.guildId,
     operatorId: item.makerUserId,
@@ -711,7 +665,7 @@ function insertVenueWorkTask(api, item, makerJobRow, actualSteps, timestamp) {
       orderItemId: item.id,
       itemType: item.itemType,
       itemName: item.itemName,
-      jobId: makerJobRow.id,
+      ...makerJobAttribution(makerJobRow),
       taskId,
     },
     createdAt: timestamp,
@@ -760,7 +714,7 @@ function insertOrderItem(api, orderId, menuItem, makerRow, { guildId, date, forc
   const itemId = Number(api.get('SELECT last_insert_rowid() AS id').id);
   if (!makerIsNpc && makerRow) {
     const taskType = menuItem.itemType === VenueItemType.MEAL ? 'casino_venue_meal' : 'casino_venue_drink';
-    insertPendingVenueWorkTask(api, {
+    insertPendingVenueWorkTaskWithApi(api, {
       guildId,
       userId: makerRow.user_id,
       jobRow: makerRow,
@@ -770,6 +724,7 @@ function insertOrderItem(api, orderId, menuItem, makerRow, { guildId, date, forc
       dueAt: new Date(new Date(timestamp).getTime() + REMINDER_TIMEOUT_MS).toISOString(),
       channelId,
       messageId: `venue-item-${itemId}`,
+      globalSchema,
     });
   }
   return mapOrderItem(api.get('SELECT * FROM casino_venue_order_items WHERE id = ?', [itemId]));
@@ -917,7 +872,7 @@ function createVenueOrder(
     const orderId = Number(api.get('SELECT last_insert_rowid() AS id').id);
     const items = [];
 
-    insertPendingVenueWorkTask(api, {
+    insertPendingVenueWorkTaskWithApi(api, {
       guildId,
       userId: waiterId,
       jobRow: waiterJob,
@@ -927,6 +882,7 @@ function createVenueOrder(
       dueAt: new Date(new Date(timestamp).getTime() + REMINDER_TIMEOUT_MS).toISOString(),
       channelId,
       messageId: `venue-order-${orderId}`,
+      globalSchema,
     });
 
     if (meal) {
@@ -995,11 +951,11 @@ function completeVenueOrderItem(guildId, userId, orderItemId, { steps, date = ne
 
     const makerJob = globalSchema
       ? item.globalCycleId
-        ? api.get('SELECT * FROM coin_primary_job_cycles WHERE cycle_id = ? AND user_id = ? AND job_name = ? AND status = ?',
-          [item.globalCycleId, userId, VENUE_JOB_BY_TYPE[item.itemType], 'active'])
+        ? getActiveJobCycleWithApi(api, { cycleId: item.globalCycleId, userId, jobName: VENUE_JOB_BY_TYPE[item.itemType] })
         : item.makerJobId
-          ? api.get('SELECT * FROM coin_jobs WHERE id = ? AND guild_id = ? AND user_id = ? AND job_name = ?',
-            [item.makerJobId, guildId, userId, VENUE_JOB_BY_TYPE[item.itemType]])
+          ? getAssignedJobRowWithApi(api, {
+            jobId: item.makerJobId, guildId, userId, jobName: VENUE_JOB_BY_TYPE[item.itemType],
+          })
           : null
       : ensureMakerJob(api, guildId, userId, item.itemType);
     if (!makerJob) throw new CoinServiceError('VENUE_MAKER_ASSIGNMENT_CONFLICT', '製作者原始工作歸屬無法核對。');
@@ -1061,11 +1017,9 @@ function serveVenueOrder(guildId, userId, orderId, { date = new Date() } = {}) {
 
     if (globalSchema) {
       const original = order.waiterGlobalCycleId
-        ? api.get('SELECT * FROM coin_primary_job_cycles WHERE cycle_id = ? AND user_id = ? AND job_name = ? AND status = ?',
-          [order.waiterGlobalCycleId, userId, order.waiterJobName, 'active'])
+        ? getActiveJobCycleWithApi(api, { cycleId: order.waiterGlobalCycleId, userId, jobName: order.waiterJobName })
         : order.waiterJobId
-          ? api.get('SELECT * FROM coin_jobs WHERE id = ? AND guild_id = ? AND user_id = ? AND job_name = ?',
-            [order.waiterJobId, guildId, userId, order.waiterJobName])
+          ? getAssignedJobRowWithApi(api, { jobId: order.waiterJobId, guildId, userId, jobName: order.waiterJobName })
           : null;
       if (!original || !WAITER_JOB_NAMES.includes(order.waiterJobName)) {
         throw new CoinServiceError('VENUE_WAITER_ASSIGNMENT_CONFLICT', '服務生原始工作歸屬無法核對。');
@@ -1129,7 +1083,7 @@ function reassignVenueOrderItem(guildId, orderItemId, newMakerId, { operatorId, 
         globalCycleId: item.globalCycleId,
         taskType: item.itemType === VenueItemType.MEAL ? 'casino_venue_meal' : 'casino_venue_drink',
         messageId: `venue-item-${item.id}`,
-      }, timestamp);
+      }, timestamp, 'reassign');
     }
     api.run(
       `UPDATE casino_venue_order_items
@@ -1139,7 +1093,7 @@ function reassignVenueOrderItem(guildId, orderItemId, newMakerId, { operatorId, 
         makerJob.job_name, timestamp, timestamp, guildId, item.id]
     );
     if (globalSchema) {
-      insertPendingVenueWorkTask(api, {
+      insertPendingVenueWorkTaskWithApi(api, {
         guildId, userId: newMakerId, jobRow: makerJob,
         taskType: item.itemType === VenueItemType.MEAL ? 'casino_venue_meal' : 'casino_venue_drink',
         description: `訂單 #${item.orderId}｜${item.itemName} 改派後待製作`,
@@ -1147,6 +1101,7 @@ function reassignVenueOrderItem(guildId, orderItemId, newMakerId, { operatorId, 
         dueAt: new Date(date.getTime() + REMINDER_TIMEOUT_MS).toISOString(),
         channelId: api.get('SELECT channel_id FROM casino_venue_orders WHERE guild_id = ? AND id = ?', [guildId, item.orderId])?.channel_id || null,
         messageId: `venue-item-${item.id}`,
+        globalSchema,
       });
     }
     insertAdminLog(api, {
@@ -1193,7 +1148,7 @@ function reassignVenueWaiter(guildId, orderId, newWaiterId, { operatorId, reason
         guildId, userId: order.waiterUserId, jobId: order.waiterJobId,
         globalCycleId: order.waiterGlobalCycleId,
         taskType: 'casino_venue_service', messageId: `venue-order-${id}`,
-      }, timestamp);
+      }, timestamp, 'reassign');
     }
     api.run(
       `UPDATE casino_venue_orders
@@ -1203,14 +1158,9 @@ function reassignVenueWaiter(guildId, orderId, newWaiterId, { operatorId, reason
         waiterJob.job_name, timestamp, timestamp, guildId, id]
     );
     if (!globalSchema) {
-      api.run(
-        `UPDATE coin_work_tasks
-         SET status = ?, updated_at = ?
-         WHERE guild_id = ? AND message_id = ? AND status = ? AND completed_at IS NULL`,
-        [TASK_STATUS.CANCELED, timestamp, guildId, `venue-order-${id}`, TASK_STATUS.PENDING]
-      );
+      cancelPendingLegacyWaiterTasksWithApi(api, { guildId, orderId: id, timestamp });
     }
-    insertPendingVenueWorkTask(api, {
+    insertPendingVenueWorkTaskWithApi(api, {
       guildId,
       userId: newWaiterId,
       jobRow: waiterJob,
@@ -1220,6 +1170,7 @@ function reassignVenueWaiter(guildId, orderId, newWaiterId, { operatorId, reason
       dueAt: new Date(new Date(timestamp).getTime() + REMINDER_TIMEOUT_MS).toISOString(),
       channelId: order.channelId,
       messageId: `venue-order-${id}`,
+      globalSchema,
     });
     insertAdminLog(api, {
       guildId,
@@ -1258,7 +1209,7 @@ function cancelVenueOrderItem(guildId, orderItemId, { operatorId, reason = '', d
         globalCycleId: item.globalCycleId,
         taskType: item.itemType === VenueItemType.MEAL ? 'casino_venue_meal' : 'casino_venue_drink',
         messageId: `venue-item-${item.id}`,
-      }, timestamp);
+      }, timestamp, 'cancel');
     }
     api.run(
       `UPDATE casino_venue_order_items
@@ -1269,7 +1220,7 @@ function cancelVenueOrderItem(guildId, orderItemId, { operatorId, reason = '', d
     const nextStatus = updateOrderStatus(api, item.orderId);
     if (nextStatus === VenueOrderStatus.CANCELLED) {
       const orderRow = api.get('SELECT * FROM casino_venue_orders WHERE guild_id = ? AND id = ?', [guildId, item.orderId]);
-      refundOrderTipIfEscrowed(api, orderRow, { reason: `場館訂單 #${item.orderId} 已取消，退還小費。`, timestamp });
+      refundCancelledOrderTip(api, orderRow, { timestamp });
     }
     insertAdminLog(api, {
       guildId,
@@ -1322,23 +1273,10 @@ function processExpiredVenueOrderItems({ date = new Date() } = {}) {
         [VenueOrderItemStatus.COMPLETED, item.standardSteps, serviceDate, timestamp, timestamp, item.id]
       );
       const makerJob = item.makerJobId
-        ? api.get('SELECT * FROM coin_jobs WHERE guild_id = ? AND id = ?', [item.guildId, item.makerJobId])
+        ? getGuildJobRowWithApi(api, { guildId: item.guildId, jobId: item.makerJobId })
         : null;
       if (makerJob && item.makerUserId) {
-        api.run(
-          `UPDATE coin_work_tasks
-           SET status = ?, completed_at = ?, review_reason = ?, updated_at = ?
-           WHERE guild_id = ? AND message_id = ? AND status = ? AND completed_at IS NULL`,
-          [
-            TASK_STATUS.SYSTEM_COMPLETED,
-            timestamp,
-            '餐飲製作逾期 24 小時未完成，由小吉場館人員接手。',
-            timestamp,
-            item.guildId,
-            `venue-item-${item.id}`,
-            TASK_STATUS.PENDING,
-          ]
-        );
+        closeOverdueMakerTaskWithApi(api, { guildId: item.guildId, itemId: item.id, timestamp });
         const penalty = createWorkPenaltyWithApi(api, {
           guildId: item.guildId,
           userId: item.makerUserId,
@@ -1364,23 +1302,16 @@ function processExpiredVenueOrderItems({ date = new Date() } = {}) {
       updateOrderStatus(api, item.orderId);
     }
 
-    const waiterRows = api.all(
-      `SELECT o.*
-       FROM casino_venue_orders o
-       WHERE o.tip_status = 'escrowed'
-         AND o.served_at IS NULL
-         AND o.created_at <= ?
-         AND NOT EXISTS (
-           SELECT 1 FROM casino_venue_order_items i
-           WHERE i.guild_id = o.guild_id
-             AND i.order_id = o.id
-             AND i.status = ?
-         )`,
-      [cutoff, VenueOrderItemStatus.PENDING]
-    );
+    // The orders this sweep closes share their condition with the primary-task expiry sweep, which
+    // leaves exactly these orders' waiter tasks to this sweep (see venueOrders.js).
+    const waiterRows = listVenueSweepDueOrdersWithApi(api, { cutoff });
     let waiterRefunded = 0;
     for (const orderRow of waiterRows) {
-      if (refundOrderTipIfEscrowed(api, orderRow, { reason: `場館訂單 #${orderRow.id} 服務生逾期未送達，退還小費。`, timestamp })) {
+      // The waiter is late only when every item was ready without NPC staff stepping in.  This
+      // sweep is the only one that closes these waiter tasks, so the cause does not depend on which
+      // sweep runs first.
+      const cause = hasItemTakenOverFromLateMaker(api, orderRow.guild_id, orderRow.id) ? 'maker_overdue' : 'waiter_overdue';
+      if (refundOverdueOrderTip(api, orderRow, { cause, timestamp })) {
         waiterRefunded++;
       }
     }
@@ -1411,4 +1342,7 @@ module.exports = {
   reassignVenueWaiter,
   serveVenueOrder,
   splitSteps,
+  // Test seams: the two tip refunds, so a test can hand them an outdated order row.
+  refundCancelledOrderTipForTests: refundCancelledOrderTip,
+  refundOverdueOrderTipForTests: refundOverdueOrderTip,
 };

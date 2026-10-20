@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { BoardCoreError, cloneJson } = require('../../../../games/contracts');
+const { BoardCoreError, cloneJson } = require('../core/contracts');
 
 const RESVG_VERSION = '2.6.2';
 // Font bytes remain at the original public asset path during this relocation.

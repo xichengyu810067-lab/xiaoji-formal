@@ -1,11 +1,18 @@
 const { validateDelivery } = require('../delivery/reminderDelivery');
+const { runWithBackgroundContext } = require('../../../platform/hostOperationContext');
+const { isEgressRefusal } = require('../../../platform/egressGuard');
+const { isEgressRateLimitError } = require('../../../platform/egressLimiter');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
 const MAX_REMINDER_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_ACTIVE_REMINDERS_PER_USER = 20;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const RETRY_DELAYS = [60_000, 300_000];
+// Delivered and failed reminders are kept this long, and one user keeps at most this many of them.
+const FINISHED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_FINISHED_REMINDERS_PER_USER = 50;
 
 function parseReminderDuration(input) {
   const match = String(input || '').trim().match(/^(\d+)([smhd])$/i);
@@ -33,6 +40,29 @@ function normalizeReminder(record, id) {
     deliveryChannelId: String(deliveryChannelId), userId: String(record.userId),
     remindAt: Number(record.remindAt), status, attemptCount: Number(record.attemptCount || 0),
   };
+}
+
+// Drops, in place, the delivered and failed reminders older than the retention time, then all but the
+// newest ones of each user. A reminder finished before its time was recorded is timed from now, so
+// it is never dropped on a guess.
+function pruneFinishedReminders(records, now) {
+  const cutoff = now - FINISHED_RETENTION_MS;
+  const byUser = new Map();
+  for (const [id, record] of Object.entries(records)) {
+    if (record.status !== 'delivered' && record.status !== 'failed') continue;
+    const field = record.status === 'delivered' ? 'deliveredAt' : 'failedAt';
+    if (!Number.isFinite(record[field])) record[field] = now;
+    if (record[field] < cutoff) {
+      delete records[id];
+      continue;
+    }
+    if (!byUser.has(record.userId)) byUser.set(record.userId, []);
+    byUser.get(record.userId).push({ id, at: record[field] });
+  }
+  for (const finished of byUser.values()) {
+    finished.sort((a, b) => b.at - a.at);
+    for (const { id } of finished.slice(MAX_FINISHED_REMINDERS_PER_USER)) delete records[id];
+  }
 }
 
 function createReminderSystem({ filePath, logger = { warn() {} }, timers = new Map() }) {
@@ -188,7 +218,20 @@ function createReminderSystem({ filePath, logger = { warn() {} }, timers = new M
   }
 
   function saveReminder(reminder) {
-    mutateRecords((records) => { records[reminder.id] = normalizeReminder(reminder, reminder.id); });
+    return mutateRecords((records) => {
+      const normalized = normalizeReminder(reminder, reminder.id);
+      const existing = records[normalized.id];
+      if (!existing && normalized.status === 'pending') {
+        const active = Object.values(records).filter((record) => record.userId === normalized.userId &&
+          (record.status === 'pending' || record.status === 'sending')).length;
+        if (active >= MAX_ACTIVE_REMINDERS_PER_USER) {
+          throw Object.assign(new Error('每位使用者最多只能有 20 則進行中的提醒。'), { code: 'REMINDER_ACTIVE_LIMIT' });
+        }
+      }
+      records[normalized.id] = normalized;
+      pruneFinishedReminders(records, Date.now());
+      return normalized;
+    });
   }
 
   function removeReminder(reminderId) {
@@ -225,7 +268,9 @@ function createReminderSystem({ filePath, logger = { warn() {} }, timers = new M
       const next = current ? update(current) : null;
       if (!next) return false;
       records[id] = normalizeReminder(next, id);
-      return records[id];
+      const result = records[id];
+      pruneFinishedReminders(records, Date.now());
+      return result;
     }) || null;
   }
 
@@ -234,11 +279,13 @@ function createReminderSystem({ filePath, logger = { warn() {} }, timers = new M
     if (reminder.status !== 'pending') return;
     const dueAt = reminder.nextAttemptAt || reminder.remindAt;
     const delay = Math.max(0, dueAt - now);
-    const timer = setTimeout(() => {
+    // Every firing runs as the background job `reminder.deliver`, never in the context of
+    // the command or restore that scheduled it.
+    const timer = setTimeout(() => runWithBackgroundContext('reminder.deliver', () => {
       timers.delete(reminder.id);
       if (delay > MAX_TIMEOUT_MS) scheduleReminder(client, reminder);
       else void sendReminder(client, reminder.id).catch((error) => logger.warn('Reminder ' + reminder.id + ': ' + error));
-    }, Math.min(delay, MAX_TIMEOUT_MS));
+    }), Math.min(delay, MAX_TIMEOUT_MS));
     timer.unref?.();
     timers.set(reminder.id, timer);
   }
@@ -260,31 +307,84 @@ function createReminderSystem({ filePath, logger = { warn() {} }, timers = new M
         };
       });
       if (failed?.status === 'pending') scheduleReminder(client, failed);
-      logger.warn('Reminder ' + reminderId + ' preflight failed: ' + error);
+      if (!String(error?.code || '').startsWith('TEST_')) logger.warn('Reminder ' + reminderId + ' preflight failed: ' + error);
       return failed;
     }
-    // Mark the uncertain boundary before Discord I/O so restart cannot resend it.
-    const sending = updateReminder(reminderId, (current) => current.status === 'pending'
-      ? { ...current, status: 'sending', attemptCount: current.attemptCount + 1, nextAttemptAt: null }
-      : null);
-    if (!sending) return null;
+    // Reserve before changing the durable reminder to `sending`.  If the egress window is
+    // full, keep it pending and let the normal scheduler try again; it must never become a
+    // failed reminder merely because output is being throttled.
+    const payload = {
+      content: '<@' + reminder.userId + '> 提醒時間到了：' + reminder.message,
+      allowedMentions: { users: [reminder.userId], roles: [] },
+    };
+    const limiter = client?.egressLimiter;
+    let reservation = null;
+    if (limiter) {
+      const reserved = limiter.reserve({ method: 'POST', fullRoute: `/channels/${reminder.deliveryChannelId}/messages`, body: payload });
+      if (!reserved.allowed) {
+        const deferred = updateReminder(reminderId, (current) => current.status === 'pending'
+          ? { ...current, nextAttemptAt: Date.now() + reserved.retryAfterMs } : null);
+        if (deferred?.status === 'pending') scheduleReminder(client, deferred);
+        return deferred;
+      }
+      reservation = reserved.reservation;
+    }
+    // From here on the reservation is released on every path, including a failed write below.
     try {
-      await channel.send({
-        content: '<@' + sending.userId + '> 提醒時間到了：' + sending.message,
-        allowedMentions: { users: [sending.userId], roles: [] },
-      });
-      return updateReminder(reminderId, (current) => current.status === 'sending'
-        ? { ...current, status: 'delivered', deliveredAt: Date.now() } : null);
-    } catch (error) {
-      logger.warn('Reminder ' + reminderId + ' send outcome unknown: ' + error);
-      return updateReminder(reminderId, (current) => current.status === 'sending'
-        ? { ...current, status: 'failed', failureReason: '投遞結果未確認，請人工核對。' } : null);
+      // Mark the uncertain boundary before Discord I/O so restart cannot resend it.
+      const sending = updateReminder(reminderId, (current) => current.status === 'pending'
+        ? { ...current, status: 'sending', attemptCount: current.attemptCount + 1, nextAttemptAt: null }
+        : null);
+      if (!sending) return null;
+      try {
+        const send = () => channel.send(payload);
+        if (reservation) await limiter.runWithReservation(reservation, send);
+        else await send();
+        return updateReminder(reminderId, (current) => current.status === 'sending'
+          ? { ...current, status: 'delivered', deliveredAt: Date.now() } : null);
+      } catch (error) {
+        if (isEgressRateLimitError(error) || isEgressRefusal(error)) {
+          // Stopped inside this process, before any request left it: known not to be sent.
+          if (!String(error?.code || '').startsWith('TEST_')) logger.warn('Reminder ' + reminderId + ' was not sent: ' + error);
+          return returnUnsentReminder(client, reminderId, error);
+        }
+        if (!String(error?.code || '').startsWith('TEST_')) logger.warn('Reminder ' + reminderId + ' send outcome unknown: ' + error);
+        return updateReminder(reminderId, (current) => current.status === 'sending'
+          ? { ...current, status: 'failed', failureReason: '投遞結果未確認，請人工核對。' } : null);
+      }
+    } finally {
+      limiter?.cancel(reservation);
     }
   }
 
+  // A reminder marked `sending` whose request was stopped before it left the process goes back
+  // to `pending`. A rate limit is only a delay, so it never counts as an attempt; a refusal
+  // counts like any failed attempt, so a request that is always refused ends as failed.
+  function returnUnsentReminder(client, reminderId, error) {
+    const returned = updateReminder(reminderId, (current) => {
+      if (current.status !== 'sending') return null;
+      if (isEgressRateLimitError(error)) {
+        const advised = Number(error.retryAfterMs);
+        return {
+          ...current, status: 'pending', attemptCount: Math.max(0, current.attemptCount - 1),
+          nextAttemptAt: Date.now() + (advised > 0 ? advised : RETRY_DELAYS[0]),
+        };
+      }
+      const exhausted = current.attemptCount >= 3;
+      return {
+        ...current, status: exhausted ? 'failed' : 'pending',
+        nextAttemptAt: exhausted ? null : Date.now() + RETRY_DELAYS[current.attemptCount - 1],
+        failureReason: '提醒被輸出政策拒絕，未送出。',
+      };
+    });
+    if (returned?.status === 'pending') scheduleReminder(client, returned);
+    return returned;
+  }
+
   function addReminder(client, reminder) {
-    saveReminder(reminder);
-    scheduleReminder(client, reminder);
+    const saved = saveReminder(reminder);
+    scheduleReminder(client, saved);
+    return saved;
   }
 
   async function restoreActiveReminders(client) {
@@ -300,7 +400,7 @@ function createReminderSystem({ filePath, logger = { warn() {} }, timers = new M
   }
 
   return {
-    MAX_REMINDER_MS, addReminder, createReminder, deleteUserReminder, initializeReminderStore,
+    MAX_ACTIVE_REMINDERS_PER_USER, MAX_REMINDER_MS, addReminder, createReminder, deleteUserReminder, initializeReminderStore,
     listUserReminders, migrateLegacyReminderStore, parseReminderDuration, readReminders, removeReminder,
     restoreActiveReminders, scheduleReminder, sendReminder, writeReminders,
   };

@@ -7,7 +7,7 @@ const { deriveServerGameReward } = require('./gameRewardPolicy');
 
 const rootPath = path.resolve(__dirname, '..', '..');
 const defaultRelativeDbPath = path.join('data', 'xiaoji.sqlite');
-const schemaVersion = 22;
+const schemaVersion = 24;
 
 const globalEconomyV22Sql = `
 CREATE TABLE IF NOT EXISTS coin_bank_accounts_global (
@@ -335,6 +335,47 @@ CREATE INDEX IF NOT EXISTS idx_casino_ledger_global_user
   ON casino_ledger (user_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_chip_ledger_global_user
   ON chip_ledger (user_id, created_at DESC, id DESC);
+`;
+
+const gameLaunchReceiptsV23Sql = `
+CREATE TABLE IF NOT EXISTS game_launch_receipts (
+  interaction_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT,
+  payload_hash TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`;
+
+const coinAdminAddConfirmationsV24Sql = `
+CREATE TABLE IF NOT EXISTS coin_admin_add_confirmations (
+  operation_id TEXT PRIMARY KEY,
+  mode TEXT NOT NULL CHECK (mode IN ('user', 'role')),
+  actor_user_id TEXT NOT NULL,
+  guild_id TEXT NOT NULL,
+  target_user_id TEXT,
+  role_id TEXT,
+  campaign_id TEXT,
+  preview_token TEXT,
+  amount INTEGER NOT NULL CHECK (amount > 0 AND amount <= 9000000000),
+  reason TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  payload_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'partial', 'completed', 'cancelled')),
+  result_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (
+    (mode = 'user' AND target_user_id IS NOT NULL AND role_id IS NULL
+      AND campaign_id IS NULL AND preview_token IS NULL)
+    OR
+    (mode = 'role' AND target_user_id IS NULL AND role_id IS NOT NULL
+      AND campaign_id IS NOT NULL AND preview_token IS NOT NULL)
+  )
+);
 `;
 
 const schemaSql = `
@@ -2100,32 +2141,6 @@ function exportDatabase(db) {
   }
 }
 
-function writeDatabaseFile(dbPath, db) {
-  const directory = path.dirname(dbPath);
-  const tempPath = `${dbPath}.tmp`;
-  const exported = exportDatabase(db);
-
-  try {
-    fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(tempPath, exported);
-    fs.renameSync(tempPath, dbPath);
-  } catch (error) {
-    try {
-      if (fs.existsSync(tempPath)) {
-        fs.unlinkSync(tempPath);
-      }
-    } catch (cleanupError) {
-      logger.error(`吉幣資料庫暫存檔清理失敗：${tempPath}`, cleanupError);
-    }
-    throw error;
-  }
-}
-
-function writeNewDatabaseFile(dbPath, db) {
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  fs.writeFileSync(dbPath, exportDatabase(db), { flag: 'wx' });
-}
-
 function verifyIntegrity(db) {
   const result = getRow(db, 'PRAGMA integrity_check');
   const value = result?.integrity_check;
@@ -3059,6 +3074,82 @@ function buildApi(db) {
   };
 }
 
+// The schema version is storage metadata. Callers that need it while using an existing
+// database callback receive it through this read port instead of naming coin_metadata.
+function readCoinSchemaVersionWithApi(api) {
+  return Number(api.get("SELECT value FROM coin_metadata WHERE key = 'schema_version'")?.value);
+}
+
+const activeTransactionApis = new WeakMap();
+// Reminder-source proof deliberately supports the read-only database wrapper. Keep
+// that narrower than the transaction-only capability used by penalty sources.
+const activeWorkReminderReadApis = new WeakMap();
+
+function readActiveWorkPenaltySource(api, { guildId, penaltyId, createdAt } = {}) {
+  const context = activeTransactionApis.get(api);
+  if (!context?.active || !state?.db || context.db !== state.db) return null;
+  const row = getRow(
+    context.db,
+    `SELECT id, guild_id, user_id, job_name, penalty_amount, status, reason, announced_at,
+            appeal_deadline_at, created_at
+       FROM coin_work_penalties
+      WHERE guild_id = ? AND id = ? AND created_at = ?`,
+    [String(guildId || ''), Number(penaltyId), String(createdAt || '')]
+  );
+  return row ? Object.freeze({ ...row }) : null;
+}
+
+// Work reminder timestamps must name their offset with a trailing Z or ±HH:MM. A value
+// without one would be read in the host's local time zone, so it never matches (fail
+// closed). The reminder accounting module normalizes with this same function.
+const ZONED_WORK_REMINDER_TIMESTAMP = /(?:Z|[+-]\d{2}:\d{2})$/u;
+
+function normalizeWorkReminderTimestamp(value) {
+  if (typeof value !== 'string' || !ZONED_WORK_REMINDER_TIMESTAMP.test(value)) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function readActiveWorkReminderSource(api, {
+  guildId, userId, taskId, createdAt, scope, parentId,
+} = {}) {
+  const context = activeWorkReminderReadApis.get(api) || activeTransactionApis.get(api);
+  if (!context?.active || !state?.db || context.db !== state.db) return null;
+  const task = getRow(
+    context.db,
+    `SELECT id, guild_id, user_id, job_id, global_cycle_id, task_type, status, description,
+            due_at, completed_at, reminder_count, last_reminder_at, created_at, updated_at
+       FROM coin_work_tasks
+      WHERE id = ? AND guild_id = ? AND user_id = ?`,
+    [Number(taskId), String(guildId || ''), String(userId || '')]
+  );
+  // Reminder sources carry a normalized created_at, while older rows may store another
+  // timestamp spelling. Compare the same normalized instant; a real mismatch fails closed.
+  const expectedCreatedAt = normalizeWorkReminderTimestamp(createdAt);
+  if (!task || !expectedCreatedAt || normalizeWorkReminderTimestamp(task.created_at) !== expectedCreatedAt) return null;
+  if (scope === 'legacy') {
+    if (!Number.isSafeInteger(Number(parentId)) || Number(task.job_id) !== Number(parentId) || task.global_cycle_id) return null;
+    const parent = getRow(
+      context.db,
+      `SELECT id, guild_id, user_id, status, last_contribution_at, last_reminder_at, updated_at
+         FROM coin_jobs WHERE id = ? AND guild_id = ? AND user_id = ?`,
+      [Number(parentId), String(guildId || ''), String(userId || '')]
+    );
+    return parent ? Object.freeze({ scope, task: Object.freeze({ ...task }), parent: Object.freeze({ ...parent }) }) : null;
+  }
+  if (scope === 'global') {
+    if (!String(parentId || '') || task.global_cycle_id !== String(parentId) || task.job_id != null) return null;
+    const parent = getRow(
+      context.db,
+      `SELECT cycle_id, user_id, source_guild_id, status, starts_at, ends_at, updated_at
+         FROM coin_primary_job_cycles WHERE cycle_id = ? AND user_id = ?`,
+      [String(parentId), String(userId || '')]
+    );
+    return parent ? Object.freeze({ scope, task: Object.freeze({ ...task }), parent: Object.freeze({ ...parent }) }) : null;
+  }
+  return null;
+}
+
 function reconcileWordChainActiveSessions(db) {
   const timestamp = new Date().toISOString();
   const retainedByGuild = new Map();
@@ -3579,7 +3670,7 @@ async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
       db = new SQL.Database();
     }
   } catch (error) {
-    logger.error(`吉幣資料庫讀取失敗，已停止載入：${dbPath}`, error);
+    logger.error(`吉幣資料庫讀取失敗，已停止載入：${process.env.XIAOJI_RUNTIME_MODE === 'test-control' ? '[test-data]' : dbPath}`, error);
     throw new CoinDatabaseError('吉幣資料庫讀取失敗，不會自動重建空資料庫。', error);
   }
 
@@ -3589,7 +3680,7 @@ async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
     verifyForeignKeyIntegrity(db);
   } catch (error) {
     db.close();
-    logger.error(`吉幣資料庫完整性檢查失敗，已停止載入：${dbPath}`, error);
+    logger.error(`吉幣資料庫完整性檢查失敗，已停止載入：${process.env.XIAOJI_RUNTIME_MODE === 'test-control' ? '[test-data]' : dbPath}`, error);
     throw new CoinDatabaseError('吉幣資料庫完整性檢查失敗，不會覆寫原始檔案。', error);
   }
 
@@ -3608,6 +3699,11 @@ async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
       verifyGlobalWalletV20Schema(db);
       if (preBootstrapVersion >= 21) verifyGlobalEconomyV21Schema(db);
       if (preBootstrapVersion >= 22) verifyGlobalEconomyV22Schema(db);
+      if (preBootstrapVersion >= 24) requireColumns(db, 'coin_admin_add_confirmations', [
+        'operation_id', 'mode', 'actor_user_id', 'guild_id', 'target_user_id', 'role_id',
+        'campaign_id', 'preview_token', 'amount', 'reason', 'expires_at', 'payload_hash',
+        'status', 'result_json', 'created_at', 'updated_at',
+      ]);
     } catch (error) {
       db.close();
       throw new CoinDatabaseError('吉幣資料庫 v20 結構不完整、不支援，或 v21/v22 全域經濟契約損壞；已停止啟動避免建立第二份權威資料。', error);
@@ -3919,6 +4015,42 @@ async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
     }
   }
 
+  if (currentVersion < 23) {
+    logger.info('Migrating coin database schema to version 23 (idempotent game launches).');
+    try {
+      db.exec(gameLaunchReceiptsV23Sql);
+      requireColumns(db, 'game_launch_receipts', [
+        'interaction_id', 'kind', 'user_id', 'guild_id', 'channel_id', 'payload_hash', 'result_json', 'created_at',
+      ]);
+    } catch (error) {
+      db.close();
+      logger.error('Coin database schema v23 migration failed', error);
+      throw new CoinDatabaseError('遊戲開局防重結構升級失敗，原始資料不會被覆寫。', error);
+    }
+  }
+
+  if (currentVersion < 24) {
+    logger.info('Migrating coin database schema to version 24 (persistent coin admin confirmations).');
+    let transactionStarted = false;
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      transactionStarted = true;
+      db.exec(coinAdminAddConfirmationsV24Sql);
+      requireColumns(db, 'coin_admin_add_confirmations', [
+        'operation_id', 'mode', 'actor_user_id', 'guild_id', 'target_user_id', 'role_id',
+        'campaign_id', 'preview_token', 'amount', 'reason', 'expires_at', 'payload_hash',
+        'status', 'result_json', 'created_at', 'updated_at',
+      ]);
+      db.exec('COMMIT');
+      transactionStarted = false;
+    } catch (error) {
+      if (transactionStarted) db.exec('ROLLBACK');
+      db.close();
+      logger.error('Coin database schema v24 migration failed', error);
+      throw new CoinDatabaseError('加幣確認狀態結構升級失敗，原始資料不會被覆寫。', error);
+    }
+  }
+
   try {
     db.exec(globalWalletRevisionIndexSql);
   } catch (error) {
@@ -3965,10 +4097,18 @@ async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
     verifyGlobalWalletV20Schema(db);
     verifyGlobalEconomyV21Schema(db);
     verifyGlobalEconomyV22Schema(db);
+    requireColumns(db, 'game_launch_receipts', [
+      'interaction_id', 'kind', 'user_id', 'guild_id', 'channel_id', 'payload_hash', 'result_json', 'created_at',
+    ]);
+    requireColumns(db, 'coin_admin_add_confirmations', [
+      'operation_id', 'mode', 'actor_user_id', 'guild_id', 'target_user_id', 'role_id',
+      'campaign_id', 'preview_token', 'amount', 'reason', 'expires_at', 'payload_hash',
+      'status', 'result_json', 'created_at', 'updated_at',
+    ]);
   } catch (error) {
     db.close();
     logger.error('Coin database global economy schema verification failed', error);
-    throw new CoinDatabaseError('吉幣資料庫 v20 結構驗證失敗，或 v21/v22 全域經濟契約損壞；已停止啟動避免破壞資料。', error);
+    throw new CoinDatabaseError('吉幣資料庫 v20–v24 結構驗證失敗；已停止啟動避免破壞資料。', error);
   }
 
   const afterTables = getTableNames(db);
@@ -3988,8 +4128,25 @@ async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
     throw new CoinDatabaseError('吉幣來源資料庫在載入期間已變更，已停止寫回避免覆蓋。');
   }
   verifyForeignKeyIntegrity(db);
-  if (existed) writeDatabaseFile(dbPath, db);
-  else writeNewDatabaseFile(dbPath, db);
+  // The opened (perhaps migrated) or brand-new database is written durably like every other
+  // write (see "Durable persistence"). A failure before the file was replaced or created
+  // stops the start and leaves the source file as it was; a directory sync failing after
+  // that counts as written.
+  const durability = resolveDurability();
+  let exported;
+  try {
+    exported = exportDatabase(db);
+    if (existed) {
+      durability.filesystem.mkdirSync(path.dirname(dbPath), { recursive: true });
+      await replaceDatabaseFile(dbPath, exported, durability);
+    } else {
+      createDatabaseFileDurably(dbPath, exported, durability);
+    }
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+  const persistedBytes = syncDirectoryAfterWrite(dbPath, durability, 'open') ? exported : null;
 
   const info = {
     path: dbPath,
@@ -4004,9 +4161,10 @@ async function createOrOpenDatabase({ allowNewDatabase = false } = {}) {
     db,
     info,
     lastSavedAt: now,
+    persistedBytes,
   };
 
-  logger.info(`吉幣資料庫路徑：${dbPath}`);
+  logger.info(`吉幣資料庫路徑：${process.env.XIAOJI_RUNTIME_MODE === 'test-control' ? '[test-data]' : dbPath}`);
   logger.info(`吉幣資料庫已存在：${existed ? '是' : '否'}`);
   logger.info(`吉幣資料庫新建：${!existed ? '是' : '否'}`);
   logger.info(`吉幣資料表建立：${createdTables.length ? createdTables.join(', ') : '沒有缺少的資料表'}`);
@@ -4045,21 +4203,143 @@ async function initializeNewCoinDatabase({ expectedPath = getCoinDatabasePath() 
   return initializationPromise;
 }
 
-async function withCoinDatabase(work, { persist = false } = {}) {
+// ---------------------------------------------------------------------------
+// Durable persistence (every coin database write since v1.1.2)
+// ---------------------------------------------------------------------------
+// The whole database lives in memory (sql.js), and every persisted write replaces the file
+// with a full export: the export is written to <db>.tmp in the same directory, fsynced and
+// closed, then renamed over the database file (an atomic replace; a Windows scanner's
+// EPERM/EBUSY/EACCES on the rename is retried), and finally the directory is fsynced so the
+// rename itself survives a power loss (POSIX; Windows cannot open a directory, so the
+// renamed file is flushed instead, as a best effort). A crash or power loss while the file
+// is replaced therefore leaves either the previous complete file or the new one, never a
+// partial file. Only the very first file (initialization) is created in place, because its
+// exclusive create ('wx') is what keeps it from ever overwriting an existing database: a
+// crash during that can leave an incomplete new file, which the next start refuses, before
+// anything was stored in it.
+//
+// The file is rewritten only when memory differs from it. state.persistedBytes holds the
+// export of the last write that completed, directory sync included. It is cleared before a
+// write starts and set again only when that write completes, so after any failure the next
+// transaction writes, whether or not it changed anything itself. Comparing the
+// exported bytes rather than a change counter covers every kind of change: changes made
+// outside a transaction (ensureGuildSettings through withCoinDatabase), schema changes,
+// PRAGMAs, and every sql.js write path (exec, run, prepare and step). An unchanged database
+// exports identical bytes.
+//
+// After the rename the file already holds the write, so a directory fsync that then fails
+// cannot be undone by restoring memory: the write counts as committed, a fixed code is
+// logged and escalated, and persistedBytes stays empty so the next write syncs again. The
+// safety ledger registrations keep their own rule (see commitCoinMetadataDurably).
+
+const COIN_DATABASE_ESCALATION_PURPOSE = 'coin-database';
+const DIRECTORY_SYNC_FAILED = 'COIN_DB_DIRECTORY_SYNC_FAILED';
+const DIRECTORY_SYNC_UNSUPPORTED = 'COIN_DB_DIRECTORY_SYNC_UNSUPPORTED';
+// Answers meaning "this file system cannot sync a directory" rather than a failed sync: some
+// network, FUSE and container file systems answer fsync on a directory with EINVAL or
+// ENOTSUP/EOPNOTSUPP, and a platform without directory handles answers the open with EISDIR.
+// Like SQLite, which treats its own directory sync as best effort, the write is then kept as
+// it is and one warning is logged per process.
+const DIRECTORY_SYNC_UNSUPPORTED_CODES = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'EISDIR']);
+const coinDatabaseEscalations = new Map();
+const loggedDurabilityWarnings = new Set();
+let durabilityForTests = null;
+
+function defaultDurabilitySleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Per-call options (the safety registration test hooks) first, then the test runner's
+// replacement for every write, then the real file system.
+function resolveDurability(options = {}) {
+  const replaced = durabilityForTests || {};
+  return {
+    filesystem: options.filesystem ?? replaced.filesystem ?? fs,
+    platform: options.platform ?? replaced.platform ?? process.platform,
+    sleep: options.sleep ?? replaced.sleep ?? defaultDurabilitySleep,
+  };
+}
+
+// Test hook: replaces the file system, platform and sleep of every coin database write until
+// it is called with null or resetCoinDatabaseForTests() runs. Refused outside the Node test
+// runner.
+function setCoinDatabaseDurabilityForTests(options) {
+  if (!(typeof process.env.NODE_TEST_CONTEXT === 'string' && process.env.NODE_TEST_CONTEXT.length > 0)) {
+    throw new CoinDatabaseError('僅測試可替換吉幣資料庫的檔案系統。');
+  }
+  durabilityForTests = options ? Object.freeze({ ...options }) : null;
+}
+
+function durabilityErrorCode(error) {
+  return String(error?.code || 'UNKNOWN').toUpperCase().replace(/[^A-Z0-9_]/gu, '').slice(0, 32) || 'UNKNOWN';
+}
+
+function warnOnce(line) {
+  if (loggedDurabilityWarnings.has(line)) return;
+  loggedDurabilityWarnings.add(line);
+  logger.warn(line);
+}
+
+// A directory fsync that failed after the rename: logged with a fixed code (never a path)
+// and recorded as an escalation in the shape of src/systems/safety/ledgerEscalation.js, so
+// the shutdown can report it like the ledgers' own (getLedgerEscalations).
+function reportDirectorySyncFailure(stage, error) {
+  warnOnce(`[COIN_DB] code=${DIRECTORY_SYNC_FAILED} stage=${stage} errno=${durabilityErrorCode(error)}`);
+  if (coinDatabaseEscalations.has(stage)) return;
+  coinDatabaseEscalations.set(stage, Object.freeze({
+    purposeId: COIN_DATABASE_ESCALATION_PURPOSE, code: DIRECTORY_SYNC_FAILED, stage, reason: null,
+  }));
+  logger.error(`[COIN_DB] code=COIN_DB_ESCALATION cause=${DIRECTORY_SYNC_FAILED} stage=${stage}`);
+}
+
+function getLedgerEscalations() {
+  return Object.freeze([...coinDatabaseEscalations.values()]);
+}
+
+// Syncs the directory after the database file was replaced or created. Returns false when
+// that failed: the write still stands (the file holds it), but it is not confirmed durable.
+function syncDirectoryAfterWrite(dbPath, durability, stage) {
+  try {
+    syncDatabaseDirectory(dbPath, durability);
+    return true;
+  } catch (error) {
+    reportDirectorySyncFailure(stage, error);
+    return false;
+  }
+}
+
+// Writes memory to the database file unless the file already holds exactly these bytes, and
+// returns whether it wrote. Throws only when the file was not replaced (a failure up to and
+// including the rename), with the database file untouched.
+async function persistCoinDatabase(stage) {
+  const current = state;
+  const exported = exportDatabase(current.db);
+  if (current.persistedBytes && exported.equals(current.persistedBytes)) return false;
+  current.persistedBytes = null;
+  const durability = resolveDurability();
+  durability.filesystem.mkdirSync(path.dirname(current.info.path), { recursive: true });
+  await replaceDatabaseFile(current.info.path, exported, durability);
+  if (syncDirectoryAfterWrite(current.info.path, durability, stage)) current.persistedBytes = exported;
+  return true;
+}
+
+async function withCoinDatabase(work) {
   const runOperation = async () => {
     await initializeCoinDatabase();
-
+    const api = buildApi(state.db);
+    // Source proofs are read-only facts. Mark this short-lived API as active for the
+    // source readers without opening a write transaction or persisting the database.
+    const readContext = { active: true, db: state.db };
+    activeWorkReminderReadApis.set(api, readContext);
     try {
-      const result = await work(buildApi(state.db));
-
-      if (persist) {
-        writeDatabaseFile(state.info.path, state.db);
-        state.lastSavedAt = new Date().toISOString();
-      }
+      const result = await work(api);
 
       return result;
     } catch (error) {
       throw error;
+    } finally {
+      readContext.active = false;
+      activeWorkReminderReadApis.delete(api);
     }
   };
 
@@ -4071,19 +4351,28 @@ async function withCoinDatabase(work, { persist = false } = {}) {
 async function withCoinTransaction(work) {
   return withCoinDatabase(async (api) => {
     let transactionStarted = false;
+    let transactionContext = null;
     const snapshot = exportDatabase(state.db);
 
     try {
       api.run('BEGIN IMMEDIATE');
       transactionStarted = true;
-      const result = await work(api);
+      transactionContext = { active: true, db: state.db };
+      activeTransactionApis.set(api, transactionContext);
+      let result;
+      try {
+        result = await work(api);
+      } finally {
+        transactionContext.active = false;
+        activeTransactionApis.delete(api);
+      }
       api.run('COMMIT');
       transactionStarted = false;
 
       try {
-        writeDatabaseFile(state.info.path, state.db);
-        state.lastSavedAt = new Date().toISOString();
+        if (await persistCoinDatabase('runtime')) state.lastSavedAt = new Date().toISOString();
       } catch (writeError) {
+        // The file was not replaced: memory returns to its state before the transaction.
         const Database = state.db.constructor;
         state.db.close();
         state.db = new Database(snapshot);
@@ -4094,6 +4383,8 @@ async function withCoinTransaction(work) {
 
       return result;
     } catch (error) {
+      if (transactionContext) transactionContext.active = false;
+      activeTransactionApis.delete(api);
       if (transactionStarted) {
         try {
           api.run('ROLLBACK');
@@ -4105,6 +4396,389 @@ async function withCoinTransaction(work) {
       throw error;
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Safety ledger registrations: coin_metadata keys "safety_ledger:<purposeId>"
+// ---------------------------------------------------------------------------
+// The coin database records which side-effect ledger each protected purpose uses (see
+// src/systems/safety/ledgerBootstrap.js, which owns the JSON value format; this module
+// only stores the strings). The registration lives in a different restore domain than
+// the ledger files, so a ledger restored or replaced together with its witnesses can
+// still be caught. Every write is compare-and-set against the value the caller last read,
+// and durable: the temporary file is fsynced before the rename and the directory after it
+// (Windows cannot flush a directory, so the renamed file is flushed instead, as a best
+// effort). If the write fails, the in-memory database returns to its state before the
+// write and the caller gets SAFETY_REGISTRATION_WRITE_FAILED. When it failed before the
+// rename, the file is untouched. When the rename already succeeded and only the directory
+// flush failed, the file already holds the new values while memory holds the old ones;
+// the file is then at most one registration write ahead of memory, the next coin
+// database write (of any kind) writes memory back, and every registration change
+// (creating, active, lastSeen, quarantine flag, released flag) is safe to find either way
+// at the next start: a registration may lag the ledger or be resumed from creating. Every
+// other coin database write is durable as well (see "Durable persistence") but counts a
+// failed directory flush as committed instead. Either way the failed write leaves
+// persistedBytes empty, so the next transaction writes memory back even when it
+// changes nothing itself. A file system that cannot sync a directory at all (EINVAL and the
+// like) is treated as a best effort, as on Windows, for both kinds of write.
+
+const SAFETY_LEDGER_KEY_PREFIX = 'safety_ledger:';
+const SAFETY_LEDGER_PURPOSE_PATTERN = /^[A-Za-z0-9:._/-]{1,64}$/u;
+const SAFETY_LEDGER_VALUE_MAX_BYTES = 4_096;
+const SAFETY_LEDGER_MAX_UPDATES = 16;
+const DATABASE_RENAME_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+function safetyRegistrationError(code, message, cause) {
+  const error = new CoinDatabaseError(message, cause);
+  error.code = code;
+  return error;
+}
+
+function readSafetyRegistrationRows(db) {
+  return getRows(
+    db,
+    'SELECT key, value, updated_at FROM coin_metadata WHERE substr(key, 1, ?) = ? ORDER BY key',
+    [SAFETY_LEDGER_KEY_PREFIX.length, SAFETY_LEDGER_KEY_PREFIX]
+  );
+}
+
+function safetyRegistrationMap(rows) {
+  const registrations = {};
+  for (const row of rows) {
+    registrations[String(row.key).slice(SAFETY_LEDGER_KEY_PREFIX.length)] = Object.freeze({
+      value: String(row.value),
+      updatedAt: String(row.updated_at),
+    });
+  }
+  return Object.freeze(registrations);
+}
+
+// { [purposeId]: { value, updatedAt } } for every safety_ledger:* key, read from the open
+// coin database in operation order with every other coin database call.
+async function readSafetyLedgerRegistrations() {
+  return withCoinDatabase((api) => safetyRegistrationMap(readSafetyRegistrationRows(api.db)));
+}
+
+function normalizeSafetyRegistrationUpdates(updates) {
+  if (!Array.isArray(updates) || updates.length < 1 || updates.length > SAFETY_LEDGER_MAX_UPDATES) {
+    throw safetyRegistrationError('SAFETY_REGISTRATION_INVALID', '安全帳本登記更新內容無效。');
+  }
+  const seen = new Set();
+  return updates.map((update) => {
+    const purposeId = typeof update?.purposeId === 'string' ? update.purposeId : '';
+    const value = update?.value;
+    const expectedValue = update?.expectedValue === undefined || update?.expectedValue === null
+      ? null : update.expectedValue;
+    if (!SAFETY_LEDGER_PURPOSE_PATTERN.test(purposeId) || seen.has(purposeId) || typeof value !== 'string' ||
+        !value || Buffer.byteLength(value) > SAFETY_LEDGER_VALUE_MAX_BYTES ||
+        (expectedValue !== null && typeof expectedValue !== 'string')) {
+      throw safetyRegistrationError('SAFETY_REGISTRATION_INVALID', '安全帳本登記更新內容無效。');
+    }
+    seen.add(purposeId);
+    return Object.freeze({ key: `${SAFETY_LEDGER_KEY_PREFIX}${purposeId}`, value, expectedValue });
+  });
+}
+
+// Test hooks: a fake file system and platform are accepted only inside the Node test runner.
+function safetyRegistrationTestOptions(options) {
+  const custom = options?.filesystem !== undefined || options?.platform !== undefined;
+  if (!custom) return {};
+  if (!(typeof process.env.NODE_TEST_CONTEXT === 'string' && process.env.NODE_TEST_CONTEXT.length > 0)) {
+    throw safetyRegistrationError('SAFETY_REGISTRATION_INVALID', '僅測試可替換安全帳本登記的檔案系統。');
+  }
+  return { filesystem: options.filesystem, platform: options.platform };
+}
+
+// Writes coin_metadata entries ({ key, value }) in one transaction, then the database file
+// durably (writeDatabaseFileDurably). If either step fails, memory is back to its state
+// before the write and failure(stage, error) is thrown, stage 'transaction' or 'durable'
+// (see above for a durable failure after the rename, which leaves the file ahead of
+// memory). Returns the updated_at the entries were given.
+async function commitCoinMetadataDurably(api, entries, durability, failure) {
+  const snapshot = exportDatabase(state.db);
+  const updatedAt = new Date().toISOString();
+  api.run('BEGIN IMMEDIATE');
+  try {
+    for (const entry of entries) {
+      api.run(
+        `INSERT INTO coin_metadata (key, value, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        [entry.key, entry.value, updatedAt]
+      );
+    }
+    api.run('COMMIT');
+  } catch (error) {
+    try {
+      api.run('ROLLBACK');
+    } catch (rollbackError) {
+      logger.error('安全帳本登記 rollback 失敗。', rollbackError);
+    }
+    throw failure('transaction', error);
+  }
+  // Not known to match memory until the write below completes (see "Durable persistence").
+  state.persistedBytes = null;
+  try {
+    state.persistedBytes = await writeDatabaseFileDurably(state.info.path, state.db, durability);
+    state.lastSavedAt = new Date().toISOString();
+  } catch (error) {
+    const Database = state.db.constructor;
+    state.db.close();
+    state.db = new Database(snapshot);
+    enableForeignKeys(state.db);
+    verifyForeignKeyIntegrity(state.db);
+    throw failure('durable', error);
+  }
+  return updatedAt;
+}
+
+// Writes every update in one transaction, or nothing. Each update names the value its
+// caller last read (expectedValue; null when the key was absent); if any key differs now,
+// SAFETY_REGISTRATION_CONFLICT is thrown and nothing changes. A failed durable write
+// throws SAFETY_REGISTRATION_WRITE_FAILED after the in-memory database is restored (see
+// above for a failure after the rename, which leaves the file ahead of memory).
+async function writeSafetyLedgerRegistrations(updates, options = {}) {
+  const normalized = normalizeSafetyRegistrationUpdates(updates);
+  const durability = safetyRegistrationTestOptions(options);
+  return withCoinDatabase(async (api) => {
+    const current = new Map(readSafetyRegistrationRows(api.db).map((row) => [String(row.key), String(row.value)]));
+    for (const update of normalized) {
+      if ((current.get(update.key) ?? null) !== update.expectedValue) {
+        throw safetyRegistrationError('SAFETY_REGISTRATION_CONFLICT', '安全帳本登記在讀取後已變更，未寫入任何內容。');
+      }
+    }
+    const updatedAt = await commitCoinMetadataDurably(api, normalized, durability, (stage, error) => (
+      safetyRegistrationError('SAFETY_REGISTRATION_WRITE_FAILED', stage === 'transaction'
+        ? '安全帳本登記寫入失敗。' : '安全帳本登記無法耐久寫入，記憶體已復原。', error)));
+    return Object.freeze({ written: normalized.length, updatedAt });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Safety alert stamps: coin_metadata keys "safety_alert:<name>"
+// ---------------------------------------------------------------------------
+// When a notice that bypasses every ledger (the Owner emergency DM of
+// src/systems/safety/ledgerAlerts.js, which owns the value format) was last sent. The
+// coin database always exists before the bot starts, so the stamp survives a ledger
+// directory that is itself the problem. Writes are compare-and-set and durable, exactly
+// like the registrations above; a failed write throws SAFETY_ALERT_WRITE_FAILED with
+// memory restored, and the caller then sends nothing.
+
+const SAFETY_ALERT_KEY_PREFIX = 'safety_alert:';
+const SAFETY_ALERT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
+const SAFETY_ALERT_VALUE_MAX_BYTES = 1_024;
+
+function safetyAlertKey(name) {
+  if (typeof name !== 'string' || !SAFETY_ALERT_NAME_PATTERN.test(name)) {
+    throw safetyRegistrationError('SAFETY_ALERT_INVALID', '安全提示戳記名稱無效。');
+  }
+  return `${SAFETY_ALERT_KEY_PREFIX}${name}`;
+}
+
+// { value, updatedAt } of one stamp, or null when it was never written.
+async function readSafetyAlertStamp(name) {
+  const key = safetyAlertKey(name);
+  return withCoinDatabase((api) => {
+    const row = getRow(api.db, 'SELECT value, updated_at FROM coin_metadata WHERE key = ?', [key]);
+    return row ? Object.freeze({ value: String(row.value), updatedAt: String(row.updated_at) }) : null;
+  });
+}
+
+// Replaces one stamp if it still holds expectedValue (null: absent); otherwise
+// SAFETY_ALERT_CONFLICT is thrown and nothing changes.
+async function writeSafetyAlertStamp(name, { value, expectedValue = null } = {}, options = {}) {
+  const key = safetyAlertKey(name);
+  if (typeof value !== 'string' || !value || Buffer.byteLength(value) > SAFETY_ALERT_VALUE_MAX_BYTES ||
+      (expectedValue !== null && typeof expectedValue !== 'string')) {
+    throw safetyRegistrationError('SAFETY_ALERT_INVALID', '安全提示戳記內容無效。');
+  }
+  const durability = safetyRegistrationTestOptions(options);
+  return withCoinDatabase(async (api) => {
+    const row = getRow(api.db, 'SELECT value FROM coin_metadata WHERE key = ?', [key]);
+    if ((row ? String(row.value) : null) !== expectedValue) {
+      throw safetyRegistrationError('SAFETY_ALERT_CONFLICT', '安全提示戳記在讀取後已變更，未寫入任何內容。');
+    }
+    const updatedAt = await commitCoinMetadataDurably(api, [{ key, value }], durability, (stage, error) => (
+      safetyRegistrationError('SAFETY_ALERT_WRITE_FAILED', stage === 'transaction'
+        ? '安全提示戳記寫入失敗。' : '安全提示戳記無法耐久寫入，記憶體已復原。', error)));
+    return Object.freeze({ written: 1, updatedAt });
+  });
+}
+
+async function renameDatabaseFileWithRetry(filesystem, from, to, platform, sleep) {
+  let delay = 25;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      filesystem.renameSync(from, to);
+      return;
+    } catch (error) {
+      if (platform !== 'win32' || !DATABASE_RENAME_RETRY_CODES.has(error?.code) || attempt >= 8) throw error;
+      await sleep(delay);
+      delay = Math.min(delay * 2, 1_000);
+    }
+  }
+}
+
+// The durable file steps (see "Durable persistence"). replaceDatabaseFile writes the bytes
+// to <db>.tmp in the same directory (a temporary file left by an earlier crash is simply
+// truncated), fsyncs and closes it, and renames it over the database file, retrying a
+// Windows scanner's EPERM/EBUSY/EACCES on the rename. Any failure removes the temporary file
+// and leaves the database file untouched. Every descriptor is closed at most once: a close
+// that fails is never repeated, since the number may already belong to another file.
+async function replaceDatabaseFile(dbPath, bytes, { filesystem, platform, sleep }) {
+  const tempPath = `${dbPath}.tmp`;
+  let descriptor;
+  try {
+    descriptor = filesystem.openSync(tempPath, 'w');
+    let offset = 0;
+    while (offset < bytes.length) {
+      offset += filesystem.writeSync(descriptor, bytes, offset, bytes.length - offset);
+    }
+    filesystem.fsyncSync(descriptor);
+    const written = descriptor;
+    descriptor = undefined;
+    filesystem.closeSync(written);
+    await renameDatabaseFileWithRetry(filesystem, tempPath, dbPath, platform, sleep);
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { filesystem.closeSync(descriptor); } catch {}
+    }
+    try {
+      if (filesystem.existsSync(tempPath)) filesystem.unlinkSync(tempPath);
+    } catch (cleanupError) {
+      logger.error(`吉幣資料庫暫存檔清理失敗：${process.env.XIAOJI_RUNTIME_MODE === 'test-control' ? '[test-data]' : tempPath}`, cleanupError);
+    }
+    throw error;
+  }
+}
+
+// A new database file (initialization) is created in place and exclusively ('wx': never
+// over an existing file), written, fsynced and closed. A failure removes the file it created.
+function createDatabaseFileDurably(dbPath, bytes, { filesystem }) {
+  filesystem.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const descriptor = filesystem.openSync(dbPath, 'wx');
+  let closed = false;
+  try {
+    let offset = 0;
+    while (offset < bytes.length) {
+      offset += filesystem.writeSync(descriptor, bytes, offset, bytes.length - offset);
+    }
+    filesystem.fsyncSync(descriptor);
+    closed = true;
+    filesystem.closeSync(descriptor);
+  } catch (error) {
+    if (!closed) {
+      try { filesystem.closeSync(descriptor); } catch {}
+    }
+    try {
+      filesystem.unlinkSync(dbPath);
+    } catch (cleanupError) {
+      logger.error(`吉幣資料庫新檔清理失敗：${process.env.XIAOJI_RUNTIME_MODE === 'test-control' ? '[test-data]' : dbPath}`, cleanupError);
+    }
+    throw error;
+  }
+}
+
+// One POSIX directory sync: open the directory read-only (O_RDONLY), fsync it, and close it
+// exactly once. Returns the first error (opening or syncing first, else closing), or null.
+// Nothing is written.
+function syncDirectoryOnce(directory, filesystem) {
+  let descriptor;
+  let failure = null;
+  try {
+    descriptor = filesystem.openSync(directory, 'r');
+    filesystem.fsyncSync(descriptor);
+  } catch (error) {
+    failure = error;
+  }
+  if (descriptor !== undefined) {
+    try {
+      filesystem.closeSync(descriptor);
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  return failure;
+}
+
+// Makes the rename (or the creation) itself durable: on POSIX the directory is synced once
+// (syncDirectoryOnce), and a failure throws; a close that fails counts as a failed sync. Windows
+// cannot open a directory, so the database file is flushed instead, as a best effort (NTFS
+// journals the rename itself). A file system that cannot sync a directory at all is treated
+// the same way, with one warning (DIRECTORY_SYNC_UNSUPPORTED_CODES).
+function syncDatabaseDirectory(dbPath, { filesystem, platform }) {
+  if (platform === 'win32') {
+    let fileDescriptor;
+    try {
+      fileDescriptor = filesystem.openSync(dbPath, 'r+');
+      filesystem.fsyncSync(fileDescriptor);
+    } catch {
+      // Best effort: NTFS journals the rename itself.
+    } finally {
+      if (fileDescriptor !== undefined) {
+        try { filesystem.closeSync(fileDescriptor); } catch {}
+      }
+    }
+    return;
+  }
+  const failure = syncDirectoryOnce(path.dirname(dbPath), filesystem);
+  if (!failure) return;
+  if (!DIRECTORY_SYNC_UNSUPPORTED_CODES.has(failure?.code)) throw failure;
+  warnOnce(`[COIN_DB] code=${DIRECTORY_SYNC_UNSUPPORTED} errno=${durabilityErrorCode(failure)}`);
+}
+
+// Read-only check for the status of scripts/safety-ledger.js: whether a folder's file system
+// syncs a directory the way the coin database's writes need it, judged exactly as a write
+// would judge it. 'ok', 'unsupported' (a file system that cannot sync a directory; the write
+// would go on with one warning), 'failed' (the write would escalate), or 'not-applicable'
+// (Windows, which has no directory sync). The folder is opened, fsynced and closed; nothing
+// is written. errno is a fixed code, never a path.
+function probeDirectorySync(directory, { filesystem = fs, platform = process.platform } = {}) {
+  if (platform === 'win32') return Object.freeze({ result: 'not-applicable', errno: null });
+  const failure = syncDirectoryOnce(directory, filesystem);
+  if (!failure) return Object.freeze({ result: 'ok', errno: null });
+  return Object.freeze({
+    result: DIRECTORY_SYNC_UNSUPPORTED_CODES.has(failure?.code) ? 'unsupported' : 'failed',
+    errno: durabilityErrorCode(failure),
+  });
+}
+
+// The whole durable write of a database object, failing as a whole, also after the rename:
+// the safety registrations use it this way (see commitCoinMetadataDurably). Returns the
+// bytes it wrote. Exported for tests of the write order.
+async function writeDatabaseFileDurably(dbPath, db, options = {}) {
+  const durability = resolveDurability(options);
+  const exported = exportDatabase(db);
+  await replaceDatabaseFile(dbPath, exported, durability);
+  syncDatabaseDirectory(dbPath, durability);
+  return exported;
+}
+
+// Read-only, for scripts/safety-ledger.js: loads a copy of the coin database file into
+// memory and returns its safety ledger registrations. Nothing is ever written back, and
+// the running bot's database (if any) is not involved.
+async function inspectSafetyRegistrationsFromFile(dbPath) {
+  if (!path.isAbsolute(String(dbPath || ''))) throw new CoinDatabaseError('吉幣資料庫路徑必須是絕對路徑。');
+  const absolutePath = path.resolve(dbPath);
+  const SQL = await getSqlModule();
+  const bytes = fs.readFileSync(absolutePath);
+  if (bytes.length < 100 || bytes.subarray(0, 16).toString('binary') !== 'SQLite format 3\0') {
+    throw new CoinDatabaseError('吉幣資料庫檔案不是 SQLite 資料庫。');
+  }
+  let db;
+  try {
+    db = new SQL.Database(bytes);
+    const hasMetadata = getTableNames(db).has('coin_metadata');
+    const versionRow = hasMetadata ? getRow(db, "SELECT value FROM coin_metadata WHERE key = 'schema_version'") : null;
+    return Object.freeze({
+      path: absolutePath,
+      sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+      schemaVersion: versionRow ? Number(versionRow.value) : null,
+      registrations: hasMetadata ? safetyRegistrationMap(readSafetyRegistrationRows(db)) : Object.freeze({}),
+    });
+  } finally {
+    if (db) db.close();
+  }
 }
 
 async function getCoinDatabaseInfo() {
@@ -4150,16 +4824,34 @@ function resetCoinDatabaseForTests({ allowCreateOnNextOpen = false } = {}) {
   initializationPromise = null;
   operationQueue = Promise.resolve();
   allowCreateOnNextOpenForTests = allowCreateOnNextOpen === true;
+  durabilityForTests = null;
+  coinDatabaseEscalations.clear();
+  loggedDurabilityWarnings.clear();
 }
 
 module.exports = {
   CoinDatabaseError,
+  SAFETY_ALERT_KEY_PREFIX,
+  SAFETY_LEDGER_KEY_PREFIX,
   dryRunGlobalEconomyV22,
   getCoinDatabaseInfo,
   getCoinDatabasePath,
+  getLedgerEscalations,
   initializeCoinDatabase,
   initializeNewCoinDatabase,
+  inspectSafetyRegistrationsFromFile,
+  normalizeWorkReminderTimestamp,
+  probeDirectorySync,
+  readCoinSchemaVersionWithApi,
+  readActiveWorkReminderSource,
+  readActiveWorkPenaltySource,
+  readSafetyAlertStamp,
+  readSafetyLedgerRegistrations,
   resetCoinDatabaseForTests,
+  setCoinDatabaseDurabilityForTests,
   withCoinDatabase,
   withCoinTransaction,
+  writeDatabaseFileDurably,
+  writeSafetyAlertStamp,
+  writeSafetyLedgerRegistrations,
 };

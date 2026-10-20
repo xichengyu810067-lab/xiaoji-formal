@@ -1,0 +1,656 @@
+{
+  "format": "xiaoji-venue-work-golden/v1",
+  "flow": "primary-reassign-cancel",
+  "tables": {
+    "casino_venue_menu": {
+      "key": ["id"],
+      "columns": ["id","guild_id","item_type","name","steps","created_by","created_at","updated_at","deleted","deleted_by","deleted_at","delete_reason"]
+    },
+    "casino_venue_orders": {
+      "key": ["id"],
+      "columns": ["id","guild_id","customer_id","channel_id","waiter_user_id","waiter_job_id","waiter_job_name","waiter_assigned_at","waiter_due_at","tip_amount","tip_status","tip_paid_at","tip_refunded_at","served_at","served_by","status","created_at","updated_at","waiter_global_cycle_id"]
+    },
+    "casino_venue_order_items": {
+      "key": ["id"],
+      "columns": ["id","guild_id","order_id","item_type","menu_item_id","item_name","standard_steps","maker_user_id","maker_job_id","maker_job_name","maker_is_npc","status","actual_steps","service_date","bonus_amount","bonus_paid","completion_message_id","created_at","assigned_at","completed_at","updated_at","cancelled_at","cancelled_by","cancel_reason","global_cycle_id"]
+    },
+    "coin_jobs": {
+      "key": ["id"],
+      "columns": ["id","guild_id","user_id","job_name","job_role_id","daily_salary","work_days","total_salary","status","is_paid","start_at","pay_at","actual_paid_at","last_contribution_at","last_reminder_at","today_task_count","today_completed_task_count","no_work_available_today","payroll_status","created_at","updated_at"]
+    },
+    "coin_work_tasks": {
+      "key": ["id"],
+      "columns": ["id","guild_id","user_id","job_id","job_name","task_type","status","description","attachment_urls","expected_channel_id","expected_channel_name","message_id","external_server_count","external_server_ids","reviewed_by","review_reason","is_paid","paid_at","paid_amount","created_at","due_at","completed_at","updated_at","deleted_at","reminder_count","last_reminder_at","global_cycle_id"]
+    },
+    "coin_work_penalties": {
+      "key": ["id"],
+      "columns": ["id","guild_id","user_id","job_id","job_name","task_id","source_type","source_id","source_channel_id","penalty_date","daily_salary","penalty_amount","status","reason","announced_at","announcement_channel_id","announcement_message_id","appeal_deadline_at","applied_at","refunded_at","resolved_by","resolved_at","resolution_reason","created_at","updated_at"]
+    },
+    "coin_work_penalty_appeals": {
+      "key": ["id"],
+      "columns": ["id","guild_id","user_id","penalty_id","reason","status","reviewed_by","reviewed_at","review_reason","created_at","updated_at"]
+    },
+    "coin_payroll_history": {
+      "key": ["id"],
+      "columns": ["id","guild_id","user_id","job_id","job_name","base_salary","total_tasks","completed_tasks","pay_ratio","paid_amount","reason","created_at"]
+    },
+    "coin_work_legacy_snapshots": {
+      "key": ["job_id"],
+      "columns": ["job_id","user_id","source_guild_id","job_name","job_role_id","daily_salary","work_days","total_salary","start_at","pay_at","status","is_paid","payroll_status","rule_version","rules_json","source_hash","cutover_state_hash","snapshot_item_count","created_at"]
+    },
+    "coin_work_legacy_snapshot_items": {
+      "key": ["job_id","item_kind","item_id"],
+      "columns": ["job_id","item_kind","item_id","source_hash","snapshot_json","captured_at"]
+    },
+    "coin_work_legacy_settlements": {
+      "key": ["job_id","period_key","user_id"],
+      "columns": ["job_id","period_key","user_id","source_guild_id","reward_key","amount","status","transaction_id","created_at","updated_at"]
+    },
+    "coin_primary_jobs_global": {
+      "key": ["user_id"],
+      "columns": ["user_id","job_name","work_days","legacy_job_id","source_guild_id","next_cycle_id","requested_at","not_before_at","effective_from","effective_until","state","updated_at"]
+    },
+    "coin_primary_job_cycles": {
+      "key": ["cycle_id"],
+      "columns": ["cycle_id","user_id","job_name","work_days","source_guild_id","starts_at","ends_at","salary_rule_version","salary_snapshot_json","status","reward_key","created_at","updated_at"]
+    },
+    "coin_primary_cycle_penalties": {
+      "key": ["id"],
+      "columns": ["id","cycle_id","user_id","task_id","amount","status","reason","applied_at","refunded_at","appeal_deadline","created_at","updated_at"]
+    },
+    "coin_primary_cycle_penalty_appeals": {
+      "key": ["id"],
+      "columns": ["id","penalty_id","user_id","status","reason","review_by","review_reason","created_at","reviewed_at"]
+    },
+    "coin_primary_cycle_payroll": {
+      "key": ["cycle_id"],
+      "columns": ["cycle_id","user_id","source_guild_id","gross_amount","paid_amount","pay_ratio","settlement_reason","reward_key","transaction_id","settled_at"]
+    },
+    "coin_guild_settings": {
+      "key": ["guild_id"],
+      "columns": ["guild_id","enabled","daily_base_reward","streak_three_bonus","streak_seven_bonus","allow_transfer","shop_enabled","admin_log_channel_id","announcement_channel_id","created_at","updated_at"]
+    },
+    "coin_wallets": {
+      "key": ["user_id"],
+      "columns": ["user_id","balance","total_earned","total_spent","revision","created_at","updated_at"]
+    },
+    "coin_guild_players": {
+      "key": ["guild_id","user_id"],
+      "columns": ["guild_id","user_id","bank_balance","bank_interest_accrued","last_interest_date","last_daily_date","daily_streak","created_at","updated_at"]
+    },
+    "coin_bank_accounts_global": {
+      "key": ["user_id"],
+      "columns": ["user_id","balance","interest_accrued","last_interest_date","created_at","updated_at"]
+    },
+    "coin_debts": {
+      "key": ["user_id"],
+      "columns": ["user_id","amount","created_at","updated_at"]
+    },
+    "coin_transactions": {
+      "key": ["id"],
+      "columns": ["id","guild_id","user_id","type","balance_before","amount","balance_after","operator_id","reason","metadata","wallet_scope","wallet_revision","created_at"]
+    },
+    "coin_operation_receipts": {
+      "key": ["operation_id"],
+      "columns": ["operation_id","kind","user_id","source_guild_id","payload_hash","transaction_id","reward_key","created_at"]
+    },
+    "coin_admin_logs": {
+      "key": ["id"],
+      "columns": ["id","guild_id","operator_id","target_user_id","action","reason","details","created_at"]
+    },
+    "chip_accounts_global": {
+      "key": ["user_id"],
+      "columns": ["user_id","balance","created_at","updated_at"]
+    },
+    "chip_ledger": {
+      "key": ["id"],
+      "columns": ["id","guild_id","user_id","entry_type","amount","balance_before","balance_after","coin_amount","fee","operator_id","reason","metadata","created_at"]
+    },
+    "reward_grants": {
+      "key": ["id"],
+      "columns": ["id","guild_id","user_id","source_type","source_id","reward_kind","amount","metadata","transaction_id","created_at"]
+    },
+    "reward_grants_v2": {
+      "key": ["id"],
+      "columns": ["id","reward_key","operation_id","kind","canonical_source_id","reward_kind","user_id","source_guild_id","amount","payload_hash","metadata_json","debt_offset","net_amount","transaction_id","legacy_grant_id","created_at"]
+    }
+  },
+  "checkpoints": {
+    "reassigned-and-cancelled": {
+      "casino_venue_menu": [
+        [1,"310000000000000001","meal","小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [2,"310000000000000001","meal","皇家牛排","將牛排兩面撒鹽與黑胡椒\n熱鍋煎至表面焦香\n加入奶油與香草淋油\n靜置後切片擺盤","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [3,"310000000000000001","meal","招牌拉麵","煮滾高湯並調整鹹度\n麵條煮至彈牙\n放入叉燒與配菜\n淋上香油後上桌","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [4,"310000000000000001","drink","星光氣泡飲","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n輕輕攪拌保留氣泡\n用薄荷葉裝飾","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [5,"310000000000000001","drink","翡翠檸檬茶","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n搖盪至均勻冰鎮\n倒入杯中加檸檬片","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [6,"310000000000000001","drink","午夜無酒精調飲","杯中加入藍柑橘糖漿\n倒入葡萄汁與檸檬汁\n加冰搖盪\n濾入杯中並放上櫻桃","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null]
+      ],
+      "casino_venue_orders": [
+        [1,"310000000000000001","310000000000000011","310000000000000002","310000000000000022",null,"制服服務生","2026-03-03T01:15:00.000Z","2026-03-04T01:00:00.000Z",120,"escrowed",null,null,null,null,"pending","2026-03-03T01:00:00.000Z","2026-03-03T01:15:00.000Z","<cycle:uniform-waiter#1>"],
+        [2,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:01:00.000Z","2026-03-04T01:01:00.000Z",60,"refunded",null,"2026-03-03T01:20:00.000Z",null,null,"cancelled","2026-03-03T01:01:00.000Z","2026-03-03T01:20:00.000Z","<cycle:waiter#1>"],
+        [3,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:02:00.000Z","2026-03-04T01:02:00.000Z",80,"escrowed",null,null,null,null,"pending","2026-03-03T01:02:00.000Z","2026-03-03T01:25:00.000Z","<cycle:waiter#1>"],
+        [4,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:03:00.000Z","2026-03-04T01:03:00.000Z",50,"escrowed",null,null,null,null,"pending","2026-03-03T01:03:00.000Z","2026-03-03T01:03:00.000Z","<cycle:waiter#1>"]
+      ],
+      "casino_venue_order_items": [
+        [1,"310000000000000001",1,"meal",2,"皇家牛排","將牛排兩面撒鹽與黑胡椒\n熱鍋煎至表面焦香\n加入奶油與香草淋油\n靜置後切片擺盤","310000000000000032",null,"廚師",0,"pending",null,null,0,0,null,"2026-03-03T01:00:00.000Z","2026-03-03T01:10:00.000Z",null,"2026-03-03T01:10:00.000Z",null,null,null,"<cycle:second-chef#1>"],
+        [2,"310000000000000001",1,"drink",4,"星光氣泡飲","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n輕輕攪拌保留氣泡\n用薄荷葉裝飾","310000000000000041",null,"調酒師",0,"pending",null,null,0,0,null,"2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",null,"2026-03-03T01:00:00.000Z",null,null,null,"<cycle:bartender#1>"],
+        [3,"310000000000000001",2,"meal",1,"小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","310000000000000031",null,"廚師",0,"cancelled",null,null,0,0,null,"2026-03-03T01:01:00.000Z","2026-03-03T01:01:00.000Z",null,"2026-03-03T01:20:00.000Z","2026-03-03T01:20:00.000Z","310000000000000009","顧客取消餐點","<cycle:chef#1>"],
+        [4,"310000000000000001",3,"meal",3,"招牌拉麵","煮滾高湯並調整鹹度\n麵條煮至彈牙\n放入叉燒與配菜\n淋上香油後上桌","310000000000000031",null,"廚師",0,"cancelled",null,null,0,0,null,"2026-03-03T01:02:00.000Z","2026-03-03T01:02:00.000Z",null,"2026-03-03T01:25:00.000Z","2026-03-03T01:25:00.000Z","310000000000000009","食材不足","<cycle:chef#1>"],
+        [5,"310000000000000001",3,"drink",5,"翡翠檸檬茶","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n搖盪至均勻冰鎮\n倒入杯中加檸檬片","310000000000000041",null,"調酒師",0,"pending",null,null,0,0,null,"2026-03-03T01:02:00.000Z","2026-03-03T01:02:00.000Z",null,"2026-03-03T01:02:00.000Z",null,null,null,"<cycle:bartender#1>"],
+        [6,"310000000000000001",4,"meal",1,"小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","310000000000000031",null,"廚師",0,"pending",null,null,0,0,null,"2026-03-03T01:03:00.000Z","2026-03-03T01:03:00.000Z",null,"2026-03-03T01:03:00.000Z",null,null,null,"<cycle:chef#1>"]
+      ],
+      "coin_jobs": [],
+      "coin_work_tasks": [
+        [1,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","cancelled","訂單 #1 待送達，小費 120 籌碼。","[]","310000000000000002","服務生","venue-order-1",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:15:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [2,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #1｜皇家牛排 待製作","[]","310000000000000002","廚師","venue-item-1",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:10:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [3,"310000000000000001","310000000000000041",null,"調酒師","casino_venue_drink","pending","訂單 #1｜星光氣泡飲 待製作","[]","310000000000000002","調酒師","venue-item-2",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:00:00.000Z",null,0,null,"<cycle:bartender#1>"],
+        [4,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","cancelled","訂單 #2 待送達，小費 60 籌碼。","[]","310000000000000002","服務生","venue-order-2",0,"[]",null,"訂單已取消，服務生任務一併取消；小費已退還顧客。",0,null,0,"2026-03-03T01:01:00.000Z","2026-03-03T11:01:00.000Z",null,"2026-03-03T01:20:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [5,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #2｜小吉炒飯 待製作","[]","310000000000000002","廚師","venue-item-3",0,"[]",null,null,0,null,0,"2026-03-03T01:01:00.000Z","2026-03-03T11:01:00.000Z",null,"2026-03-03T01:20:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [6,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","pending","訂單 #3 待送達，小費 80 籌碼。","[]","310000000000000002","服務生","venue-order-3",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z",null,"2026-03-03T01:02:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [7,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #3｜招牌拉麵 待製作","[]","310000000000000002","廚師","venue-item-4",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z",null,"2026-03-03T01:25:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [8,"310000000000000001","310000000000000041",null,"調酒師","casino_venue_drink","pending","訂單 #3｜翡翠檸檬茶 待製作","[]","310000000000000002","調酒師","venue-item-5",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z",null,"2026-03-03T01:02:00.000Z",null,0,null,"<cycle:bartender#1>"],
+        [9,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","pending","訂單 #4 待送達，小費 50 籌碼。","[]","310000000000000002","服務生","venue-order-4",0,"[]",null,null,0,null,0,"2026-03-03T01:03:00.000Z","2026-03-03T11:03:00.000Z",null,"2026-03-03T01:03:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [10,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","pending","訂單 #4｜小吉炒飯 待製作","[]","310000000000000002","廚師","venue-item-6",0,"[]",null,null,0,null,0,"2026-03-03T01:03:00.000Z","2026-03-03T11:03:00.000Z",null,"2026-03-03T01:03:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [11,"310000000000000001","310000000000000032",null,"廚師","casino_venue_meal","pending","訂單 #1｜皇家牛排 改派後待製作","[]","310000000000000002","廚師","venue-item-1",0,"[]",null,null,0,null,0,"2026-03-03T01:10:00.000Z","2026-03-03T11:10:00.000Z",null,"2026-03-03T01:10:00.000Z",null,0,null,"<cycle:second-chef#1>"],
+        [12,"310000000000000001","310000000000000022",null,"制服服務生","casino_venue_service","pending","訂單 #1 改派後待送達，小費 120 籌碼。","[]","310000000000000002","制服服務生","venue-order-1",0,"[]",null,null,0,null,0,"2026-03-03T01:15:00.000Z","2026-03-03T11:15:00.000Z",null,"2026-03-03T01:15:00.000Z",null,0,null,"<cycle:uniform-waiter#1>"]
+      ],
+      "coin_work_penalties": [],
+      "coin_work_penalty_appeals": [],
+      "coin_payroll_history": [],
+      "coin_work_legacy_snapshots": [],
+      "coin_work_legacy_snapshot_items": [],
+      "coin_work_legacy_settlements": [],
+      "coin_primary_jobs_global": [
+        ["310000000000000021","服務生",2,null,"310000000000000001","<cycle:waiter#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000022","制服服務生",2,null,"310000000000000001","<cycle:uniform-waiter#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000031","廚師",2,null,"310000000000000001","<cycle:chef#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000032","廚師",2,null,"310000000000000001","<cycle:second-chef#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000041","調酒師",2,null,"310000000000000001","<cycle:bartender#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"]
+      ],
+      "coin_primary_job_cycles": [
+        ["<cycle:bartender#1>","310000000000000041","調酒師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":60,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:chef#1>","310000000000000031","廚師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":70,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:second-chef#1>","310000000000000032","廚師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":70,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:uniform-waiter#1>","310000000000000022","制服服務生",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":0,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:waiter#1>","310000000000000021","服務生",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":0,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"]
+      ],
+      "coin_primary_cycle_penalties": [],
+      "coin_primary_cycle_penalty_appeals": [],
+      "coin_primary_cycle_payroll": [],
+      "coin_guild_settings": [
+        ["310000000000000001",1,50,20,100,0,1,null,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_wallets": [
+        ["310000000000000011",1690,2000,0,5,"2026-03-02T01:00:00.000Z","2026-03-03T01:03:00.000Z"],
+        ["310000000000000021",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000022",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000031",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000032",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000041",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_guild_players": [
+        ["310000000000000001","310000000000000011",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000021",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000022",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000031",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000032",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000041",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_bank_accounts_global": [
+        ["310000000000000011",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000021",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000022",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000031",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000032",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000041",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_debts": [],
+      "coin_transactions": [
+        [1,"310000000000000001","310000000000000011","admin_add",0,2000,2000,"310000000000000009","合成測試：顧客預存吉幣",null,"global",1,"2026-03-02T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000011","chip_buy",2000,-120,1880,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":120,\"chipBalanceBeforeTopUp\":0}","global",2,"2026-03-03T01:00:00.000Z"],
+        [3,"310000000000000001","310000000000000011","chip_buy",1880,-60,1820,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":60,\"chipBalanceBeforeTopUp\":0}","global",3,"2026-03-03T01:01:00.000Z"],
+        [4,"310000000000000001","310000000000000011","chip_buy",1820,-80,1740,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":80,\"chipBalanceBeforeTopUp\":0}","global",4,"2026-03-03T01:02:00.000Z"],
+        [5,"310000000000000001","310000000000000011","chip_buy",1740,-50,1690,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":50,\"chipBalanceBeforeTopUp\":0}","global",5,"2026-03-03T01:03:00.000Z"]
+      ],
+      "coin_operation_receipts": [
+        ["venue-work-flows:seed-customer-coins","manual-adjustment","310000000000000011","310000000000000001","795aacbeeda6ebd8855e8163ec6771220434a276d2e19dee3fc2d2e5676b46e3",1,null,"2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_admin_logs": [
+        [1,"310000000000000001","310000000000000009","310000000000000011","coin_admin:add","合成測試：顧客預存吉幣","{\"before\":0,\"amount\":2000,\"after\":2000}","2026-03-02T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000009","310000000000000032","venue:reassign","原廚師忙碌，改派","{\"orderItemId\":1,\"orderId\":1,\"oldMakerId\":\"310000000000000031\",\"newMakerId\":\"310000000000000032\"}","2026-03-03T01:10:00.000Z"],
+        [3,"310000000000000001","310000000000000009","310000000000000022","venue:reassign-waiter","改由制服服務生送餐","{\"orderId\":1,\"oldWaiterId\":\"310000000000000021\",\"newWaiterId\":\"310000000000000022\"}","2026-03-03T01:15:00.000Z"],
+        [4,"310000000000000001","310000000000000009","310000000000000031","venue:cancel","顧客取消餐點","{\"orderItemId\":3,\"orderId\":2,\"itemType\":\"meal\",\"itemName\":\"小吉炒飯\"}","2026-03-03T01:20:00.000Z"],
+        [5,"310000000000000001","310000000000000009","310000000000000031","venue:cancel","食材不足","{\"orderItemId\":4,\"orderId\":3,\"itemType\":\"meal\",\"itemName\":\"招牌拉麵\"}","2026-03-03T01:25:00.000Z"]
+      ],
+      "chip_accounts_global": [
+        ["310000000000000011",60,"2026-03-03T01:00:00.000Z","2026-03-03T01:20:00.000Z"]
+      ],
+      "chip_ledger": [
+        [1,"310000000000000001","310000000000000011","auto_top_up",120,0,120,120,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":120}","2026-03-03T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000011","tip_escrow",-120,120,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":120}","2026-03-03T01:00:00.000Z"],
+        [3,"310000000000000001","310000000000000011","auto_top_up",60,0,60,60,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":60}","2026-03-03T01:01:00.000Z"],
+        [4,"310000000000000001","310000000000000011","tip_escrow",-60,60,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":60}","2026-03-03T01:01:00.000Z"],
+        [5,"310000000000000001","310000000000000011","auto_top_up",80,0,80,80,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":80}","2026-03-03T01:02:00.000Z"],
+        [6,"310000000000000001","310000000000000011","tip_escrow",-80,80,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":80}","2026-03-03T01:02:00.000Z"],
+        [7,"310000000000000001","310000000000000011","auto_top_up",50,0,50,50,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":50}","2026-03-03T01:03:00.000Z"],
+        [8,"310000000000000001","310000000000000011","tip_escrow",-50,50,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":50}","2026-03-03T01:03:00.000Z"],
+        [9,"310000000000000001","310000000000000011","tip_refund",60,0,60,0,0,null,"場館訂單 #2 已取消，退還小費。","{\"orderId\":2,\"waiterUserId\":\"310000000000000021\"}","2026-03-03T01:20:00.000Z"]
+      ],
+      "reward_grants": [],
+      "reward_grants_v2": []
+    },
+    "served": {
+      "casino_venue_menu": [
+        [1,"310000000000000001","meal","小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [2,"310000000000000001","meal","皇家牛排","將牛排兩面撒鹽與黑胡椒\n熱鍋煎至表面焦香\n加入奶油與香草淋油\n靜置後切片擺盤","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [3,"310000000000000001","meal","招牌拉麵","煮滾高湯並調整鹹度\n麵條煮至彈牙\n放入叉燒與配菜\n淋上香油後上桌","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [4,"310000000000000001","drink","星光氣泡飲","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n輕輕攪拌保留氣泡\n用薄荷葉裝飾","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [5,"310000000000000001","drink","翡翠檸檬茶","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n搖盪至均勻冰鎮\n倒入杯中加檸檬片","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [6,"310000000000000001","drink","午夜無酒精調飲","杯中加入藍柑橘糖漿\n倒入葡萄汁與檸檬汁\n加冰搖盪\n濾入杯中並放上櫻桃","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null]
+      ],
+      "casino_venue_orders": [
+        [1,"310000000000000001","310000000000000011","310000000000000002","310000000000000022",null,"制服服務生","2026-03-03T01:15:00.000Z","2026-03-04T01:00:00.000Z",120,"paid","2026-03-03T01:40:00.000Z",null,"2026-03-03T01:40:00.000Z","310000000000000022","completed","2026-03-03T01:00:00.000Z","2026-03-03T01:40:00.000Z","<cycle:uniform-waiter#1>"],
+        [2,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:01:00.000Z","2026-03-04T01:01:00.000Z",60,"refunded",null,"2026-03-03T01:20:00.000Z",null,null,"cancelled","2026-03-03T01:01:00.000Z","2026-03-03T01:20:00.000Z","<cycle:waiter#1>"],
+        [3,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:02:00.000Z","2026-03-04T01:02:00.000Z",80,"paid","2026-03-03T01:50:00.000Z",null,"2026-03-03T01:50:00.000Z","310000000000000021","completed","2026-03-03T01:02:00.000Z","2026-03-03T01:50:00.000Z","<cycle:waiter#1>"],
+        [4,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:03:00.000Z","2026-03-04T01:03:00.000Z",50,"escrowed",null,null,null,null,"pending","2026-03-03T01:03:00.000Z","2026-03-03T01:03:00.000Z","<cycle:waiter#1>"]
+      ],
+      "casino_venue_order_items": [
+        [1,"310000000000000001",1,"meal",2,"皇家牛排","將牛排兩面撒鹽與黑胡椒\n熱鍋煎至表面焦香\n加入奶油與香草淋油\n靜置後切片擺盤","310000000000000032",null,"廚師",0,"completed","牛排兩面撒鹽與黑胡椒\n熱鍋煎至焦香\n靜置後切片擺盤","2026-03-03",0,0,null,"2026-03-03T01:00:00.000Z","2026-03-03T01:10:00.000Z","2026-03-03T01:30:00.000Z","2026-03-03T01:30:00.000Z",null,null,null,"<cycle:second-chef#1>"],
+        [2,"310000000000000001",1,"drink",4,"星光氣泡飲","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n輕輕攪拌保留氣泡\n用薄荷葉裝飾","310000000000000041",null,"調酒師",0,"completed","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n用薄荷葉裝飾","2026-03-03",0,0,null,"2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z","2026-03-03T01:35:00.000Z","2026-03-03T01:35:00.000Z",null,null,null,"<cycle:bartender#1>"],
+        [3,"310000000000000001",2,"meal",1,"小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","310000000000000031",null,"廚師",0,"cancelled",null,null,0,0,null,"2026-03-03T01:01:00.000Z","2026-03-03T01:01:00.000Z",null,"2026-03-03T01:20:00.000Z","2026-03-03T01:20:00.000Z","310000000000000009","顧客取消餐點","<cycle:chef#1>"],
+        [4,"310000000000000001",3,"meal",3,"招牌拉麵","煮滾高湯並調整鹹度\n麵條煮至彈牙\n放入叉燒與配菜\n淋上香油後上桌","310000000000000031",null,"廚師",0,"cancelled",null,null,0,0,null,"2026-03-03T01:02:00.000Z","2026-03-03T01:02:00.000Z",null,"2026-03-03T01:25:00.000Z","2026-03-03T01:25:00.000Z","310000000000000009","食材不足","<cycle:chef#1>"],
+        [5,"310000000000000001",3,"drink",5,"翡翠檸檬茶","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n搖盪至均勻冰鎮\n倒入杯中加檸檬片","310000000000000041",null,"調酒師",0,"completed","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n倒入杯中加檸檬片","2026-03-03",0,0,null,"2026-03-03T01:02:00.000Z","2026-03-03T01:02:00.000Z","2026-03-03T01:45:00.000Z","2026-03-03T01:45:00.000Z",null,null,null,"<cycle:bartender#1>"],
+        [6,"310000000000000001",4,"meal",1,"小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","310000000000000031",null,"廚師",0,"pending",null,null,0,0,null,"2026-03-03T01:03:00.000Z","2026-03-03T01:03:00.000Z",null,"2026-03-03T01:03:00.000Z",null,null,null,"<cycle:chef#1>"]
+      ],
+      "coin_jobs": [],
+      "coin_work_tasks": [
+        [1,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","cancelled","訂單 #1 待送達，小費 120 籌碼。","[]","310000000000000002","服務生","venue-order-1",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:15:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [2,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #1｜皇家牛排 待製作","[]","310000000000000002","廚師","venue-item-1",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:10:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [3,"310000000000000001","310000000000000041",null,"調酒師","casino_venue_drink","completed","星光氣泡飲 製作完成\n杯中加入冰塊與莓果糖漿\n倒入氣泡水\n用薄荷葉裝飾","[]","310000000000000002","調酒師","venue-item-2",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z","2026-03-03T01:35:00.000Z","2026-03-03T01:35:00.000Z",null,0,null,"<cycle:bartender#1>"],
+        [4,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","cancelled","訂單 #2 待送達，小費 60 籌碼。","[]","310000000000000002","服務生","venue-order-2",0,"[]",null,"訂單已取消，服務生任務一併取消；小費已退還顧客。",0,null,0,"2026-03-03T01:01:00.000Z","2026-03-03T11:01:00.000Z",null,"2026-03-03T01:20:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [5,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #2｜小吉炒飯 待製作","[]","310000000000000002","廚師","venue-item-3",0,"[]",null,null,0,null,0,"2026-03-03T01:01:00.000Z","2026-03-03T11:01:00.000Z",null,"2026-03-03T01:20:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [6,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","completed","訂單 #3 已送達，收到小費 80 籌碼。","[]","310000000000000002","服務生","venue-order-3",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z","2026-03-03T01:50:00.000Z","2026-03-03T01:50:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [7,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #3｜招牌拉麵 待製作","[]","310000000000000002","廚師","venue-item-4",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z",null,"2026-03-03T01:25:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [8,"310000000000000001","310000000000000041",null,"調酒師","casino_venue_drink","completed","翡翠檸檬茶 製作完成\n泡好綠茶並冷卻\n加入檸檬汁與糖漿\n倒入杯中加檸檬片","[]","310000000000000002","調酒師","venue-item-5",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z","2026-03-03T01:45:00.000Z","2026-03-03T01:45:00.000Z",null,0,null,"<cycle:bartender#1>"],
+        [9,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","pending","訂單 #4 待送達，小費 50 籌碼。","[]","310000000000000002","服務生","venue-order-4",0,"[]",null,null,0,null,0,"2026-03-03T01:03:00.000Z","2026-03-03T11:03:00.000Z",null,"2026-03-03T01:03:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [10,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","pending","訂單 #4｜小吉炒飯 待製作","[]","310000000000000002","廚師","venue-item-6",0,"[]",null,null,0,null,0,"2026-03-03T01:03:00.000Z","2026-03-03T11:03:00.000Z",null,"2026-03-03T01:03:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [11,"310000000000000001","310000000000000032",null,"廚師","casino_venue_meal","completed","皇家牛排 製作完成\n牛排兩面撒鹽與黑胡椒\n熱鍋煎至焦香\n靜置後切片擺盤","[]","310000000000000002","廚師","venue-item-1",0,"[]",null,null,0,null,0,"2026-03-03T01:10:00.000Z","2026-03-03T11:10:00.000Z","2026-03-03T01:30:00.000Z","2026-03-03T01:30:00.000Z",null,0,null,"<cycle:second-chef#1>"],
+        [12,"310000000000000001","310000000000000022",null,"制服服務生","casino_venue_service","completed","訂單 #1 已送達，收到小費 120 籌碼。","[]","310000000000000002","制服服務生","venue-order-1",0,"[]",null,null,0,null,0,"2026-03-03T01:15:00.000Z","2026-03-03T11:15:00.000Z","2026-03-03T01:40:00.000Z","2026-03-03T01:40:00.000Z",null,0,null,"<cycle:uniform-waiter#1>"]
+      ],
+      "coin_work_penalties": [],
+      "coin_work_penalty_appeals": [],
+      "coin_payroll_history": [],
+      "coin_work_legacy_snapshots": [],
+      "coin_work_legacy_snapshot_items": [],
+      "coin_work_legacy_settlements": [],
+      "coin_primary_jobs_global": [
+        ["310000000000000021","服務生",2,null,"310000000000000001","<cycle:waiter#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000022","制服服務生",2,null,"310000000000000001","<cycle:uniform-waiter#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000031","廚師",2,null,"310000000000000001","<cycle:chef#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000032","廚師",2,null,"310000000000000001","<cycle:second-chef#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000041","調酒師",2,null,"310000000000000001","<cycle:bartender#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"]
+      ],
+      "coin_primary_job_cycles": [
+        ["<cycle:bartender#1>","310000000000000041","調酒師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":60,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:chef#1>","310000000000000031","廚師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":70,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:second-chef#1>","310000000000000032","廚師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":70,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:uniform-waiter#1>","310000000000000022","制服服務生",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":0,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:waiter#1>","310000000000000021","服務生",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":0,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"]
+      ],
+      "coin_primary_cycle_penalties": [],
+      "coin_primary_cycle_penalty_appeals": [],
+      "coin_primary_cycle_payroll": [],
+      "coin_guild_settings": [
+        ["310000000000000001",1,50,20,100,0,1,null,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_wallets": [
+        ["310000000000000011",1690,2000,0,5,"2026-03-02T01:00:00.000Z","2026-03-03T01:03:00.000Z"],
+        ["310000000000000021",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000022",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000031",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000032",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000041",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_guild_players": [
+        ["310000000000000001","310000000000000011",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000021",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000022",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000031",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000032",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000041",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_bank_accounts_global": [
+        ["310000000000000011",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000021",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000022",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000031",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000032",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000041",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_debts": [],
+      "coin_transactions": [
+        [1,"310000000000000001","310000000000000011","admin_add",0,2000,2000,"310000000000000009","合成測試：顧客預存吉幣",null,"global",1,"2026-03-02T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000011","chip_buy",2000,-120,1880,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":120,\"chipBalanceBeforeTopUp\":0}","global",2,"2026-03-03T01:00:00.000Z"],
+        [3,"310000000000000001","310000000000000011","chip_buy",1880,-60,1820,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":60,\"chipBalanceBeforeTopUp\":0}","global",3,"2026-03-03T01:01:00.000Z"],
+        [4,"310000000000000001","310000000000000011","chip_buy",1820,-80,1740,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":80,\"chipBalanceBeforeTopUp\":0}","global",4,"2026-03-03T01:02:00.000Z"],
+        [5,"310000000000000001","310000000000000011","chip_buy",1740,-50,1690,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":50,\"chipBalanceBeforeTopUp\":0}","global",5,"2026-03-03T01:03:00.000Z"]
+      ],
+      "coin_operation_receipts": [
+        ["venue-work-flows:seed-customer-coins","manual-adjustment","310000000000000011","310000000000000001","795aacbeeda6ebd8855e8163ec6771220434a276d2e19dee3fc2d2e5676b46e3",1,null,"2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_admin_logs": [
+        [1,"310000000000000001","310000000000000009","310000000000000011","coin_admin:add","合成測試：顧客預存吉幣","{\"before\":0,\"amount\":2000,\"after\":2000}","2026-03-02T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000009","310000000000000032","venue:reassign","原廚師忙碌，改派","{\"orderItemId\":1,\"orderId\":1,\"oldMakerId\":\"310000000000000031\",\"newMakerId\":\"310000000000000032\"}","2026-03-03T01:10:00.000Z"],
+        [3,"310000000000000001","310000000000000009","310000000000000022","venue:reassign-waiter","改由制服服務生送餐","{\"orderId\":1,\"oldWaiterId\":\"310000000000000021\",\"newWaiterId\":\"310000000000000022\"}","2026-03-03T01:15:00.000Z"],
+        [4,"310000000000000001","310000000000000009","310000000000000031","venue:cancel","顧客取消餐點","{\"orderItemId\":3,\"orderId\":2,\"itemType\":\"meal\",\"itemName\":\"小吉炒飯\"}","2026-03-03T01:20:00.000Z"],
+        [5,"310000000000000001","310000000000000009","310000000000000031","venue:cancel","食材不足","{\"orderItemId\":4,\"orderId\":3,\"itemType\":\"meal\",\"itemName\":\"招牌拉麵\"}","2026-03-03T01:25:00.000Z"],
+        [6,"310000000000000001","310000000000000032","310000000000000032","venue:make","完成餐飲製作","{\"orderId\":1,\"orderItemId\":1,\"itemType\":\"meal\",\"itemName\":\"皇家牛排\",\"jobId\":null,\"globalCycleId\":\"<cycle:second-chef#1>\",\"taskId\":11}","2026-03-03T01:30:00.000Z"],
+        [7,"310000000000000001","310000000000000041","310000000000000041","venue:make","完成餐飲製作","{\"orderId\":1,\"orderItemId\":2,\"itemType\":\"drink\",\"itemName\":\"星光氣泡飲\",\"jobId\":null,\"globalCycleId\":\"<cycle:bartender#1>\",\"taskId\":3}","2026-03-03T01:35:00.000Z"],
+        [8,"310000000000000001","310000000000000022","310000000000000011","venue:serve","服務生完成送達","{\"orderId\":1,\"tipAmount\":120,\"taskId\":12}","2026-03-03T01:40:00.000Z"],
+        [9,"310000000000000001","310000000000000041","310000000000000041","venue:make","完成餐飲製作","{\"orderId\":3,\"orderItemId\":5,\"itemType\":\"drink\",\"itemName\":\"翡翠檸檬茶\",\"jobId\":null,\"globalCycleId\":\"<cycle:bartender#1>\",\"taskId\":8}","2026-03-03T01:45:00.000Z"],
+        [10,"310000000000000001","310000000000000021","310000000000000011","venue:serve","服務生完成送達","{\"orderId\":3,\"tipAmount\":80,\"taskId\":6}","2026-03-03T01:50:00.000Z"]
+      ],
+      "chip_accounts_global": [
+        ["310000000000000011",60,"2026-03-03T01:00:00.000Z","2026-03-03T01:20:00.000Z"],
+        ["310000000000000021",80,"2026-03-03T01:50:00.000Z","2026-03-03T01:50:00.000Z"],
+        ["310000000000000022",120,"2026-03-03T01:40:00.000Z","2026-03-03T01:40:00.000Z"]
+      ],
+      "chip_ledger": [
+        [1,"310000000000000001","310000000000000011","auto_top_up",120,0,120,120,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":120}","2026-03-03T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000011","tip_escrow",-120,120,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":120}","2026-03-03T01:00:00.000Z"],
+        [3,"310000000000000001","310000000000000011","auto_top_up",60,0,60,60,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":60}","2026-03-03T01:01:00.000Z"],
+        [4,"310000000000000001","310000000000000011","tip_escrow",-60,60,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":60}","2026-03-03T01:01:00.000Z"],
+        [5,"310000000000000001","310000000000000011","auto_top_up",80,0,80,80,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":80}","2026-03-03T01:02:00.000Z"],
+        [6,"310000000000000001","310000000000000011","tip_escrow",-80,80,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":80}","2026-03-03T01:02:00.000Z"],
+        [7,"310000000000000001","310000000000000011","auto_top_up",50,0,50,50,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":50}","2026-03-03T01:03:00.000Z"],
+        [8,"310000000000000001","310000000000000011","tip_escrow",-50,50,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":50}","2026-03-03T01:03:00.000Z"],
+        [9,"310000000000000001","310000000000000011","tip_refund",60,0,60,0,0,null,"場館訂單 #2 已取消，退還小費。","{\"orderId\":2,\"waiterUserId\":\"310000000000000021\"}","2026-03-03T01:20:00.000Z"],
+        [10,"310000000000000001","310000000000000022","tip_payout",120,0,120,0,0,null,"場館訂單 #1 服務生小費","{\"orderId\":1,\"customerId\":\"310000000000000011\"}","2026-03-03T01:40:00.000Z"],
+        [11,"310000000000000001","310000000000000021","tip_payout",80,0,80,0,0,null,"場館訂單 #3 服務生小費","{\"orderId\":3,\"customerId\":\"310000000000000011\"}","2026-03-03T01:50:00.000Z"]
+      ],
+      "reward_grants": [],
+      "reward_grants_v2": []
+    },
+    "taken-over": {
+      "casino_venue_menu": [
+        [1,"310000000000000001","meal","小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [2,"310000000000000001","meal","皇家牛排","將牛排兩面撒鹽與黑胡椒\n熱鍋煎至表面焦香\n加入奶油與香草淋油\n靜置後切片擺盤","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [3,"310000000000000001","meal","招牌拉麵","煮滾高湯並調整鹹度\n麵條煮至彈牙\n放入叉燒與配菜\n淋上香油後上桌","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [4,"310000000000000001","drink","星光氣泡飲","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n輕輕攪拌保留氣泡\n用薄荷葉裝飾","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [5,"310000000000000001","drink","翡翠檸檬茶","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n搖盪至均勻冰鎮\n倒入杯中加檸檬片","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [6,"310000000000000001","drink","午夜無酒精調飲","杯中加入藍柑橘糖漿\n倒入葡萄汁與檸檬汁\n加冰搖盪\n濾入杯中並放上櫻桃","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null]
+      ],
+      "casino_venue_orders": [
+        [1,"310000000000000001","310000000000000011","310000000000000002","310000000000000022",null,"制服服務生","2026-03-03T01:15:00.000Z","2026-03-04T01:00:00.000Z",120,"paid","2026-03-03T01:40:00.000Z",null,"2026-03-03T01:40:00.000Z","310000000000000022","completed","2026-03-03T01:00:00.000Z","2026-03-03T01:40:00.000Z","<cycle:uniform-waiter#1>"],
+        [2,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:01:00.000Z","2026-03-04T01:01:00.000Z",60,"refunded",null,"2026-03-03T01:20:00.000Z",null,null,"cancelled","2026-03-03T01:01:00.000Z","2026-03-03T01:20:00.000Z","<cycle:waiter#1>"],
+        [3,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:02:00.000Z","2026-03-04T01:02:00.000Z",80,"paid","2026-03-03T01:50:00.000Z",null,"2026-03-03T01:50:00.000Z","310000000000000021","completed","2026-03-03T01:02:00.000Z","2026-03-03T01:50:00.000Z","<cycle:waiter#1>"],
+        [4,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:03:00.000Z","2026-03-04T01:03:00.000Z",50,"refunded",null,"2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z","system","completed","2026-03-03T01:03:00.000Z","2026-03-04T01:03:00.000Z","<cycle:waiter#1>"]
+      ],
+      "casino_venue_order_items": [
+        [1,"310000000000000001",1,"meal",2,"皇家牛排","將牛排兩面撒鹽與黑胡椒\n熱鍋煎至表面焦香\n加入奶油與香草淋油\n靜置後切片擺盤","310000000000000032",null,"廚師",0,"completed","牛排兩面撒鹽與黑胡椒\n熱鍋煎至焦香\n靜置後切片擺盤","2026-03-03",0,0,null,"2026-03-03T01:00:00.000Z","2026-03-03T01:10:00.000Z","2026-03-03T01:30:00.000Z","2026-03-03T01:30:00.000Z",null,null,null,"<cycle:second-chef#1>"],
+        [2,"310000000000000001",1,"drink",4,"星光氣泡飲","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n輕輕攪拌保留氣泡\n用薄荷葉裝飾","310000000000000041",null,"調酒師",0,"completed","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n用薄荷葉裝飾","2026-03-03",0,0,null,"2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z","2026-03-03T01:35:00.000Z","2026-03-03T01:35:00.000Z",null,null,null,"<cycle:bartender#1>"],
+        [3,"310000000000000001",2,"meal",1,"小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","310000000000000031",null,"廚師",0,"cancelled",null,null,0,0,null,"2026-03-03T01:01:00.000Z","2026-03-03T01:01:00.000Z",null,"2026-03-03T01:20:00.000Z","2026-03-03T01:20:00.000Z","310000000000000009","顧客取消餐點","<cycle:chef#1>"],
+        [4,"310000000000000001",3,"meal",3,"招牌拉麵","煮滾高湯並調整鹹度\n麵條煮至彈牙\n放入叉燒與配菜\n淋上香油後上桌","310000000000000031",null,"廚師",0,"cancelled",null,null,0,0,null,"2026-03-03T01:02:00.000Z","2026-03-03T01:02:00.000Z",null,"2026-03-03T01:25:00.000Z","2026-03-03T01:25:00.000Z","310000000000000009","食材不足","<cycle:chef#1>"],
+        [5,"310000000000000001",3,"drink",5,"翡翠檸檬茶","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n搖盪至均勻冰鎮\n倒入杯中加檸檬片","310000000000000041",null,"調酒師",0,"completed","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n倒入杯中加檸檬片","2026-03-03",0,0,null,"2026-03-03T01:02:00.000Z","2026-03-03T01:02:00.000Z","2026-03-03T01:45:00.000Z","2026-03-03T01:45:00.000Z",null,null,null,"<cycle:bartender#1>"],
+        [6,"310000000000000001",4,"meal",1,"小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","310000000000000031",null,"廚師",1,"completed","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","2026-03-04",0,0,null,"2026-03-03T01:03:00.000Z","2026-03-03T01:03:00.000Z","2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z",null,null,null,"<cycle:chef#1>"]
+      ],
+      "coin_jobs": [],
+      "coin_work_tasks": [
+        [1,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","cancelled","訂單 #1 待送達，小費 120 籌碼。","[]","310000000000000002","服務生","venue-order-1",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:15:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [2,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #1｜皇家牛排 待製作","[]","310000000000000002","廚師","venue-item-1",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:10:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [3,"310000000000000001","310000000000000041",null,"調酒師","casino_venue_drink","completed","星光氣泡飲 製作完成\n杯中加入冰塊與莓果糖漿\n倒入氣泡水\n用薄荷葉裝飾","[]","310000000000000002","調酒師","venue-item-2",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z","2026-03-03T01:35:00.000Z","2026-03-03T01:35:00.000Z",null,0,null,"<cycle:bartender#1>"],
+        [4,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","cancelled","訂單 #2 待送達，小費 60 籌碼。","[]","310000000000000002","服務生","venue-order-2",0,"[]",null,"訂單已取消，服務生任務一併取消；小費已退還顧客。",0,null,0,"2026-03-03T01:01:00.000Z","2026-03-03T11:01:00.000Z",null,"2026-03-03T01:20:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [5,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #2｜小吉炒飯 待製作","[]","310000000000000002","廚師","venue-item-3",0,"[]",null,null,0,null,0,"2026-03-03T01:01:00.000Z","2026-03-03T11:01:00.000Z",null,"2026-03-03T01:20:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [6,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","completed","訂單 #3 已送達，收到小費 80 籌碼。","[]","310000000000000002","服務生","venue-order-3",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z","2026-03-03T01:50:00.000Z","2026-03-03T01:50:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [7,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #3｜招牌拉麵 待製作","[]","310000000000000002","廚師","venue-item-4",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z",null,"2026-03-03T01:25:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [8,"310000000000000001","310000000000000041",null,"調酒師","casino_venue_drink","completed","翡翠檸檬茶 製作完成\n泡好綠茶並冷卻\n加入檸檬汁與糖漿\n倒入杯中加檸檬片","[]","310000000000000002","調酒師","venue-item-5",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z","2026-03-03T01:45:00.000Z","2026-03-03T01:45:00.000Z",null,0,null,"<cycle:bartender#1>"],
+        [9,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","system_completed","訂單 #4 待送達，小費 50 籌碼。","[]","310000000000000002","服務生","venue-order-4",0,"[]",null,"餐飲製作逾期由小吉接手，服務生不算逾期；小費已退還顧客。",0,null,0,"2026-03-03T01:03:00.000Z","2026-03-03T11:03:00.000Z","2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [10,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","system_completed","訂單 #4｜小吉炒飯 待製作","[]","310000000000000002","廚師","venue-item-6",0,"[]",null,"逾期 24 小時未完成，由系統接手。",0,null,0,"2026-03-03T01:03:00.000Z","2026-03-03T11:03:00.000Z","2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [11,"310000000000000001","310000000000000032",null,"廚師","casino_venue_meal","completed","皇家牛排 製作完成\n牛排兩面撒鹽與黑胡椒\n熱鍋煎至焦香\n靜置後切片擺盤","[]","310000000000000002","廚師","venue-item-1",0,"[]",null,null,0,null,0,"2026-03-03T01:10:00.000Z","2026-03-03T11:10:00.000Z","2026-03-03T01:30:00.000Z","2026-03-03T01:30:00.000Z",null,0,null,"<cycle:second-chef#1>"],
+        [12,"310000000000000001","310000000000000022",null,"制服服務生","casino_venue_service","completed","訂單 #1 已送達，收到小費 120 籌碼。","[]","310000000000000002","制服服務生","venue-order-1",0,"[]",null,null,0,null,0,"2026-03-03T01:15:00.000Z","2026-03-03T11:15:00.000Z","2026-03-03T01:40:00.000Z","2026-03-03T01:40:00.000Z",null,0,null,"<cycle:uniform-waiter#1>"]
+      ],
+      "coin_work_penalties": [],
+      "coin_work_penalty_appeals": [],
+      "coin_payroll_history": [],
+      "coin_work_legacy_snapshots": [],
+      "coin_work_legacy_snapshot_items": [],
+      "coin_work_legacy_settlements": [],
+      "coin_primary_jobs_global": [
+        ["310000000000000021","服務生",2,null,"310000000000000001","<cycle:waiter#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000022","制服服務生",2,null,"310000000000000001","<cycle:uniform-waiter#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000031","廚師",2,null,"310000000000000001","<cycle:chef#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000032","廚師",2,null,"310000000000000001","<cycle:second-chef#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"],
+        ["310000000000000041","調酒師",2,null,"310000000000000001","<cycle:bartender#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","active","2026-03-02T14:00:00.000Z"]
+      ],
+      "coin_primary_job_cycles": [
+        ["<cycle:bartender#1>","310000000000000041","調酒師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":60,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:chef#1>","310000000000000031","廚師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":70,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:second-chef#1>","310000000000000032","廚師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":70,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:uniform-waiter#1>","310000000000000022","制服服務生",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":0,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"],
+        ["<cycle:waiter#1>","310000000000000021","服務生",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":0,\"basicRatio\":0.75,\"translatorBonus\":0}","active",null,"2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z"]
+      ],
+      "coin_primary_cycle_penalties": [
+        [1,"<cycle:chef#1>","310000000000000031",10,70,"active","工作任務逾期 24 小時未完成，由系統接手。",null,null,"2026-03-18T01:03:00.000Z","2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z"]
+      ],
+      "coin_primary_cycle_penalty_appeals": [],
+      "coin_primary_cycle_payroll": [],
+      "coin_guild_settings": [
+        ["310000000000000001",1,50,20,100,0,1,null,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_wallets": [
+        ["310000000000000011",1690,2000,0,5,"2026-03-02T01:00:00.000Z","2026-03-03T01:03:00.000Z"],
+        ["310000000000000021",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000022",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000031",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000032",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000041",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_guild_players": [
+        ["310000000000000001","310000000000000011",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000021",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000022",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000031",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000032",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000041",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_bank_accounts_global": [
+        ["310000000000000011",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000021",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000022",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000031",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000032",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000041",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_debts": [],
+      "coin_transactions": [
+        [1,"310000000000000001","310000000000000011","admin_add",0,2000,2000,"310000000000000009","合成測試：顧客預存吉幣",null,"global",1,"2026-03-02T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000011","chip_buy",2000,-120,1880,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":120,\"chipBalanceBeforeTopUp\":0}","global",2,"2026-03-03T01:00:00.000Z"],
+        [3,"310000000000000001","310000000000000011","chip_buy",1880,-60,1820,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":60,\"chipBalanceBeforeTopUp\":0}","global",3,"2026-03-03T01:01:00.000Z"],
+        [4,"310000000000000001","310000000000000011","chip_buy",1820,-80,1740,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":80,\"chipBalanceBeforeTopUp\":0}","global",4,"2026-03-03T01:02:00.000Z"],
+        [5,"310000000000000001","310000000000000011","chip_buy",1740,-50,1690,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":50,\"chipBalanceBeforeTopUp\":0}","global",5,"2026-03-03T01:03:00.000Z"]
+      ],
+      "coin_operation_receipts": [
+        ["venue-work-flows:seed-customer-coins","manual-adjustment","310000000000000011","310000000000000001","795aacbeeda6ebd8855e8163ec6771220434a276d2e19dee3fc2d2e5676b46e3",1,null,"2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_admin_logs": [
+        [1,"310000000000000001","310000000000000009","310000000000000011","coin_admin:add","合成測試：顧客預存吉幣","{\"before\":0,\"amount\":2000,\"after\":2000}","2026-03-02T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000009","310000000000000032","venue:reassign","原廚師忙碌，改派","{\"orderItemId\":1,\"orderId\":1,\"oldMakerId\":\"310000000000000031\",\"newMakerId\":\"310000000000000032\"}","2026-03-03T01:10:00.000Z"],
+        [3,"310000000000000001","310000000000000009","310000000000000022","venue:reassign-waiter","改由制服服務生送餐","{\"orderId\":1,\"oldWaiterId\":\"310000000000000021\",\"newWaiterId\":\"310000000000000022\"}","2026-03-03T01:15:00.000Z"],
+        [4,"310000000000000001","310000000000000009","310000000000000031","venue:cancel","顧客取消餐點","{\"orderItemId\":3,\"orderId\":2,\"itemType\":\"meal\",\"itemName\":\"小吉炒飯\"}","2026-03-03T01:20:00.000Z"],
+        [5,"310000000000000001","310000000000000009","310000000000000031","venue:cancel","食材不足","{\"orderItemId\":4,\"orderId\":3,\"itemType\":\"meal\",\"itemName\":\"招牌拉麵\"}","2026-03-03T01:25:00.000Z"],
+        [6,"310000000000000001","310000000000000032","310000000000000032","venue:make","完成餐飲製作","{\"orderId\":1,\"orderItemId\":1,\"itemType\":\"meal\",\"itemName\":\"皇家牛排\",\"jobId\":null,\"globalCycleId\":\"<cycle:second-chef#1>\",\"taskId\":11}","2026-03-03T01:30:00.000Z"],
+        [7,"310000000000000001","310000000000000041","310000000000000041","venue:make","完成餐飲製作","{\"orderId\":1,\"orderItemId\":2,\"itemType\":\"drink\",\"itemName\":\"星光氣泡飲\",\"jobId\":null,\"globalCycleId\":\"<cycle:bartender#1>\",\"taskId\":3}","2026-03-03T01:35:00.000Z"],
+        [8,"310000000000000001","310000000000000022","310000000000000011","venue:serve","服務生完成送達","{\"orderId\":1,\"tipAmount\":120,\"taskId\":12}","2026-03-03T01:40:00.000Z"],
+        [9,"310000000000000001","310000000000000041","310000000000000041","venue:make","完成餐飲製作","{\"orderId\":3,\"orderItemId\":5,\"itemType\":\"drink\",\"itemName\":\"翡翠檸檬茶\",\"jobId\":null,\"globalCycleId\":\"<cycle:bartender#1>\",\"taskId\":8}","2026-03-03T01:45:00.000Z"],
+        [10,"310000000000000001","310000000000000021","310000000000000011","venue:serve","服務生完成送達","{\"orderId\":3,\"tipAmount\":80,\"taskId\":6}","2026-03-03T01:50:00.000Z"]
+      ],
+      "chip_accounts_global": [
+        ["310000000000000011",110,"2026-03-03T01:00:00.000Z","2026-03-04T01:03:00.000Z"],
+        ["310000000000000021",80,"2026-03-03T01:50:00.000Z","2026-03-03T01:50:00.000Z"],
+        ["310000000000000022",120,"2026-03-03T01:40:00.000Z","2026-03-03T01:40:00.000Z"]
+      ],
+      "chip_ledger": [
+        [1,"310000000000000001","310000000000000011","auto_top_up",120,0,120,120,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":120}","2026-03-03T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000011","tip_escrow",-120,120,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":120}","2026-03-03T01:00:00.000Z"],
+        [3,"310000000000000001","310000000000000011","auto_top_up",60,0,60,60,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":60}","2026-03-03T01:01:00.000Z"],
+        [4,"310000000000000001","310000000000000011","tip_escrow",-60,60,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":60}","2026-03-03T01:01:00.000Z"],
+        [5,"310000000000000001","310000000000000011","auto_top_up",80,0,80,80,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":80}","2026-03-03T01:02:00.000Z"],
+        [6,"310000000000000001","310000000000000011","tip_escrow",-80,80,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":80}","2026-03-03T01:02:00.000Z"],
+        [7,"310000000000000001","310000000000000011","auto_top_up",50,0,50,50,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":50}","2026-03-03T01:03:00.000Z"],
+        [8,"310000000000000001","310000000000000011","tip_escrow",-50,50,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":50}","2026-03-03T01:03:00.000Z"],
+        [9,"310000000000000001","310000000000000011","tip_refund",60,0,60,0,0,null,"場館訂單 #2 已取消，退還小費。","{\"orderId\":2,\"waiterUserId\":\"310000000000000021\"}","2026-03-03T01:20:00.000Z"],
+        [10,"310000000000000001","310000000000000022","tip_payout",120,0,120,0,0,null,"場館訂單 #1 服務生小費","{\"orderId\":1,\"customerId\":\"310000000000000011\"}","2026-03-03T01:40:00.000Z"],
+        [11,"310000000000000001","310000000000000021","tip_payout",80,0,80,0,0,null,"場館訂單 #3 服務生小費","{\"orderId\":3,\"customerId\":\"310000000000000011\"}","2026-03-03T01:50:00.000Z"],
+        [12,"310000000000000001","310000000000000011","tip_refund",50,60,110,0,0,null,"場館訂單 #4 餐飲製作逾期由小吉接手，退還小費。","{\"orderId\":4,\"waiterUserId\":\"310000000000000021\"}","2026-03-04T01:03:00.000Z"]
+      ],
+      "reward_grants": [],
+      "reward_grants_v2": []
+    },
+    "settled": {
+      "casino_venue_menu": [
+        [1,"310000000000000001","meal","小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [2,"310000000000000001","meal","皇家牛排","將牛排兩面撒鹽與黑胡椒\n熱鍋煎至表面焦香\n加入奶油與香草淋油\n靜置後切片擺盤","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [3,"310000000000000001","meal","招牌拉麵","煮滾高湯並調整鹹度\n麵條煮至彈牙\n放入叉燒與配菜\n淋上香油後上桌","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [4,"310000000000000001","drink","星光氣泡飲","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n輕輕攪拌保留氣泡\n用薄荷葉裝飾","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [5,"310000000000000001","drink","翡翠檸檬茶","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n搖盪至均勻冰鎮\n倒入杯中加檸檬片","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null],
+        [6,"310000000000000001","drink","午夜無酒精調飲","杯中加入藍柑橘糖漿\n倒入葡萄汁與檸檬汁\n加冰搖盪\n濾入杯中並放上櫻桃","system","2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z",0,null,null,null]
+      ],
+      "casino_venue_orders": [
+        [1,"310000000000000001","310000000000000011","310000000000000002","310000000000000022",null,"制服服務生","2026-03-03T01:15:00.000Z","2026-03-04T01:00:00.000Z",120,"paid","2026-03-03T01:40:00.000Z",null,"2026-03-03T01:40:00.000Z","310000000000000022","completed","2026-03-03T01:00:00.000Z","2026-03-03T01:40:00.000Z","<cycle:uniform-waiter#1>"],
+        [2,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:01:00.000Z","2026-03-04T01:01:00.000Z",60,"refunded",null,"2026-03-03T01:20:00.000Z",null,null,"cancelled","2026-03-03T01:01:00.000Z","2026-03-03T01:20:00.000Z","<cycle:waiter#1>"],
+        [3,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:02:00.000Z","2026-03-04T01:02:00.000Z",80,"paid","2026-03-03T01:50:00.000Z",null,"2026-03-03T01:50:00.000Z","310000000000000021","completed","2026-03-03T01:02:00.000Z","2026-03-03T01:50:00.000Z","<cycle:waiter#1>"],
+        [4,"310000000000000001","310000000000000011","310000000000000002","310000000000000021",null,"服務生","2026-03-03T01:03:00.000Z","2026-03-04T01:03:00.000Z",50,"refunded",null,"2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z","system","completed","2026-03-03T01:03:00.000Z","2026-03-04T01:03:00.000Z","<cycle:waiter#1>"]
+      ],
+      "casino_venue_order_items": [
+        [1,"310000000000000001",1,"meal",2,"皇家牛排","將牛排兩面撒鹽與黑胡椒\n熱鍋煎至表面焦香\n加入奶油與香草淋油\n靜置後切片擺盤","310000000000000032",null,"廚師",0,"completed","牛排兩面撒鹽與黑胡椒\n熱鍋煎至焦香\n靜置後切片擺盤","2026-03-03",0,0,null,"2026-03-03T01:00:00.000Z","2026-03-03T01:10:00.000Z","2026-03-03T01:30:00.000Z","2026-03-03T01:30:00.000Z",null,null,null,"<cycle:second-chef#1>"],
+        [2,"310000000000000001",1,"drink",4,"星光氣泡飲","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n輕輕攪拌保留氣泡\n用薄荷葉裝飾","310000000000000041",null,"調酒師",0,"completed","杯中加入冰塊與莓果糖漿\n倒入氣泡水\n用薄荷葉裝飾","2026-03-03",0,0,null,"2026-03-03T01:00:00.000Z","2026-03-03T01:00:00.000Z","2026-03-03T01:35:00.000Z","2026-03-03T01:35:00.000Z",null,null,null,"<cycle:bartender#1>"],
+        [3,"310000000000000001",2,"meal",1,"小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","310000000000000031",null,"廚師",0,"cancelled",null,null,0,0,null,"2026-03-03T01:01:00.000Z","2026-03-03T01:01:00.000Z",null,"2026-03-03T01:20:00.000Z","2026-03-03T01:20:00.000Z","310000000000000009","顧客取消餐點","<cycle:chef#1>"],
+        [4,"310000000000000001",3,"meal",3,"招牌拉麵","煮滾高湯並調整鹹度\n麵條煮至彈牙\n放入叉燒與配菜\n淋上香油後上桌","310000000000000031",null,"廚師",0,"cancelled",null,null,0,0,null,"2026-03-03T01:02:00.000Z","2026-03-03T01:02:00.000Z",null,"2026-03-03T01:25:00.000Z","2026-03-03T01:25:00.000Z","310000000000000009","食材不足","<cycle:chef#1>"],
+        [5,"310000000000000001",3,"drink",5,"翡翠檸檬茶","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n搖盪至均勻冰鎮\n倒入杯中加檸檬片","310000000000000041",null,"調酒師",0,"completed","泡好綠茶並冷卻\n加入檸檬汁與糖漿\n倒入杯中加檸檬片","2026-03-03",0,0,null,"2026-03-03T01:02:00.000Z","2026-03-03T01:02:00.000Z","2026-03-03T01:45:00.000Z","2026-03-03T01:45:00.000Z",null,null,null,"<cycle:bartender#1>"],
+        [6,"310000000000000001",4,"meal",1,"小吉炒飯","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","310000000000000031",null,"廚師",1,"completed","熱鍋下油炒香蔥花\n加入白飯與配料拌炒\n淋上醬油調味\n盛盤後撒上海苔粉","2026-03-04",0,0,null,"2026-03-03T01:03:00.000Z","2026-03-03T01:03:00.000Z","2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z",null,null,null,"<cycle:chef#1>"]
+      ],
+      "coin_jobs": [],
+      "coin_work_tasks": [
+        [1,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","cancelled","訂單 #1 待送達，小費 120 籌碼。","[]","310000000000000002","服務生","venue-order-1",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:15:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [2,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #1｜皇家牛排 待製作","[]","310000000000000002","廚師","venue-item-1",0,"[]",null,null,0,null,0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z",null,"2026-03-03T01:10:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [3,"310000000000000001","310000000000000041",null,"調酒師","casino_venue_drink","paid","星光氣泡飲 製作完成\n杯中加入冰塊與莓果糖漿\n倒入氣泡水\n用薄荷葉裝飾","[]","310000000000000002","調酒師","venue-item-2",0,"[]",null,null,1,"2026-03-04T14:00:00.000Z",0,"2026-03-03T01:00:00.000Z","2026-03-03T11:00:00.000Z","2026-03-03T01:35:00.000Z","2026-03-04T14:00:00.000Z",null,0,null,"<cycle:bartender#1>"],
+        [4,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","cancelled","訂單 #2 待送達，小費 60 籌碼。","[]","310000000000000002","服務生","venue-order-2",0,"[]",null,"訂單已取消，服務生任務一併取消；小費已退還顧客。",0,null,0,"2026-03-03T01:01:00.000Z","2026-03-03T11:01:00.000Z",null,"2026-03-03T01:20:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [5,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #2｜小吉炒飯 待製作","[]","310000000000000002","廚師","venue-item-3",0,"[]",null,null,0,null,0,"2026-03-03T01:01:00.000Z","2026-03-03T11:01:00.000Z",null,"2026-03-03T01:20:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [6,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","paid","訂單 #3 已送達，收到小費 80 籌碼。","[]","310000000000000002","服務生","venue-order-3",0,"[]",null,null,1,"2026-03-04T14:00:00.000Z",0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z","2026-03-03T01:50:00.000Z","2026-03-04T14:00:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [7,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","cancelled","訂單 #3｜招牌拉麵 待製作","[]","310000000000000002","廚師","venue-item-4",0,"[]",null,null,0,null,0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z",null,"2026-03-03T01:25:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [8,"310000000000000001","310000000000000041",null,"調酒師","casino_venue_drink","paid","翡翠檸檬茶 製作完成\n泡好綠茶並冷卻\n加入檸檬汁與糖漿\n倒入杯中加檸檬片","[]","310000000000000002","調酒師","venue-item-5",0,"[]",null,null,1,"2026-03-04T14:00:00.000Z",0,"2026-03-03T01:02:00.000Z","2026-03-03T11:02:00.000Z","2026-03-03T01:45:00.000Z","2026-03-04T14:00:00.000Z",null,0,null,"<cycle:bartender#1>"],
+        [9,"310000000000000001","310000000000000021",null,"服務生","casino_venue_service","system_completed","訂單 #4 待送達，小費 50 籌碼。","[]","310000000000000002","服務生","venue-order-4",0,"[]",null,"餐飲製作逾期由小吉接手，服務生不算逾期；小費已退還顧客。",0,null,0,"2026-03-03T01:03:00.000Z","2026-03-03T11:03:00.000Z","2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z",null,0,null,"<cycle:waiter#1>"],
+        [10,"310000000000000001","310000000000000031",null,"廚師","casino_venue_meal","system_completed","訂單 #4｜小吉炒飯 待製作","[]","310000000000000002","廚師","venue-item-6",0,"[]",null,"逾期 24 小時未完成，由系統接手。",0,null,0,"2026-03-03T01:03:00.000Z","2026-03-03T11:03:00.000Z","2026-03-04T01:03:00.000Z","2026-03-04T01:03:00.000Z",null,0,null,"<cycle:chef#1>"],
+        [11,"310000000000000001","310000000000000032",null,"廚師","casino_venue_meal","paid","皇家牛排 製作完成\n牛排兩面撒鹽與黑胡椒\n熱鍋煎至焦香\n靜置後切片擺盤","[]","310000000000000002","廚師","venue-item-1",0,"[]",null,null,1,"2026-03-04T14:00:00.000Z",0,"2026-03-03T01:10:00.000Z","2026-03-03T11:10:00.000Z","2026-03-03T01:30:00.000Z","2026-03-04T14:00:00.000Z",null,0,null,"<cycle:second-chef#1>"],
+        [12,"310000000000000001","310000000000000022",null,"制服服務生","casino_venue_service","paid","訂單 #1 已送達，收到小費 120 籌碼。","[]","310000000000000002","制服服務生","venue-order-1",0,"[]",null,null,1,"2026-03-04T14:00:00.000Z",0,"2026-03-03T01:15:00.000Z","2026-03-03T11:15:00.000Z","2026-03-03T01:40:00.000Z","2026-03-04T14:00:00.000Z",null,0,null,"<cycle:uniform-waiter#1>"]
+      ],
+      "coin_work_penalties": [],
+      "coin_work_penalty_appeals": [],
+      "coin_payroll_history": [],
+      "coin_work_legacy_snapshots": [],
+      "coin_work_legacy_snapshot_items": [],
+      "coin_work_legacy_settlements": [],
+      "coin_primary_jobs_global": [
+        ["310000000000000021","服務生",2,null,"310000000000000001","<cycle:waiter#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","closed","2026-03-04T14:00:00.000Z"],
+        ["310000000000000022","制服服務生",2,null,"310000000000000001","<cycle:uniform-waiter#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","closed","2026-03-04T14:00:00.000Z"],
+        ["310000000000000031","廚師",2,null,"310000000000000001","<cycle:chef#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","closed","2026-03-04T14:00:00.000Z"],
+        ["310000000000000032","廚師",2,null,"310000000000000001","<cycle:second-chef#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","closed","2026-03-04T14:00:00.000Z"],
+        ["310000000000000041","調酒師",2,null,"310000000000000001","<cycle:bartender#1>","2026-03-02T01:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","closed","2026-03-04T14:00:00.000Z"]
+      ],
+      "coin_primary_job_cycles": [
+        ["<cycle:bartender#1>","310000000000000041","調酒師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":60,\"basicRatio\":0.75,\"translatorBonus\":0}","settled","<reward-key:work-settlement|primary:<cycle:bartender#1>|salary|310000000000000041>","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z"],
+        ["<cycle:chef#1>","310000000000000031","廚師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":70,\"basicRatio\":0.75,\"translatorBonus\":0}","settled","<reward-key:work-settlement|primary:<cycle:chef#1>|salary|310000000000000031>","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z"],
+        ["<cycle:second-chef#1>","310000000000000032","廚師",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":70,\"basicRatio\":0.75,\"translatorBonus\":0}","settled","<reward-key:work-settlement|primary:<cycle:second-chef#1>|salary|310000000000000032>","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z"],
+        ["<cycle:uniform-waiter#1>","310000000000000022","制服服務生",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":0,\"basicRatio\":0.75,\"translatorBonus\":0}","settled","<reward-key:work-settlement|primary:<cycle:uniform-waiter#1>|salary|310000000000000022>","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z"],
+        ["<cycle:waiter#1>","310000000000000021","服務生",2,"310000000000000001","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z","primary-v1","{\"version\":\"primary-v1\",\"dailySalary\":0,\"basicRatio\":0.75,\"translatorBonus\":0}","settled","<reward-key:work-settlement|primary:<cycle:waiter#1>|salary|310000000000000021>","2026-03-02T14:00:00.000Z","2026-03-04T14:00:00.000Z"]
+      ],
+      "coin_primary_cycle_penalties": [
+        [1,"<cycle:chef#1>","310000000000000031",10,70,"active","工作任務逾期 24 小時未完成，由系統接手。","2026-03-04T14:00:00.000Z",null,"2026-03-18T01:03:00.000Z","2026-03-04T01:03:00.000Z","2026-03-04T14:00:00.000Z"]
+      ],
+      "coin_primary_cycle_penalty_appeals": [],
+      "coin_primary_cycle_payroll": [
+        ["<cycle:bartender#1>","310000000000000041","310000000000000001",120,120,1,"有效工作依固定日薪與已核加給結算。","<reward-key:work-settlement|primary:<cycle:bartender#1>|salary|310000000000000041>",7,"2026-03-04T14:00:00.000Z"],
+        ["<cycle:chef#1>","310000000000000031","310000000000000001",0,0,0,"沒有有效工作或無工作回報，本期薪資為零。","<reward-key:work-settlement|primary:<cycle:chef#1>|salary|310000000000000031>",null,"2026-03-04T14:00:00.000Z"],
+        ["<cycle:second-chef#1>","310000000000000032","310000000000000001",140,140,1,"有效工作依固定日薪與已核加給結算。","<reward-key:work-settlement|primary:<cycle:second-chef#1>|salary|310000000000000032>",6,"2026-03-04T14:00:00.000Z"],
+        ["<cycle:uniform-waiter#1>","310000000000000022","310000000000000001",0,0,1,"有效工作依固定日薪與已核加給結算。","<reward-key:work-settlement|primary:<cycle:uniform-waiter#1>|salary|310000000000000022>",null,"2026-03-04T14:00:00.000Z"],
+        ["<cycle:waiter#1>","310000000000000021","310000000000000001",0,0,1,"有效工作依固定日薪與已核加給結算。","<reward-key:work-settlement|primary:<cycle:waiter#1>|salary|310000000000000021>",null,"2026-03-04T14:00:00.000Z"]
+      ],
+      "coin_guild_settings": [
+        ["310000000000000001",1,50,20,100,0,1,null,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_wallets": [
+        ["310000000000000011",1690,2000,0,5,"2026-03-02T01:00:00.000Z","2026-03-03T01:03:00.000Z"],
+        ["310000000000000021",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000022",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000031",0,0,0,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000032",140,140,0,1,"2026-03-02T01:00:00.000Z","2026-03-04T14:00:00.000Z"],
+        ["310000000000000041",120,120,0,1,"2026-03-02T01:00:00.000Z","2026-03-04T14:00:00.000Z"]
+      ],
+      "coin_guild_players": [
+        ["310000000000000001","310000000000000011",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000021",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000022",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000031",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000032",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000001","310000000000000041",0,0,null,null,0,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_bank_accounts_global": [
+        ["310000000000000011",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000021",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000022",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000031",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000032",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"],
+        ["310000000000000041",0,0,null,"2026-03-02T01:00:00.000Z","2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_debts": [],
+      "coin_transactions": [
+        [1,"310000000000000001","310000000000000011","admin_add",0,2000,2000,"310000000000000009","合成測試：顧客預存吉幣",null,"global",1,"2026-03-02T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000011","chip_buy",2000,-120,1880,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":120,\"chipBalanceBeforeTopUp\":0}","global",2,"2026-03-03T01:00:00.000Z"],
+        [3,"310000000000000001","310000000000000011","chip_buy",1880,-60,1820,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":60,\"chipBalanceBeforeTopUp\":0}","global",3,"2026-03-03T01:01:00.000Z"],
+        [4,"310000000000000001","310000000000000011","chip_buy",1820,-80,1740,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":80,\"chipBalanceBeforeTopUp\":0}","global",4,"2026-03-03T01:02:00.000Z"],
+        [5,"310000000000000001","310000000000000011","chip_buy",1740,-50,1690,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpFor\":\"tip_escrow\",\"requiredAmount\":50,\"chipBalanceBeforeTopUp\":0}","global",5,"2026-03-03T01:03:00.000Z"],
+        [6,"310000000000000001","310000000000000032","system_reward",0,140,140,null,"work-settlement:salary","{\"rewardKey\":\"<reward-key:work-settlement|primary:<cycle:second-chef#1>|salary|310000000000000032>\",\"canonicalSourceId\":\"primary:<cycle:second-chef#1>\"}","global",1,"2026-03-04T14:00:00.000Z"],
+        [7,"310000000000000001","310000000000000041","system_reward",0,120,120,null,"work-settlement:salary","{\"rewardKey\":\"<reward-key:work-settlement|primary:<cycle:bartender#1>|salary|310000000000000041>\",\"canonicalSourceId\":\"primary:<cycle:bartender#1>\"}","global",1,"2026-03-04T14:00:00.000Z"]
+      ],
+      "coin_operation_receipts": [
+        ["venue-work-flows:seed-customer-coins","manual-adjustment","310000000000000011","310000000000000001","795aacbeeda6ebd8855e8163ec6771220434a276d2e19dee3fc2d2e5676b46e3",1,null,"2026-03-02T01:00:00.000Z"]
+      ],
+      "coin_admin_logs": [
+        [1,"310000000000000001","310000000000000009","310000000000000011","coin_admin:add","合成測試：顧客預存吉幣","{\"before\":0,\"amount\":2000,\"after\":2000}","2026-03-02T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000009","310000000000000032","venue:reassign","原廚師忙碌，改派","{\"orderItemId\":1,\"orderId\":1,\"oldMakerId\":\"310000000000000031\",\"newMakerId\":\"310000000000000032\"}","2026-03-03T01:10:00.000Z"],
+        [3,"310000000000000001","310000000000000009","310000000000000022","venue:reassign-waiter","改由制服服務生送餐","{\"orderId\":1,\"oldWaiterId\":\"310000000000000021\",\"newWaiterId\":\"310000000000000022\"}","2026-03-03T01:15:00.000Z"],
+        [4,"310000000000000001","310000000000000009","310000000000000031","venue:cancel","顧客取消餐點","{\"orderItemId\":3,\"orderId\":2,\"itemType\":\"meal\",\"itemName\":\"小吉炒飯\"}","2026-03-03T01:20:00.000Z"],
+        [5,"310000000000000001","310000000000000009","310000000000000031","venue:cancel","食材不足","{\"orderItemId\":4,\"orderId\":3,\"itemType\":\"meal\",\"itemName\":\"招牌拉麵\"}","2026-03-03T01:25:00.000Z"],
+        [6,"310000000000000001","310000000000000032","310000000000000032","venue:make","完成餐飲製作","{\"orderId\":1,\"orderItemId\":1,\"itemType\":\"meal\",\"itemName\":\"皇家牛排\",\"jobId\":null,\"globalCycleId\":\"<cycle:second-chef#1>\",\"taskId\":11}","2026-03-03T01:30:00.000Z"],
+        [7,"310000000000000001","310000000000000041","310000000000000041","venue:make","完成餐飲製作","{\"orderId\":1,\"orderItemId\":2,\"itemType\":\"drink\",\"itemName\":\"星光氣泡飲\",\"jobId\":null,\"globalCycleId\":\"<cycle:bartender#1>\",\"taskId\":3}","2026-03-03T01:35:00.000Z"],
+        [8,"310000000000000001","310000000000000022","310000000000000011","venue:serve","服務生完成送達","{\"orderId\":1,\"tipAmount\":120,\"taskId\":12}","2026-03-03T01:40:00.000Z"],
+        [9,"310000000000000001","310000000000000041","310000000000000041","venue:make","完成餐飲製作","{\"orderId\":3,\"orderItemId\":5,\"itemType\":\"drink\",\"itemName\":\"翡翠檸檬茶\",\"jobId\":null,\"globalCycleId\":\"<cycle:bartender#1>\",\"taskId\":8}","2026-03-03T01:45:00.000Z"],
+        [10,"310000000000000001","310000000000000021","310000000000000011","venue:serve","服務生完成送達","{\"orderId\":3,\"tipAmount\":80,\"taskId\":6}","2026-03-03T01:50:00.000Z"]
+      ],
+      "chip_accounts_global": [
+        ["310000000000000011",110,"2026-03-03T01:00:00.000Z","2026-03-04T01:03:00.000Z"],
+        ["310000000000000021",80,"2026-03-03T01:50:00.000Z","2026-03-03T01:50:00.000Z"],
+        ["310000000000000022",120,"2026-03-03T01:40:00.000Z","2026-03-03T01:40:00.000Z"]
+      ],
+      "chip_ledger": [
+        [1,"310000000000000001","310000000000000011","auto_top_up",120,0,120,120,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":120}","2026-03-03T01:00:00.000Z"],
+        [2,"310000000000000001","310000000000000011","tip_escrow",-120,120,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":120}","2026-03-03T01:00:00.000Z"],
+        [3,"310000000000000001","310000000000000011","auto_top_up",60,0,60,60,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":60}","2026-03-03T01:01:00.000Z"],
+        [4,"310000000000000001","310000000000000011","tip_escrow",-60,60,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":60}","2026-03-03T01:01:00.000Z"],
+        [5,"310000000000000001","310000000000000011","auto_top_up",80,0,80,80,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":80}","2026-03-03T01:02:00.000Z"],
+        [6,"310000000000000001","310000000000000011","tip_escrow",-80,80,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":80}","2026-03-03T01:02:00.000Z"],
+        [7,"310000000000000001","310000000000000011","auto_top_up",50,0,50,50,0,null,"場館小費自動補足籌碼","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"requiredAmount\":50}","2026-03-03T01:03:00.000Z"],
+        [8,"310000000000000001","310000000000000011","tip_escrow",-50,50,0,0,0,null,"場館訂單服務生小費保管","{\"waiterId\":\"310000000000000021\",\"waiterJobName\":\"服務生\",\"autoTopUpAmount\":50}","2026-03-03T01:03:00.000Z"],
+        [9,"310000000000000001","310000000000000011","tip_refund",60,0,60,0,0,null,"場館訂單 #2 已取消，退還小費。","{\"orderId\":2,\"waiterUserId\":\"310000000000000021\"}","2026-03-03T01:20:00.000Z"],
+        [10,"310000000000000001","310000000000000022","tip_payout",120,0,120,0,0,null,"場館訂單 #1 服務生小費","{\"orderId\":1,\"customerId\":\"310000000000000011\"}","2026-03-03T01:40:00.000Z"],
+        [11,"310000000000000001","310000000000000021","tip_payout",80,0,80,0,0,null,"場館訂單 #3 服務生小費","{\"orderId\":3,\"customerId\":\"310000000000000011\"}","2026-03-03T01:50:00.000Z"],
+        [12,"310000000000000001","310000000000000011","tip_refund",50,60,110,0,0,null,"場館訂單 #4 餐飲製作逾期由小吉接手，退還小費。","{\"orderId\":4,\"waiterUserId\":\"310000000000000021\"}","2026-03-04T01:03:00.000Z"]
+      ],
+      "reward_grants": [],
+      "reward_grants_v2": [
+        [1,"<reward-key:work-settlement|primary:<cycle:second-chef#1>|salary|310000000000000032>","work-settlement:primary:<cycle:second-chef#1>","work-settlement","primary:<cycle:second-chef#1>","salary","310000000000000032","310000000000000001",140,"<payload-hash:verified>","{}",0,140,6,null,"2026-03-04T14:00:00.000Z"],
+        [2,"<reward-key:work-settlement|primary:<cycle:bartender#1>|salary|310000000000000041>","work-settlement:primary:<cycle:bartender#1>","work-settlement","primary:<cycle:bartender#1>","salary","310000000000000041","310000000000000001",120,"<payload-hash:verified>","{}",0,120,7,null,"2026-03-04T14:00:00.000Z"]
+      ]
+    }
+  }
+}

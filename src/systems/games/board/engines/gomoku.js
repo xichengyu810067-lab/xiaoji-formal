@@ -1,5 +1,5 @@
-const { BoardRuleError } = require('../../../../games/contracts');
-const { isTrustedSystemAction } = require('../../../../games/trustedSystemActions');
+const { BoardRuleError } = require('../core/contracts');
+const { isTrustedSystemAction } = require('../core/trustedSystemActions');
 
 const RULES_VERSION = '1.0.0';
 const SIZE = 15;

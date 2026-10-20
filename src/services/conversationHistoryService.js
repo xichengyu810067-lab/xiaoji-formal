@@ -1,7 +1,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const logger = require('../utils/logger');
+const { runWithBackgroundContext } = require('../platform/hostOperationContext');
 const { captureProofFor, hasPublicCaptureProof, isCurrentPublicChannel } = require('../systems/conversation/publicVisibility');
+const {
+  getConversationDecisionPayload,
+  getMessageDecisionContext,
+  sanitizeUntrustedText,
+  verifyConversationDecisionContext,
+} = require('../systems/conversation/disclosurePolicy');
 
 const DEFAULT_HISTORY_PATH = path.join(__dirname, '..', '..', 'data', 'aiConversationHistory.json');
 const DEFAULT_RETENTION_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -177,10 +184,19 @@ function getRecentConversationTurns(identity, { requirePublicCapture = false } =
 }
 
 function truncateText(value) {
-  return String(value || '').trim().slice(0, getLimits().maxTextLength);
+  return sanitizeUntrustedText(value).trim().slice(0, getLimits().maxTextLength);
 }
 
-function rememberConversationTurn(identity, userText, assistantText, now = new Date(), { captureMessage = null } = {}) {
+function rememberConversationTurn(identity, decision, now = new Date(), { captureMessage = null } = {}) {
+  const payload = getConversationDecisionPayload(decision);
+  if (!payload.historyAllowed) return Promise.resolve({ persisted: false, reason: 'decision_denied' });
+  const context = getMessageDecisionContext(captureMessage);
+  verifyConversationDecisionContext(decision, context, 'history');
+  if (String(identity.userId || identity.username || '') !== context.actorId ||
+      String(identity.guildId || 'dm') !== String(context.guildId || 'dm') ||
+      String(identity.channelId || '') !== context.channelId) {
+    throw new TypeError('Conversation history identity does not match the authorized context.');
+  }
   const guildId = String(identity.guildId || 'dm');
   const channelId = String(identity.channelId || 'unknown-channel');
   const userId = String(identity.userId || identity.username || 'unknown-user');
@@ -200,8 +216,8 @@ function rememberConversationTurn(identity, userText, assistantText, now = new D
     };
     conversation.updatedAt = timestamp;
     const turn = {
-      user: truncateText(userText),
-      assistant: truncateText(assistantText),
+      user: truncateText(payload.userText),
+      assistant: truncateText(payload.text),
       createdAt: timestamp,
     };
     if (guildId !== 'dm' && hasPublicCaptureProof({ captureProof })) turn.captureProof = captureProof;
@@ -261,7 +277,8 @@ function startConversationHistoryCleanupScheduler({
     }
   };
 
-  const timer = setIntervalFn(runCleanup, intervalMs);
+  // Each cleanup run is its own background job run.
+  const timer = setIntervalFn(() => runWithBackgroundContext('conversation-history.cleanup', runCleanup), intervalMs);
   timer.unref?.();
   retentionCleanupTimer = timer;
   cancelRetentionCleanupTimer = () => clearIntervalFn(timer);

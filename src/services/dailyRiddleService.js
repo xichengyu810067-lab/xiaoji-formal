@@ -1,10 +1,12 @@
 const { createHash, randomUUID } = require('node:crypto');
 const { EmbedBuilder } = require('discord.js');
 const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
-const { grantRewardOnce, setFeatureHealth } = require('./featurePlatformService');
+const { ensureGuildEconomyRowWithApi, readGuildEconomyEnabledWithApi } = require('./coinService');
+const { getGuildFeatureSetting, grantRewardOnce, setFeatureHealth } = require('./featurePlatformService');
 const { corpusVersion, riddles, selectRiddleForDate } = require('./dailyRiddleCorpus');
 const { getNextTaipeiOccurrence, getTaipeiDateKey, getTaipeiMinuteOfDay } = require('../utils/taipeiClock');
 const logger = require('../utils/logger');
+const { runWithBackgroundContext } = require('../platform/hostOperationContext');
 
 const FEATURE_KEY = 'daily_riddle';
 const EVENT_KIND = 'riddle';
@@ -17,6 +19,9 @@ const MAX_HISTORY_PAGES = 20;
 const HISTORY_PAGE_SIZE = 100;
 const SCHEDULER_INTERVAL_MS = 60_000;
 const LEASE_MS = 15 * 60_000;
+// The boundary timer and the 60-second watchdog always run a little after the exact start of the window, so a post
+// made within this grace after the start is on time, not late.
+const ON_TIME_GRACE_MS = 2 * 60_000;
 const TAIPEI_BOUNDARY_MINUTES = Object.freeze([0, PUBLISH_MINUTE, SETTLE_MINUTE]);
 const graphemeSegmenter = new Intl.Segmenter('zh-TW', { granularity: 'grapheme' });
 let schedulerState = null;
@@ -102,6 +107,17 @@ function stableMarker(kind, guildId, localDate, riddleId) {
     .digest('hex')
     .slice(0, 24);
   return `xiaoji-daily-riddle:${kind}:${digest}`;
+}
+
+// What members read in the footer of the public posts. The stable markers stay in the event row as an internal key
+// and are never shown. The footer names the day, which is unique to the post: one question and one answer for each
+// guild and day, found again by the footer when a post was sent but not yet recorded.
+function publishFooter(event) {
+  return `每日猜謎・${event.localDate}`;
+}
+
+function answerFooter(event) {
+  return `每日猜謎解答・${event.localDate}`;
 }
 
 function mapEvent(row) {
@@ -253,7 +269,10 @@ function messageFooter(message) {
   return message?.embeds?.[0]?.footer?.text || message?.embeds?.[0]?.data?.footer?.text || null;
 }
 
-async function findMarkedMessage(channel, marker, botUserId, { lowerBound, maxPages = MAX_HISTORY_PAGES } = {}) {
+// `markers` are the footers that tell a post of this event: the footer shown today and, for a post sent before the
+// footer was changed, the stable marker it carried then.
+async function findMarkedMessage(channel, markers, botUserId, { lowerBound, maxPages = MAX_HISTORY_PAGES } = {}) {
+  const accepted = new Set([markers].flat());
   if (!channel?.messages?.fetch) throw new DailyRiddleError('READ_HISTORY_UNAVAILABLE', 'Message history is unavailable.');
   const lowerBoundMs = requireNow(lowerBound).getTime();
   let before;
@@ -261,7 +280,7 @@ async function findMarkedMessage(channel, marker, botUserId, { lowerBound, maxPa
     const page = collectionValues(await channel.messages.fetch({ limit: HISTORY_PAGE_SIZE, ...(before ? { before } : {}) }));
     const match = page.find((message) => {
       const createdMs = new Date(message.createdAt || message.createdTimestamp).getTime();
-      return createdMs >= lowerBoundMs && message?.author?.id === botUserId && messageFooter(message) === marker;
+      return createdMs >= lowerBoundMs && message?.author?.id === botUserId && accepted.has(messageFooter(message));
     });
     if (match) return { complete: true, message: match, reason: null };
     if (page.length < HISTORY_PAGE_SIZE) return { complete: true, message: null, reason: null };
@@ -305,7 +324,7 @@ function buildQuestionEmbed(event, riddle) {
     .setTitle('小吉每日猜謎')
     .setDescription(riddle.question)
     .addFields({ name: '參加方式', value: '請到本訊息的討論串回答或討論。公布答案前的有效參與可獲得 30 吉幣，答對再加 50 吉幣。' })
-    .setFooter({ text: event.publishMarker });
+    .setFooter({ text: publishFooter(event) });
 }
 
 function buildAnswerEmbed(event, riddle) {
@@ -314,7 +333,7 @@ function buildAnswerEmbed(event, riddle) {
     .setTitle('小吉每日猜謎答案')
     .setDescription(`標準答案：**${riddle.canonicalAnswer}**`)
     .addFields({ name: '解說', value: riddle.explanation })
-    .setFooter({ text: event.answerMarker });
+    .setFooter({ text: answerFooter(event) });
 }
 
 async function persistPublishedEvent(eventId, announcementMessageId, threadId, status, now, leaseOwner) {
@@ -398,7 +417,7 @@ async function publishDailyRiddle(
     ? await channel.messages.fetch(event.announcementMessageId).catch(() => null)
     : null;
   if (!announcement) {
-    const markerResult = await findMarkedMessage(channel, event.publishMarker, client.user.id, {
+    const markerResult = await findMarkedMessage(channel, [publishFooter(event), event.publishMarker], client.user.id, {
       lowerBound: event.createdAt,
       maxPages: maxMarkerPages,
     });
@@ -435,7 +454,7 @@ async function publishDailyRiddle(
 
     const persistNow = operationNow();
     await revalidatePublishLease(event.id, normalizedLeaseOwner, persistNow);
-    const status = date.getTime() > new Date(event.windowStartAt).getTime() ? 'published_late' : 'published';
+    const status = date.getTime() - new Date(event.windowStartAt).getTime() > ON_TIME_GRACE_MS ? 'published_late' : 'published';
     const persisted = await persistPublishedEvent(
       event.id, announcement.id, thread.id, status, persistNow, normalizedLeaseOwner
     );
@@ -735,13 +754,8 @@ async function settleDailyRiddle(
 
   const economyEnabled = await withCoinTransaction((api) => {
     const timestamp = date.toISOString();
-    api.run(
-      `INSERT INTO coin_guild_settings (guild_id, created_at, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(guild_id) DO NOTHING`,
-      [settling.guildId, timestamp, timestamp]
-    );
-    return Number(api.get('SELECT enabled FROM coin_guild_settings WHERE guild_id = ?', [settling.guildId])?.enabled) === 1;
+    ensureGuildEconomyRowWithApi(api, settling.guildId, timestamp);
+    return Number(readGuildEconomyEnabledWithApi(api, settling.guildId)) === 1;
   });
   if (!economyEnabled) {
     const error = new DailyRiddleError('COIN_DISABLED', 'Guild coin system is disabled.');
@@ -759,7 +773,7 @@ async function settleDailyRiddle(
     ? await thread.messages.fetch(settling.answerMessageId).catch(() => null)
     : null;
   if (!answerMessage) {
-    const markerResult = await findMarkedMessage(thread, settling.answerMarker, client.user.id, {
+    const markerResult = await findMarkedMessage(thread, [answerFooter(settling), settling.answerMarker], client.user.id, {
       lowerBound: settling.windowEndAt,
       maxPages: maxMarkerPages,
     });
@@ -923,6 +937,46 @@ async function processDailyRiddleTick(client, { now = new Date(), maxGuilds = 10
   return summary;
 }
 
+async function openOrGetDailyRiddle(client, { guildId, now = new Date(), hooks = {} } = {}) {
+  const date = requireNow(now);
+  const localDate = getTaipeiDateKey(date);
+  const setting = await getGuildFeatureSetting(requireId(guildId, 'guildId'), FEATURE_KEY);
+  if (!setting.enabled || !setting.channelId) {
+    return { available: false, code: 'RIDDLE_DISABLED', phase: getRiddlePhase(date), event: null };
+  }
+
+  let event = await getDailyRiddleEvent(guildId, localDate);
+  if (event && event.status !== 'claimed') {
+    return { available: Boolean(event.threadId), code: event.status, phase: getRiddlePhase(date), event };
+  }
+  const phase = getRiddlePhase(date);
+  if (phase === 'before') return { available: false, code: 'RIDDLE_NOT_OPEN', phase, event };
+  if (phase === 'settlement') return { available: Boolean(event?.threadId), code: event?.status || 'RIDDLE_CLOSED', phase, event };
+
+  const claimed = await claimDailyRiddleEvent({
+    guildId,
+    parentChannelId: setting.channelId,
+    localDate,
+    now: date,
+  });
+  event = claimed.event;
+  if (!claimed.claimed) {
+    return { available: Boolean(event?.threadId), code: event?.status || 'RIDDLE_OPENING', phase, event };
+  }
+  try {
+    event = await publishDailyRiddle(client, event, { now: date, leaseOwner: claimed.leaseOwner, ...hooks });
+    return { available: true, code: event.status, phase, event };
+  } catch (error) {
+    event = await setEventFailure(event.id, 'publish', error, {
+      terminal: error?.code === 'MARKER_HISTORY_INCOMPLETE',
+      now: date,
+      leaseKind: 'publish',
+      leaseOwner: claimed.leaseOwner,
+    });
+    throw new DailyRiddleError(error?.code || 'RIDDLE_PUBLISH_FAILED', `Daily riddle could not be opened (${event.status}).`);
+  }
+}
+
 function getNextRiddleBoundaryDelay(now = new Date()) {
   const date = requireNow(now);
   return Math.min(
@@ -944,11 +998,12 @@ async function startDailyRiddleScheduler(client, options = {}) {
     tick = processDailyRiddleTick,
   } = options;
   let tickRunning = false;
+  // Every tick (the first one, boundary and watchdog runs) is its own background job run.
   const runTick = async () => {
     if (tickRunning) return;
     tickRunning = true;
     try {
-      await tick(client, { now: nowFn() });
+      await runWithBackgroundContext('daily-riddle.tick', () => tick(client, { now: nowFn() }));
     } finally {
       tickRunning = false;
     }
@@ -1011,6 +1066,7 @@ module.exports = {
   isCorrectDailyRiddleAnswer,
   isEligibleRiddleMessage,
   normalizeDailyRiddleAnswer,
+  openOrGetDailyRiddle,
   processDailyRiddleTick,
   publishDailyRiddle,
   reconcileRiddleHistory,

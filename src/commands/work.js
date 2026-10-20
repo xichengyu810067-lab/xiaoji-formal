@@ -1,9 +1,9 @@
 const { PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const {
   JOB_TYPES,
+  RESIGNATION_UNAVAILABLE_MESSAGE,
   TASK_STATUS,
   addPendingTask,
-  cancelJob,
   createWorkPenaltyAppeal,
   createPrimaryPenaltyAppeal,
   deleteWorkSubmission,
@@ -27,15 +27,20 @@ const {
   startJob,
   startVenueJobs,
 } = require('../services/workService');
-const { formatCoins, formatUser, replyCoinError } = require('../utils/coinPresentation');
+const {
+  formatCoins,
+  formatSourceGuild,
+  formatUser,
+  formatWorkStatus: statusLabel,
+  isForeignPrimaryJob,
+  isPrimaryPayrollVisibleTo,
+  replyCoinError,
+} = require('../utils/coinPresentation');
 const { ensureModerationAccess } = require('../utils/moderation');
+const { reportInteractionSecurityAlert } = require('../utils/securityAlert');
 const { isBotOwner } = require('../utils/ownerOnly');
-const { getClientExtensionHost } = require('../extensions/extensionHost');
-
-async function runWorkRoleHook(client, hookName, payload, fallback = { ok: true, skipped: true, role: null, warnings: [] }) {
-  const results = await getClientExtensionHost(client).runHook(`workRole.${hookName}`, payload);
-  return results.find((item) => item.result !== undefined)?.result || fallback;
-}
+const { clipText, fitListText, fitReplyText, listRows, omittedLine } = require('../utils/replyLengthGuard');
+const { workRoleCoordinator } = require('../coordinators/workRoleCoordinator');
 
 const taskStatusChoices = [
   { name: '待審核', value: TASK_STATUS.PENDING },
@@ -63,28 +68,6 @@ function formatPercent(value) {
   return `${(Number(value || 0) * 100).toFixed(1)}%`;
 }
 
-function statusLabel(status) {
-  const labels = {
-    active: '進行中',
-    paid: '已發薪',
-    canceled: '已取消',
-    failed: '發薪失敗',
-    pending: '待審核',
-    approved: '已核准',
-    rejected: '已駁回',
-    deleted: '已刪除',
-    completed: '已完成',
-    system_completed: '小吉接手完成',
-    expired: '已逾期',
-    cancelled: '已取消',
-    no_work_available: '無工作可做',
-    pending_legacy: '等待舊工作結清',
-    closed: '本期已結束',
-  };
-
-  return labels[status] || status || '未知';
-}
-
 function addOptionalUserLimitOptions(subcommand) {
   return subcommand
     .addUserOption((option) => option.setName('user').setDescription('要查詢的使用者'))
@@ -105,7 +88,10 @@ function formatRoleWarnings(warnings) {
   return ['', '**身分組提醒**', ...warnings.map((warning) => `• ${warning}`)];
 }
 
-function formatJobBlock(job, { includeUser = false } = {}) {
+// roleSync says whether an extension syncs the primary job's role. Without one the core syncs no job role, so the
+// block says nothing about it. guildId is the server the command ran in: a primary job chosen in another server is
+// shown as coming from "其他伺服器", without that server's ID.
+function formatJobBlock(job, { includeUser = false, roleSync = false, guildId = null } = {}) {
   if (!job) {
     return '目前沒有進行中的工作。';
   }
@@ -113,18 +99,20 @@ function formatJobBlock(job, { includeUser = false } = {}) {
   const jobType = JOB_TYPES.find((item) => item.name === job.jobName);
 
   if (job.scope === 'primary') {
+    const fromThisServer = Boolean(job.sourceGuildId) && job.sourceGuildId === guildId;
+
     return [
       includeUser ? `使用者：<@${job.userId}>` : null,
       `全域主職：${job.jobName}`,
       includeUser ? `週期 ID：${job.globalCycleId}` : null,
-      includeUser ? `選擇來源群 ID：${job.sourceGuildId}` : null,
+      includeUser ? `選擇來源群${fromThisServer ? ' ID' : ''}：${formatSourceGuild(job.sourceGuildId, guildId)}` : null,
       `天數：${job.workDays} 天`,
       `狀態：${statusLabel(job.status)}`,
       job.status === 'pending_legacy' ? `最早生效：${formatTimestamp(job.notBeforeAt)}` : null,
       job.startAt ? `生效時間：${formatTimestamp(job.startAt)}` : null,
       job.payAt ? `本期結束：${formatTimestamp(job.payAt)}` : null,
       job.settledAmount == null ? '本期薪資：尚未結算' : `實際發放：${formatCoins(job.settledAmount)}`,
-      '角色同步：由私有擴充核對',
+      roleSync ? '角色同步：由管理功能核對' : null,
     ].filter(Boolean).join('\n');
   }
 
@@ -145,13 +133,15 @@ function formatJobBlock(job, { includeUser = false } = {}) {
     .join('\n');
 }
 
-function formatTaskLine(task) {
+// The line formatters take textLimit, how many characters the free text of the line (a task, a reason) may take. A
+// long list passes a number to shorten every line; without it the line is shown as stored.
+function formatTaskLine(task, { textLimit = Infinity } = {}) {
   return [
     `#${task.id}`,
     `<@${task.userId}>`,
     task.jobName,
     statusLabel(task.status),
-    task.description || task.taskType,
+    clipText(task.description || task.taskType, textLimit),
     task.expectedChannelName ? `頻道 #${task.expectedChannelName}` : null,
     task.externalServerCount ? `外部伺服器 ${task.externalServerCount}` : null,
     task.attachmentUrls?.length ? `附件 ${task.attachmentUrls.length}` : null,
@@ -163,7 +153,7 @@ function formatTaskLine(task) {
     .join('｜');
 }
 
-function formatPayrollLine(payroll) {
+function formatPayrollLine(payroll, { textLimit = Infinity } = {}) {
   return [
     `#${payroll.id}`,
     `<@${payroll.userId}>`,
@@ -172,11 +162,11 @@ function formatPayrollLine(payroll) {
     `比例 ${formatPercent(payroll.payRatio)}`,
     `任務 ${payroll.completedTasks}/${payroll.totalTasks}`,
     formatTimestamp(payroll.createdAt),
-    payroll.reason,
+    clipText(payroll.reason, textLimit),
   ].join('｜');
 }
 
-function formatPayrollPreviewLine(item) {
+function formatPayrollPreviewLine(item, { textLimit = Infinity } = {}) {
   return [
     `<@${item.job.userId}>`,
     item.job.jobName,
@@ -185,10 +175,21 @@ function formatPayrollPreviewLine(item) {
     `有效提交 ${item.completedTasks}/${item.totalTasks}`,
     item.externalServerCount ? `外部伺服器 ${item.externalServerCount}` : null,
     `發薪 ${formatTimestamp(item.job.payAt)}`,
-    item.reason,
+    clipText(item.reason, textLimit),
   ]
     .filter(Boolean)
     .join('｜');
+}
+
+// The global primary job's settlements, shown in /work payroll.
+function formatPrimarySettlementLine(item, { textLimit = Infinity } = {}) {
+  return item.jobName + '｜發放 ' + formatCoins(item.paidAmount) +
+    '｜比例 ' + formatPercent(item.payRatio) +
+    '｜' + formatTimestamp(item.settledAt) + '｜' + clipText(item.reason, textLimit);
+}
+
+function primaryRoleSync(interaction) {
+  return workRoleCoordinator.hasWorkRoleHook(interaction.client, 'syncPrimaryJobRoleForMember');
 }
 
 function formatJobListBlock(jobs) {
@@ -199,7 +200,7 @@ function formatJobListBlock(jobs) {
   return jobs.map((job) => formatJobBlock(job)).join('\n\n');
 }
 
-function formatPenaltyLine(penalty) {
+function formatPenaltyLine(penalty, { textLimit = Infinity } = {}) {
   return [
     `#${penalty.id}`,
     `<@${penalty.userId}>`,
@@ -208,8 +209,71 @@ function formatPenaltyLine(penalty) {
     `狀態 ${statusLabel(penalty.status)}`,
     `申訴期限 ${formatTimestamp(penalty.appealDeadlineAt)}`,
     penalty.appliedAt ? `已套用 ${formatTimestamp(penalty.appliedAt)}` : '尚未套用',
-    penalty.reason,
+    clipText(penalty.reason, textLimit),
   ].join('｜');
+}
+
+// The global primary job's penalties, shown in /work penalties.
+function formatPrimaryPenaltyLine(item, { textLimit = Infinity } = {}) {
+  return '#' + item.id + '｜扣薪 ' + formatCoins(item.amount) +
+    '｜狀態 ' + statusLabel(item.status) +
+    '｜申訴期限 ' + formatTimestamp(item.appealDeadline) +
+    '｜' + clipText(item.reason, textLimit);
+}
+
+// The reply of a list command: one line for every row under a heading. A task or a reason can be long, so when the
+// lines do not fit one message the free text is shortened, and the last rows are left out with a line that says how
+// many and how to narrow the list.
+function rowsReply(heading, rows, render, { unit, hint = '' }) {
+  return fitListText({
+    header: heading,
+    items: rows,
+    render: (row, { textLimit }) => render(row, { textLimit }),
+    note: (count) => omittedLine(count, { unit, hint }),
+  });
+}
+
+// The lines of one list inside a reply that holds several; `cut` is what fitReplyText gave the reply being built.
+function sectionRows(rows, render, cut, { unit, hint = '' }) {
+  return listRows(rows, (row, { textLimit }) => render(row, { textLimit }), {
+    textLimit: cut.textLimit,
+    rowLimit: cut.rowLimit,
+    note: (count) => omittedLine(count, { unit, hint }),
+  });
+}
+
+// /work status and /work status-user: the jobs, the latest payrolls and the latest tasks of one member. The job
+// blocks stay as they are; a task is the part that can be long. viewerGuildId is set when an administrator looks at
+// another member: the global primary job (and its payroll) of that member is then left out when it was chosen in
+// another server, so this server learns nothing about it.
+function workStatusText({ heading, status, roleSync, recentTaskCount, unit = '筆任務', viewerGuildId = null }) {
+  const recentTasks = status.recentTasks.slice(0, recentTaskCount);
+  const primaryHidden = Boolean(viewerGuildId) && isForeignPrimaryJob(status.primaryStatusView, viewerGuildId);
+  const primaryView = primaryHidden ? null : status.primaryStatusView;
+  // The latest pay of a primary job is shown to another member's viewer only when its cycle was started in this server.
+  const primaryPayroll = !viewerGuildId || isPrimaryPayrollVisibleTo(status.latestPrimaryPayroll, viewerGuildId)
+    ? status.latestPrimaryPayroll : null;
+  return fitReplyText((cut) => [
+    heading,
+    primaryView
+      ? formatJobBlock(primaryView, { roleSync }) : null,
+    status.activeJobs?.length
+      ? formatJobListBlock(status.activeJobs)
+      : primaryView ? null : primaryHidden ? '本伺服器沒有進行中的工作。' : '目前沒有進行中的工作。',
+    status.latestPayroll
+      ? ['', '**最近發薪紀錄**', formatPayrollLine(status.latestPayroll, { textLimit: cut.textLimit })].join('\n') : null,
+    primaryPayroll ? ['', '**最近主職實際發薪**',
+      primaryPayroll.jobName + '｜' + formatCoins(primaryPayroll.paidAmount) +
+      '｜' + formatTimestamp(primaryPayroll.settledAt)].join('\n') : null,
+    status.recentTasks.length
+      ? ['', '**最近任務**', ...sectionRows(recentTasks, formatTaskLine, cut, {
+        unit,
+        hint: '可用 /work submissions 或 /work tasks 查看',
+      })].join('\n')
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n'), { maxRows: recentTasks.length });
 }
 
 async function ensureAdmin(interaction) {
@@ -297,7 +361,7 @@ module.exports = {
         .setDescription('管理員查詢伺服器工作紀錄')
         .addIntegerOption((option) => option.setName('limit').setDescription('筆數，預設 10').setMinValue(1).setMaxValue(25))
     )
-    .addSubcommand((subcommand) => subcommand.setName('cancel').setDescription('查詢舊工作取消限制'))
+    .addSubcommand((subcommand) => subcommand.setName('cancel').setDescription('說明：目前不開放辭職，工作期滿後自動結算'))
     .addSubcommand((subcommand) =>
       subcommand
         .setName('submit')
@@ -417,7 +481,7 @@ module.exports = {
       subcommand
         .setName('admin-remind')
         .setDescription('管理員手動檢查並發送工作提醒')
-        .addBooleanOption((option) => option.setName('force').setDescription('是否忽略 10 小時間隔直接提醒'))
+        .addBooleanOption((option) => option.setName('force').setDescription('是否忽略 10 小時間隔直接提醒（結果不明後的冷卻仍然有效）'))
     )
     .addSubcommand((subcommand) =>
       subcommand
@@ -547,20 +611,12 @@ module.exports = {
         const status = await getWorkStatus(interaction.guildId, interaction.user.id);
 
         await interaction.reply({
-          content: [
-            '**目前工作狀態**',
-            status.primaryStatusView ? formatJobBlock(status.primaryStatusView) : null,
-            status.activeJobs?.length
-              ? formatJobListBlock(status.activeJobs)
-              : status.primaryStatusView ? null : '目前沒有進行中的工作。',
-            status.latestPayroll ? ['', '**最近發薪紀錄**', formatPayrollLine(status.latestPayroll)].join('\n') : null,
-            status.latestPrimaryPayroll ? ['', '**最近主職實際發薪**',
-              status.latestPrimaryPayroll.jobName + '｜' + formatCoins(status.latestPrimaryPayroll.paidAmount) +
-              '｜' + formatTimestamp(status.latestPrimaryPayroll.settledAt)].join('\n') : null,
-            status.recentTasks.length ? ['', '**最近任務**', ...status.recentTasks.slice(0, 5).map(formatTaskLine)].join('\n') : null,
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          content: workStatusText({
+            heading: '**目前工作狀態**',
+            status,
+            roleSync: primaryRoleSync(interaction),
+            recentTaskCount: 5,
+          }),
           ephemeral: true,
         });
         return;
@@ -570,25 +626,20 @@ module.exports = {
         const user = interaction.options.getUser('user', true);
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
         if (!member) {
+          reportInteractionSecurityAlert('personal-data', interaction);
           await interaction.reply({ content: '只能查詢目前在此伺服器的成員。', ephemeral: true });
           return;
         }
         const status = await getWorkStatus(interaction.guildId, user.id);
 
         await interaction.reply({
-          content: [
-            `**${formatUser(user)} 的工作狀態**`,
-            status.primaryStatusView ? formatJobBlock(status.primaryStatusView) : null,
-            status.activeJobs?.length ? formatJobListBlock(status.activeJobs) : null,
-            !status.primaryStatusView && !status.activeJobs?.length ? '目前沒有進行中的工作。' : null,
-            status.latestPayroll ? ['', '**最近發薪紀錄**', formatPayrollLine(status.latestPayroll)].join('\n') : null,
-            status.latestPrimaryPayroll ? ['', '**最近主職實際發薪**',
-              status.latestPrimaryPayroll.jobName + '｜' + formatCoins(status.latestPrimaryPayroll.paidAmount) +
-              '｜' + formatTimestamp(status.latestPrimaryPayroll.settledAt)].join('\n') : null,
-            status.recentTasks.length ? ['', '**最近任務**', ...status.recentTasks.slice(0, 8).map(formatTaskLine)].join('\n') : null,
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          content: workStatusText({
+            heading: `**${formatUser(user)} 的工作狀態**`,
+            status,
+            roleSync: primaryRoleSync(interaction),
+            recentTaskCount: 8,
+            viewerGuildId: interaction.guildId,
+          }),
           ephemeral: true,
         });
         return;
@@ -602,32 +653,30 @@ module.exports = {
           await interaction.reply({ content: '目前無法核對本群成員，已暫停全域工作總覽。', ephemeral: true });
           return;
         }
-        const jobs = await getAllWorkStatuses(interaction.guildId, {
+        // A member's global primary job chosen in another server is not shown to this one.
+        const jobs = (await getAllWorkStatuses(interaction.guildId, {
           limit, visibleUserIds: members.keys(),
-        });
-        const lines = jobs.map((job) => formatJobBlock(job, { includeUser: true }).replaceAll('\n', '｜'));
+        })).filter((job) => !isForeignPrimaryJob(job, interaction.guildId));
+        const roleSync = primaryRoleSync(interaction);
 
         await interaction.reply({
-          content: jobs.length ? ['**本群舊工作及目前本群成員的全域主職**', ...lines].join('\n') : '目前沒有工作紀錄。',
+          content: jobs.length
+            ? rowsReply(
+              '**本群舊工作及目前本群成員的全域主職**',
+              jobs,
+              (job) => formatJobBlock(job, { includeUser: true, roleSync, guildId: interaction.guildId }).replaceAll('\n', '｜'),
+              { unit: '筆工作紀錄' }
+            )
+            : '目前沒有工作紀錄。',
           ephemeral: true,
         });
         return;
       }
 
       if (subcommand === 'cancel') {
-        await interaction.deferReply({ ephemeral: true });
-        const job = await cancelJob(interaction.guildId, interaction.user.id);
-        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-        const roleResult = member
-          ? await runWorkRoleHook(interaction.client, 'removeJobRolesForMember', { member })
-          : { warnings: ['找不到你的成員資料，無法移除職業身分組。'] };
-
-        await interaction.editReply({
-          content: [
-            `你已取消 **${(job.cancelledJobs || [job]).map((item) => item.jobName).join('、')}** 的工作。取消後將不會發放任何薪水。`,
-            ...formatRoleWarnings(roleResult.warnings),
-          ].join('\n'),
-        });
+        // Resigning is not offered.  The command answers with the refusal itself (the same text
+        // cancelJob refuses with); nothing is changed and no job role is touched.
+        await interaction.reply({ content: RESIGNATION_UNAVAILABLE_MESSAGE, ephemeral: true });
         return;
       }
 
@@ -665,7 +714,9 @@ module.exports = {
         });
 
         await interaction.reply({
-          content: tasks.length ? ['**你的工作提交紀錄**', ...tasks.map(formatTaskLine)].join('\n') : '目前沒有工作提交紀錄。',
+          content: tasks.length
+            ? rowsReply('**你的工作提交紀錄**', tasks, formatTaskLine, { unit: '筆提交紀錄', hint: '可用 status 選項縮小範圍' })
+            : '目前沒有工作提交紀錄。',
           ephemeral: true,
         });
         return;
@@ -739,6 +790,13 @@ module.exports = {
 
       if (subcommand === 'task-add') {
         const user = interaction.options.getUser('user', true);
+        // A task is a duty with a deadline and a salary penalty, so it is only for a member of this server, like
+        // status-user and role-sync. Somebody outside could never finish it in this server.
+        const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+        if (!member) {
+          await interaction.reply({ content: '只能指派工作任務給目前在此伺服器的成員。', ephemeral: true });
+          return;
+        }
         const task = await addPendingTask(interaction.guildId, user.id, {
           description: interaction.options.getString('description', true),
           taskType: interaction.options.getString('task-type') || 'admin_task',
@@ -763,7 +821,9 @@ module.exports = {
         });
 
         await interaction.reply({
-          content: tasks.length ? ['**工作任務紀錄**', ...tasks.map(formatTaskLine)].join('\n') : '目前沒有符合條件的工作任務紀錄。',
+          content: tasks.length
+            ? rowsReply('**工作任務紀錄**', tasks, formatTaskLine, { unit: '筆任務紀錄', hint: '可用 status 選項縮小範圍' })
+            : '目前沒有符合條件的工作任務紀錄。',
           ephemeral: true,
         });
         return;
@@ -775,7 +835,7 @@ module.exports = {
 
         await interaction.reply({
           content: tasks.length
-            ? ['**待審核工作提交**', ...tasks.map(formatTaskLine)].join('\n')
+            ? rowsReply('**待審核工作提交**', tasks, formatTaskLine, { unit: '筆待審核提交', hint: '審核完前面的提交後才會顯示' })
             : '目前沒有待審核的工作提交。',
           ephemeral: true,
         });
@@ -804,7 +864,17 @@ module.exports = {
         const force = interaction.options.getBoolean('force') || false;
         const result = await processWorkReminders(interaction.client, { guildId: interaction.guildId, force });
 
-        await interaction.editReply(`提醒檢查完成：檢查 ${result.checked} 筆，成功送出 ${result.reminded} 筆。`);
+        if (result.busy) {
+          await interaction.editReply('工作提醒正在處理中，請稍後再試。');
+          return;
+        }
+        await interaction.editReply([
+          !result.guardDisabled ? `提醒檢查完成：檢查 ${result.checked} 筆，成功送出 ${result.reminded} 筆。`
+            : result.reminded ? `工作提醒防護目前未啟用：本次只送出 ${result.reminded} 筆，其餘提醒未送出。`
+              : '工作提醒防護目前未啟用，未送出任何提醒。',
+          result.failed ? `另有 ${result.failed} 項處理失敗，部分提醒可能已送出，詳情已記錄在本機 log。` : null,
+          result.deferred ? `另有 ${result.deferred} 筆因先前失敗暫緩，可改用 force 重試。` : null,
+        ].filter(Boolean).join('\n'));
         return;
       }
 
@@ -818,7 +888,9 @@ module.exports = {
             await interaction.editReply(`找不到 ${formatUser(user)} 的伺服器成員資料。`);
             return;
           }
-          const jobs = await getActiveJobs(interaction.guildId, user.id);
+          // A global primary job chosen in another server is not shown to this one: it counts as no job here.
+          const jobs = (await getActiveJobs(interaction.guildId, user.id))
+            .filter((job) => !isForeignPrimaryJob(job, interaction.guildId));
           if (!jobs.length) {
             await interaction.editReply(`${formatUser(user)} 目前沒有進行中的工作。`);
             return;
@@ -829,7 +901,7 @@ module.exports = {
 
           const results = [];
           for (const job of legacyJobs) {
-            results.push(await runWorkRoleHook(interaction.client, 'syncJobRoleForMember', {
+            results.push(await workRoleCoordinator.runWorkRoleHook(interaction.client, 'syncJobRoleForMember', {
               member,
               jobName: job.jobName,
               options: {
@@ -840,7 +912,7 @@ module.exports = {
             }));
           }
           if (primaryJob?.status === 'active' && primaryJob.sourceGuildId === interaction.guildId) {
-            results.push(await runWorkRoleHook(interaction.client, 'syncPrimaryJobRoleForMember', {
+            results.push(await workRoleCoordinator.runWorkRoleHook(interaction.client, 'syncPrimaryJobRoleForMember', {
               member,
               jobName: primaryJob.jobName,
               options: { cycleId: primaryJob.globalCycleId, sourceGuildId: primaryJob.sourceGuildId },
@@ -856,14 +928,18 @@ module.exports = {
           return;
         }
 
-        const result = await runWorkRoleHook(interaction.client, 'syncAllJobRoles', { guild: interaction.guild }, {
+        const result = await workRoleCoordinator.runWorkRoleHook(interaction.client, 'syncAllJobRoles', { guild: interaction.guild }, {
           total: 0,
           synced: 0,
           warnings: [],
           skipped: true,
         });
+        // An extension that stops the run early (the request boundary deferred a role change for its budget, or the guild's
+        // role queue was full) says so with rateLimited and, for a full queue, queueFull. Then not every role was synced,
+        // so the title must not claim the sync is complete. The reason is already the first of its warnings.
+        const paused = result.rateLimited === true || result.queueFull === true;
         await interaction.editReply([
-          `工作身分組同步完成：${result.synced}/${result.total}`,
+          `${paused ? '工作身分組同步已暫停，尚未全部完成' : '工作身分組同步完成'}：${result.synced}/${result.total}`,
           result.cleaned ? `已清理結束週期角色：${result.cleaned}` : null,
           ...formatRoleWarnings(result.warnings.slice(0, 10)),
         ].filter(Boolean).join('\n'));
@@ -876,7 +952,9 @@ module.exports = {
         const items = await previewPayroll(interaction.guildId, { userId: user?.id || null, limit });
 
         await interaction.reply({
-          content: items.length ? ['**工作發薪預覽**', ...items.map(formatPayrollPreviewLine)].join('\n') : '目前沒有可預覽的工作發薪資料。',
+          content: items.length
+            ? rowsReply('**工作發薪預覽**', items, formatPayrollPreviewLine, { unit: '筆發薪預覽', hint: '可用 user 選項指定成員' })
+            : '目前沒有可預覽的工作發薪資料。',
           ephemeral: true,
         });
         return;
@@ -888,7 +966,9 @@ module.exports = {
         const history = await getPayrollHistory(interaction.guildId, { userId: user?.id || null, limit });
 
         await interaction.reply({
-          content: history.length ? ['**工作發薪紀錄**', ...history.map(formatPayrollLine)].join('\n') : '目前沒有工作發薪紀錄。',
+          content: history.length
+            ? rowsReply('**工作發薪紀錄**', history, formatPayrollLine, { unit: '筆發薪紀錄', hint: '可用 user 選項指定成員' })
+            : '目前沒有工作發薪紀錄。',
           ephemeral: true,
         });
         return;
@@ -902,18 +982,20 @@ module.exports = {
           getPrimaryPayrollHistory(interaction.user.id, { limit }),
         ]);
 
+        // Three lists in one message. When they do not fit, the reasons are shortened and each list shows fewer rows,
+        // with a line under it that says how many were left out.
         await interaction.reply({
-          content: [
+          content: fitReplyText((cut) => [
             primaryHistory.length
-              ? ['**全域主職結算**', ...primaryHistory.map((item) =>
-                item.jobName + '｜發放 ' + formatCoins(item.paidAmount) +
-                '｜比例 ' + formatPercent(item.payRatio) +
-                '｜' + formatTimestamp(item.settledAt) + '｜' + item.reason
-              )].join('\n')
+              ? ['**全域主職結算**', ...sectionRows(primaryHistory, formatPrimarySettlementLine, cut, { unit: '筆主職結算' })].join('\n')
               : '**全域主職結算**\n目前沒有結算紀錄。',
-            preview.length ? ['**待發薪預覽**', ...preview.map(formatPayrollPreviewLine)].join('\n') : '**待發薪預覽**\n目前沒有待發薪工作。',
-            history.length ? ['**最近發薪紀錄**', ...history.map(formatPayrollLine)].join('\n') : '**最近發薪紀錄**\n目前沒有發薪紀錄。',
-          ].join('\n\n'),
+            preview.length
+              ? ['**待發薪預覽**', ...sectionRows(preview, formatPayrollPreviewLine, cut, { unit: '筆發薪預覽' })].join('\n')
+              : '**待發薪預覽**\n目前沒有待發薪工作。',
+            history.length
+              ? ['**最近發薪紀錄**', ...sectionRows(history, formatPayrollLine, cut, { unit: '筆發薪紀錄' })].join('\n')
+              : '**最近發薪紀錄**\n目前沒有發薪紀錄。',
+          ].join('\n\n'), { maxRows: Math.max(primaryHistory.length, preview.length, history.length) }),
           ephemeral: true,
         });
         return;
@@ -925,16 +1007,17 @@ module.exports = {
           listWorkPenalties(interaction.guildId, { userId: interaction.user.id, limit }),
           listPrimaryPenalties(interaction.user.id, { limit }),
         ]);
-        const lines = [
-          legacy.length ? ['**原群扣薪**', ...legacy.map(formatPenaltyLine)].join('\n') : null,
-          primary.length ? ['**全域主職扣薪**', ...primary.map((item) =>
-            '#' + item.id + '｜扣薪 ' + formatCoins(item.amount) +
-            '｜狀態 ' + statusLabel(item.status) +
-            '｜申訴期限 ' + formatTimestamp(item.appealDeadline) +
-            '｜' + item.reason
-          )].join('\n') : null,
-        ].filter(Boolean);
-        await interaction.reply({ content: lines.length ? lines.join('\n\n') : '目前沒有扣薪紀錄。', ephemeral: true });
+        // Two lists in one message. A reason can be long, so when they do not fit the reasons are shortened and each
+        // list shows fewer rows, with a line under it that says how many were left out.
+        const content = legacy.length || primary.length
+          ? fitReplyText((cut) => [
+            legacy.length ? ['**原群扣薪**', ...sectionRows(legacy, formatPenaltyLine, cut, { unit: '筆扣薪紀錄' })].join('\n') : null,
+            primary.length
+              ? ['**全域主職扣薪**', ...sectionRows(primary, formatPrimaryPenaltyLine, cut, { unit: '筆扣薪紀錄' })].join('\n')
+              : null,
+          ].filter(Boolean).join('\n\n'), { maxRows: Math.max(legacy.length, primary.length) })
+          : '目前沒有扣薪紀錄。';
+        await interaction.reply({ content, ephemeral: true });
         return;
       }
 

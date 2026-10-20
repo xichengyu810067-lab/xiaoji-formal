@@ -2,20 +2,28 @@ const { withCoinTransaction, withCoinDatabase } = require('../../services/coinDa
 const {
   CoinServiceError,
   TransactionType,
+  addDays,
   ensureGuildSettings,
   ensurePlayer,
+  readPlayer,
   nowIso,
   getLocalDate,
 } = require('./coinService');
 const { mutateWalletWithApi } = require('./coinWalletService');
+const { BankReason, bankInterestReason, fixedDepositCreatedReason } = require('./transactionReasons');
 const logger = require('../../utils/logger');
 
+const MAX_COIN_AMOUNT = 9_000_000_000;
 const INTEREST_RATE = 0.0003;
 const INTEREST_TIME_TW = '23:00';
 const MIN_FIXED_DEPOSIT = 1000;
 const DEMAND_RATE_MAX = 0.01;
 const FIXED_RATE_MAX = 0.3;
 const FIXED_TERMS = Object.freeze([7, 14, 30, 90]);
+// Members read these replies directly (replyCoinError shows a CoinServiceError's message), so they are
+// fixed Chinese sentences. A deposit that belongs to someone else is "not found" too.
+const COIN_DISABLED_MESSAGE = '這個伺服器的吉幣系統目前停用。';
+const FIXED_DEPOSIT_NOT_FOUND_MESSAGE = '找不到這筆定存，請用 /bank fixed-list 確認定存 ID。';
 const DEFAULT_RATES = Object.freeze({
   demand: INTEREST_RATE,
   fixed_7: 0.0035,
@@ -28,15 +36,36 @@ function getInterestDate(date = new Date()) {
   return getLocalDate(date);
 }
 
+// Interest is settled at 23:00 Taipei time, so the hour is read there whatever the coin time zone is.
+// hourCycle h23 (not hour12: false) because some ICU builds print midnight as 24:00 for hour12: false.
+function getTaipeiHour(date = new Date()) {
+  const twTime = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Taipei',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  }).format(date);
+  const [hour] = twTime.split(':').map(Number);
+  return hour;
+}
+
+// Interest for a date is paid from 23:00 of that date, to an account that holds money then. A deposit into
+// an empty account therefore counts from the settlement it has not missed: today once 23:00 has passed,
+// yesterday before that. The days the account sat empty are never owed.
+function getEmptyAccountInterestDate(date = new Date()) {
+  const today = getInterestDate(date);
+  return getTaipeiHour(date) >= 23 ? today : addDays(today, -1);
+}
+
 function addDaysIso(date, days) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function normalizeAmount(amount, name = 'amount') {
+function normalizeAmount(amount, label = '金額') {
   const value = Number(amount);
 
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new CoinServiceError('INVALID_AMOUNT', `${name} must be a positive integer.`);
+  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_COIN_AMOUNT) {
+    throw new CoinServiceError('INVALID_AMOUNT', `${label}必須是 1 到 ${MAX_COIN_AMOUNT.toLocaleString('zh-TW')} 的整數。`);
   }
 
   return value;
@@ -46,7 +75,7 @@ function normalizeTerm(termDays) {
   const value = Number(termDays);
 
   if (!FIXED_TERMS.includes(value)) {
-    throw new CoinServiceError('INVALID_FIXED_TERM', 'Fixed deposit term must be 7, 14, 30, or 90 days.');
+    throw new CoinServiceError('INVALID_FIXED_TERM', '定存期間只能選 7、14、30 或 90 天。');
   }
 
   return value;
@@ -56,11 +85,11 @@ function normalizeRatePercent(ratePercent, maxPercent, label) {
   const value = Number(ratePercent);
 
   if (!Number.isFinite(value) || value < 0) {
-    throw new CoinServiceError('INVALID_RATE', `${label} rate cannot be negative.`);
+    throw new CoinServiceError('INVALID_RATE', `${label}利率不能是負數。`);
   }
 
   if (value > maxPercent) {
-    throw new CoinServiceError('RATE_TOO_HIGH', `${label} rate cannot exceed ${maxPercent}%.`);
+    throw new CoinServiceError('RATE_TOO_HIGH', `${label}利率不能超過 ${maxPercent}%。`);
   }
 
   return value / 100;
@@ -81,9 +110,9 @@ function ensureBankRates(api) {
   for (const [rateKey, rate] of Object.entries(DEFAULT_RATES)) {
     api.run(
       `INSERT INTO coin_bank_rates_global (rate_key, rate, updated_by, reason, updated_at)
-       VALUES (?, ?, 'system', 'default rate', ?)
+       VALUES (?, ?, 'system', ?, ?)
        ON CONFLICT(rate_key) DO NOTHING`,
-      [rateKey, rate, timestamp]
+      [rateKey, rate, BankReason.DEFAULT_RATE, timestamp]
     );
   }
 
@@ -107,18 +136,19 @@ function reconcileExpiredRateEvents(api) {
     api.run(
       `UPDATE coin_bank_rates_global
        SET rate = ?, previous_rate = NULL, is_event = 0, event_ends_at = NULL,
-           updated_by = 'system', reason = 'event expired', updated_at = ?
+           updated_by = 'system', reason = ?, updated_at = ?
        WHERE rate_key = ?`,
-      [restoredRate, timestamp, row.rate_key]
+      [restoredRate, BankReason.RATE_EVENT_EXPIRED, timestamp, row.rate_key]
     );
     api.run(
       `INSERT INTO coin_rate_history_global
         (operator_id, rate_key, old_rate, new_rate, reason, is_event, event_ends_at, source_guild_id, created_at)
-       VALUES ('system', ?, ?, ?, 'event expired auto restore', 0, NULL, NULL, ?)`,
+       VALUES ('system', ?, ?, ?, ?, 0, NULL, NULL, ?)`,
       [
         row.rate_key,
         Number(row.rate),
         restoredRate,
+        BankReason.RATE_EVENT_RESTORED,
         timestamp,
       ]
     );
@@ -201,7 +231,7 @@ async function setDemandRate(guildId, ratePercent, { operatorId, reason = '', du
     reason,
     durationDays,
     maxPercent: 1,
-    label: 'Demand',
+    label: '活存',
   });
 }
 
@@ -213,7 +243,7 @@ async function setFixedRate(guildId, termDays, ratePercent, { operatorId, reason
     reason,
     durationDays,
     maxPercent: 30,
-    label: `${term}-day fixed`,
+    label: `${term} 天定存`,
   });
 }
 
@@ -229,7 +259,7 @@ async function setRate(guildId, rateKey, ratePercent, { operatorId, reason, dura
     const eventDays = durationDays === null || durationDays === undefined ? null : Number(durationDays);
 
     if (eventDays !== null && (!Number.isSafeInteger(eventDays) || eventDays <= 0 || eventDays > 365)) {
-      throw new CoinServiceError('INVALID_EVENT_DURATION', 'Event duration must be 1 to 365 days.');
+      throw new CoinServiceError('INVALID_EVENT_DURATION', '活動天數必須介於 1 到 365 天。');
     }
 
     const isEvent = eventDays !== null;
@@ -282,13 +312,13 @@ async function deposit(guildId, userId, amount) {
   return withCoinTransaction(async (api) => {
     const settings = ensureGuildSettings(api, guildId);
     if (!settings.enabled) {
-      throw new CoinServiceError('COIN_DISABLED', 'Coin system is disabled.');
+      throw new CoinServiceError('COIN_DISABLED', COIN_DISABLED_MESSAGE);
     }
 
-    const val = normalizeAmount(amount, 'Deposit amount');
+    const val = normalizeAmount(amount, '存入金額');
     const player = ensurePlayer(api, guildId, userId);
     if (player.balance < val) {
-      throw new CoinServiceError('INSUFFICIENT_FUNDS', 'Wallet balance is not enough.', {
+      throw new CoinServiceError('INSUFFICIENT_FUNDS', '錢包吉幣不足，無法存入活存。', {
         balance: player.balance,
         required: val,
       });
@@ -297,10 +327,17 @@ async function deposit(guildId, userId, amount) {
     const timestamp = nowIso();
     const newBalance = player.balance - val;
     const newBankBalance = player.bankBalance + val;
+    // An empty account earns nothing, and its interest date stands still while it is empty. Money put into it
+    // moves that date up first, so the days it sat empty are not paid afterwards, one day per run. An account
+    // that still holds money keeps its date: the days the bot was down are still owed to it.
+    const emptyAccountDate = getEmptyAccountInterestDate(new Date(timestamp));
+    const keepsDate = player.bankBalance > 0
+      || (player.lastInterestDate && player.lastInterestDate > emptyAccountDate);
+    const lastInterestDate = keepsDate ? player.lastInterestDate : emptyAccountDate;
 
     api.run(
-      'UPDATE coin_bank_accounts_global SET balance = ?, updated_at = ? WHERE user_id = ?',
-      [newBankBalance, timestamp, userId]
+      'UPDATE coin_bank_accounts_global SET balance = ?, last_interest_date = ?, updated_at = ? WHERE user_id = ?',
+      [newBankBalance, lastInterestDate, timestamp, userId]
     );
     mutateWalletWithApi(api, {
       guildId,
@@ -308,7 +345,7 @@ async function deposit(guildId, userId, amount) {
       type: TransactionType.BANK_DEPOSIT,
       balanceDelta: -val,
       operatorId: null,
-      reason: 'bank deposit',
+      reason: BankReason.DEPOSIT,
       metadata: { bankBalanceBefore: player.bankBalance, bankBalanceAfter: newBankBalance },
       createdAt: timestamp,
     });
@@ -326,13 +363,13 @@ async function withdraw(guildId, userId, amount) {
   return withCoinTransaction(async (api) => {
     const settings = ensureGuildSettings(api, guildId);
     if (!settings.enabled) {
-      throw new CoinServiceError('COIN_DISABLED', 'Coin system is disabled.');
+      throw new CoinServiceError('COIN_DISABLED', COIN_DISABLED_MESSAGE);
     }
 
-    const val = normalizeAmount(amount, 'Withdraw amount');
+    const val = normalizeAmount(amount, '領出金額');
     const player = ensurePlayer(api, guildId, userId);
     if (player.bankBalance < val) {
-      throw new CoinServiceError('INSUFFICIENT_BANK_FUNDS', 'Bank balance is not enough.', {
+      throw new CoinServiceError('INSUFFICIENT_BANK_FUNDS', '活存餘額不足，無法領出。', {
         bankBalance: player.bankBalance,
         required: val,
       });
@@ -352,7 +389,7 @@ async function withdraw(guildId, userId, amount) {
       type: TransactionType.BANK_WITHDRAW,
       balanceDelta: val,
       operatorId: null,
-      reason: 'bank withdraw',
+      reason: BankReason.WITHDRAW,
       metadata: { bankBalanceBefore: player.bankBalance, bankBalanceAfter: newBankBalance },
       createdAt: timestamp,
     });
@@ -370,13 +407,13 @@ async function createFixedDeposit(guildId, userId, { amount, termDays, source = 
   return withCoinTransaction((api) => {
     const settings = ensureGuildSettings(api, guildId);
     if (!settings.enabled) {
-      throw new CoinServiceError('COIN_DISABLED', 'Coin system is disabled.');
+      throw new CoinServiceError('COIN_DISABLED', COIN_DISABLED_MESSAGE);
     }
     ensureBankRates(api);
 
-    const principal = normalizeAmount(amount, 'Fixed deposit amount');
+    const principal = normalizeAmount(amount, '定存金額');
     if (principal < MIN_FIXED_DEPOSIT) {
-      throw new CoinServiceError('FIXED_DEPOSIT_TOO_SMALL', `Fixed deposit amount must be at least ${MIN_FIXED_DEPOSIT}.`);
+      throw new CoinServiceError('FIXED_DEPOSIT_TOO_SMALL', `定存金額至少要 ${MIN_FIXED_DEPOSIT.toLocaleString('zh-TW')} 吉幣。`);
     }
 
     const term = normalizeTerm(termDays);
@@ -384,13 +421,13 @@ async function createFixedDeposit(guildId, userId, { amount, termDays, source = 
     const player = ensurePlayer(api, guildId, userId);
 
     if (normalizedSource === 'wallet' && player.balance < principal) {
-      throw new CoinServiceError('INSUFFICIENT_FUNDS', 'Wallet balance is not enough.', {
+      throw new CoinServiceError('INSUFFICIENT_FUNDS', '錢包吉幣不足，無法建立定存。', {
         balance: player.balance,
         required: principal,
       });
     }
     if (normalizedSource === 'bank' && player.bankBalance < principal) {
-      throw new CoinServiceError('INSUFFICIENT_BANK_FUNDS', 'Bank balance is not enough.', {
+      throw new CoinServiceError('INSUFFICIENT_BANK_FUNDS', '活存餘額不足，無法建立定存。', {
         bankBalance: player.bankBalance,
         required: principal,
       });
@@ -422,7 +459,7 @@ async function createFixedDeposit(guildId, userId, { amount, termDays, source = 
       type: TransactionType.FIXED_DEPOSIT_CREATE,
       balanceDelta: normalizedSource === 'wallet' ? -principal : 0,
       operatorId: null,
-      reason: `${term}-day fixed deposit created`,
+      reason: fixedDepositCreatedReason(term),
       metadata: { fixedDepositId: id, principal, termDays: term, rate, source: normalizedSource, bankAfter },
       createdAt: timestamp,
     });
@@ -472,18 +509,18 @@ async function claimFixedDeposit(guildId, userId, fixedDepositId) {
     );
 
     if (!depositRow) {
-      throw new CoinServiceError('FIXED_DEPOSIT_NOT_FOUND', 'Fixed deposit was not found.');
+      throw new CoinServiceError('FIXED_DEPOSIT_NOT_FOUND', FIXED_DEPOSIT_NOT_FOUND_MESSAGE);
     }
 
     const depositInfo = mapFixedDeposit(depositRow);
     if (depositInfo.status === 'claimed') {
-      throw new CoinServiceError('FIXED_DEPOSIT_ALREADY_CLAIMED', 'This fixed deposit was already claimed.');
+      throw new CoinServiceError('FIXED_DEPOSIT_ALREADY_CLAIMED', '這筆定存已經領取過了。');
     }
     if (depositInfo.status === 'cancelled') {
-      throw new CoinServiceError('FIXED_DEPOSIT_CANCELLED', 'This fixed deposit was already cancelled.');
+      throw new CoinServiceError('FIXED_DEPOSIT_CANCELLED', '這筆定存已經解約了。');
     }
     if (depositInfo.maturityAt > nowIso()) {
-      throw new CoinServiceError('FIXED_DEPOSIT_NOT_MATURED', 'This fixed deposit has not matured yet.');
+      throw new CoinServiceError('FIXED_DEPOSIT_NOT_MATURED', '這筆定存尚未到期；如要提前拿回，請改用 /bank fixed-cancel 解約。');
     }
 
     const timestamp = nowIso();
@@ -497,7 +534,7 @@ async function claimFixedDeposit(guildId, userId, fixedDepositId) {
       balanceDelta: depositInfo.principal,
       totalEarnedDelta: 0,
       operatorId: null,
-      reason: 'fixed deposit principal returned',
+      reason: BankReason.FIXED_PRINCIPAL_RETURNED,
       metadata: { fixedDepositId: depositInfo.id, principal: depositInfo.principal },
       createdAt: timestamp,
     });
@@ -508,7 +545,7 @@ async function claimFixedDeposit(guildId, userId, fixedDepositId) {
       balanceDelta: depositInfo.expectedInterest,
       totalEarnedDelta: depositInfo.expectedInterest,
       operatorId: null,
-      reason: 'fixed deposit interest',
+      reason: BankReason.FIXED_INTEREST,
       metadata: { fixedDepositId: depositInfo.id, interest: depositInfo.expectedInterest },
       createdAt: timestamp,
     }) : null;
@@ -530,18 +567,18 @@ async function cancelFixedDeposit(guildId, userId, fixedDepositId) {
     );
 
     if (!depositRow) {
-      throw new CoinServiceError('FIXED_DEPOSIT_NOT_FOUND', 'Fixed deposit was not found.');
+      throw new CoinServiceError('FIXED_DEPOSIT_NOT_FOUND', FIXED_DEPOSIT_NOT_FOUND_MESSAGE);
     }
 
     const depositInfo = mapFixedDeposit(depositRow);
     if (depositInfo.status === 'claimed') {
-      throw new CoinServiceError('FIXED_DEPOSIT_ALREADY_CLAIMED', 'This fixed deposit was already claimed.');
+      throw new CoinServiceError('FIXED_DEPOSIT_ALREADY_CLAIMED', '這筆定存已經領取過了。');
     }
     if (depositInfo.status === 'cancelled') {
-      throw new CoinServiceError('FIXED_DEPOSIT_CANCELLED', 'This fixed deposit was already cancelled.');
+      throw new CoinServiceError('FIXED_DEPOSIT_CANCELLED', '這筆定存已經解約了。');
     }
     if (depositInfo.maturityAt <= nowIso()) {
-      throw new CoinServiceError('FIXED_DEPOSIT_MATURED', 'This fixed deposit has matured. Please claim it instead.');
+      throw new CoinServiceError('FIXED_DEPOSIT_MATURED', '這筆定存已經到期，請改用 /bank fixed-claim 領取。');
     }
 
     const createdAt = new Date(depositInfo.createdAt).getTime();
@@ -563,7 +600,7 @@ async function cancelFixedDeposit(guildId, userId, fixedDepositId) {
       balanceDelta: depositInfo.principal,
       totalEarnedDelta: 0,
       operatorId: null,
-      reason: 'fixed deposit principal returned after cancellation',
+      reason: BankReason.FIXED_CANCEL_PRINCIPAL_RETURNED,
       metadata: { fixedDepositId: depositInfo.id, principal: depositInfo.principal, halfReached },
       createdAt: timestamp,
     });
@@ -574,7 +611,7 @@ async function cancelFixedDeposit(guildId, userId, fixedDepositId) {
       balanceDelta: penaltyInterest,
       totalEarnedDelta: penaltyInterest,
       operatorId: null,
-      reason: 'fixed deposit cancellation interest',
+      reason: BankReason.FIXED_CANCEL_INTEREST,
       metadata: { fixedDepositId: depositInfo.id, interest: penaltyInterest, halfReached },
       createdAt: timestamp,
     }) : null;
@@ -586,36 +623,48 @@ async function cancelFixedDeposit(guildId, userId, fixedDepositId) {
   });
 }
 
+// The wallet, bank and fixed deposit figures of one user. The fixed deposits are the user's own, whatever guild
+// they were made in.
+function summarizeBalance(api, userId, player) {
+  const fixed = api.get(
+    `SELECT
+       COALESCE(SUM(principal), 0) AS principal,
+       COALESCE(SUM(expected_interest), 0) AS interest,
+       COALESCE(SUM(CASE WHEN maturity_at <= ? THEN principal + expected_interest ELSE 0 END), 0) AS claimable
+     FROM coin_fixed_deposits
+     WHERE user_id = ? AND status IN ('active', 'matured')`,
+    [nowIso(), userId]
+  );
+
+  const fixedPrincipal = Number(fixed.principal || 0);
+  const fixedInterest = Number(fixed.interest || 0);
+  const claimable = Number(fixed.claimable || 0);
+
+  return {
+    userId,
+    walletBalance: player.balance,
+    bankBalance: player.bankBalance,
+    interestRemainder: player.bankInterestAccrued,
+    fixedPrincipal,
+    fixedExpectedInterest: fixedInterest,
+    fixedClaimable: claimable,
+    totalAssets: player.balance + player.bankBalance + fixedPrincipal + fixedInterest,
+    player,
+  };
+}
+
 async function getBalanceSummary(guildId, userId) {
   return withCoinTransaction((api) => {
     ensureGuildSettings(api, guildId);
-    const player = ensurePlayer(api, guildId, userId);
-    const fixed = api.get(
-      `SELECT
-         COALESCE(SUM(principal), 0) AS principal,
-         COALESCE(SUM(expected_interest), 0) AS interest,
-         COALESCE(SUM(CASE WHEN maturity_at <= ? THEN principal + expected_interest ELSE 0 END), 0) AS claimable
-       FROM coin_fixed_deposits
-       WHERE user_id = ? AND status IN ('active', 'matured')`,
-      [nowIso(), userId]
-    );
-
-    const fixedPrincipal = Number(fixed.principal || 0);
-    const fixedInterest = Number(fixed.interest || 0);
-    const claimable = Number(fixed.claimable || 0);
-
-    return {
-      userId,
-      walletBalance: player.balance,
-      bankBalance: player.bankBalance,
-      interestRemainder: player.bankInterestAccrued,
-      fixedPrincipal,
-      fixedExpectedInterest: fixedInterest,
-      fixedClaimable: claimable,
-      totalAssets: player.balance + player.bankBalance + fixedPrincipal + fixedInterest,
-      player,
-    };
+    return summarizeBalance(api, userId, ensurePlayer(api, guildId, userId));
   });
+}
+
+// Read-only counterpart of getBalanceSummary, for looking at somebody else. It files nobody under the guild
+// (getBalanceSummary does, through ensurePlayer, and the user would then show on the guild's boards) and writes
+// nothing. A user the economy has not seen reads as zeros.
+async function readBalanceSummary(guildId, userId) {
+  return withCoinDatabase((api) => summarizeBalance(api, userId, readPlayer(api, guildId, userId)));
 }
 
 async function getAllBalanceSummaries(guildId, { limit = 25 } = {}) {
@@ -659,13 +708,7 @@ async function getAllBalanceSummaries(guildId, { limit = 25 } = {}) {
 async function processBankInterest() {
   const now = new Date();
   const todayStr = getInterestDate(now);
-  const twTime = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Taipei',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-  }).format(now);
-  const [hour] = twTime.split(':').map(Number);
+  const hour = getTaipeiHour(now);
 
   const eligiblePlayers = await withCoinDatabase((api) =>
     api.all(
@@ -725,7 +768,7 @@ async function processBankInterest() {
             balanceDelta: creditAmount,
             totalEarnedDelta: creditAmount,
             operatorId: null,
-            reason: `bank interest (${payDate})`,
+            reason: bankInterestReason(payDate),
             metadata: { bankBalance: p.bankBalance, interestRate: rates.demandRate, accrued: totalAccrued },
             createdAt: timestamp,
           });
@@ -766,6 +809,7 @@ module.exports = {
   getRateHistory,
   listFixedDeposits,
   processBankInterest,
+  readBalanceSummary,
   setDemandRate,
   setFixedRate,
   withdraw,

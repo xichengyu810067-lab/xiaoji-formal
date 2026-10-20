@@ -1,11 +1,10 @@
 const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
-const { isGuildApproved } = require('../services/auditService');
 const { corpusVersion } = require('../services/dailyRiddleCorpus');
 const { FEATURE_KEY, getDailyRiddleEvent } = require('../services/dailyRiddleService');
 const { getGuildFeatureSetting, setGuildFeatureSetting } = require('../services/featurePlatformService');
+const { formatDailyEventStatus } = require('../utils/dailyEventStatus');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
 const { ensureModerationAccess, handleCommandError, replyEphemeral } = require('../utils/moderation');
-const { isBotOwner } = require('../utils/ownerOnly');
 
 const REQUIRED_BOT_PERMISSIONS = [
   PermissionFlagsBits.ViewChannel,
@@ -37,6 +36,8 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName('daily-riddle')
     .setDescription('管理小吉每日猜謎')
+    // Hides the command from members without Administrator. The checks in execute stay the real guard.
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
     .addSubcommand((subcommand) =>
       subcommand
@@ -57,10 +58,6 @@ module.exports = {
     try {
       if (!interaction.guildId || !interaction.guild || !interaction.inGuild()) {
         await replyEphemeral(interaction, '每日猜謎只能在伺服器內設定。');
-        return;
-      }
-      if (!isBotOwner(interaction.user.id) && !isGuildApproved(interaction.guildId)) {
-        await replyEphemeral(interaction, '此伺服器尚未通過小吉擁有者審核，暫時不能設定每日猜謎。');
         return;
       }
 
@@ -98,7 +95,7 @@ module.exports = {
       const channelLabel = setting.channelId ? `<#${setting.channelId}>` : '尚未設定';
       await replyEphemeral(
         interaction,
-        `每日猜謎：${setting.enabled ? '已啟用' : '已停用'}\n父頻道：${channelLabel}\n今日活動：${event?.status || '尚未建立'}`
+        `每日猜謎：${setting.enabled ? '已啟用' : '已停用'}\n父頻道：${channelLabel}\n今日活動：${formatDailyEventStatus(event?.status)}`
       );
     } catch (error) {
       await handleCommandError(interaction, error, '每日猜謎設定失敗，請稍後再試。');

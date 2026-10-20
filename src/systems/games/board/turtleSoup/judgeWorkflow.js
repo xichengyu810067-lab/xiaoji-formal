@@ -102,7 +102,13 @@ async function prepareTurtleSoupJudgment({ session, request, scenarioProvider, j
   if (isUnsafeInstruction(input) || evidence.length === 0) {
     result = { verdict: '無法判定' };
   } else {
-    result = await judgeProvider.judge({ kind, input, evidence });
+    result = await judgeProvider.judge({
+      kind,
+      input,
+      evidence,
+      // Who is asking, for the shared provider guard's per-player limits. Identifiers only.
+      context: { userId: request.actorId, guildId: request.guildId, channelId: request.channelId },
+    });
   }
   result = validateJudgeResult(result, kind);
 

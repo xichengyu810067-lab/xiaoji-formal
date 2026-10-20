@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const {
   ActionRowBuilder,
   ButtonBuilder,
@@ -8,9 +9,39 @@ const {
 } = require('discord.js');
 const logger = require('../utils/logger');
 
+const { runWithBackgroundContext } = require('../platform/hostOperationContext');
 const { retainedDataFile } = require('../platform/retainedDataSource');
 const pollsPath = retainedDataFile('polls.json');
 const pollTimers = new Map();
+
+// One server (or one direct-message channel) can have this many polls open at once; polls still being
+// created count too, so a burst of requests cannot pass the check together.
+const MAX_OPEN_POLLS_PER_SCOPE = 20;
+const pendingCreations = new Map();
+// One member can have this many polls open at once, in all servers together, so a single member
+// cannot fill the server's places for a whole day. Counted the same way, with the polls being created.
+const MAX_OPEN_POLLS_PER_MEMBER = 3;
+const pendingMemberCreations = new Map();
+// A poll that ended longer ago than this is dropped when the file is written.
+const ENDED_POLL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+// Windows can briefly refuse to replace a file that a scanner, indexer or backup program holds open.
+// These codes are retried like the coin database file replace does: 8 attempts, 25 ms doubling to 1 s.
+const RENAME_RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const RENAME_ATTEMPTS = 8;
+
+function pollScope(value) {
+  return value.guildId || value.channelId;
+}
+
+function reserveCreation(counts, key) {
+  counts.set(key, (counts.get(key) || 0) + 1);
+}
+
+function releaseCreation(counts, key) {
+  const left = (counts.get(key) || 1) - 1;
+  if (left > 0) counts.set(key, left);
+  else counts.delete(key);
+}
 
 function ensurePollFile() {
   const directory = path.dirname(pollsPath);
@@ -36,19 +67,68 @@ function readPolls() {
   }
 }
 
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function renameWithRetry(from, to) {
+  let delay = 25;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      if (process.platform !== 'win32' || !RENAME_RETRY_CODES.has(error?.code) || attempt >= RENAME_ATTEMPTS) {
+        throw error;
+      }
+      sleepSync(delay);
+      delay = Math.min(delay * 2, 1_000);
+    }
+  }
+}
+
+// Written next to the file and renamed over it, so a crash in the middle leaves the earlier file whole.
+// A failure, after the retries of the rename, removes the temporary file and leaves the file as it was.
 function writePolls(polls) {
   ensurePollFile();
-  fs.writeFileSync(pollsPath, `${JSON.stringify(polls, null, 2)}\n`, 'utf8');
+  const tempPath = `${pollsPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  let handle;
+  try {
+    handle = fs.openSync(tempPath, 'wx', 0o600);
+    fs.writeFileSync(handle, `${JSON.stringify(polls, null, 2)}\n`, 'utf8');
+    fs.fsyncSync(handle);
+    fs.closeSync(handle);
+    handle = null;
+    renameWithRetry(tempPath, pollsPath);
+  } finally {
+    // A cleanup that fails must not hide the failure of the write itself.
+    if (handle !== undefined && handle !== null) {
+      try { fs.closeSync(handle); } catch { /* keep the original failure */ }
+    }
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch { /* keep the original failure */ }
+  }
+}
+
+function pruneEndedPolls(polls, keepMessageId, now = Date.now()) {
+  for (const [messageId, poll] of Object.entries(polls)) {
+    if (messageId !== keepMessageId && poll?.endedAt && now - poll.endedAt > ENDED_POLL_RETENTION_MS) {
+      delete polls[messageId];
+    }
+  }
 }
 
 function savePoll(poll) {
   const polls = readPolls();
   polls[poll.messageId] = poll;
+  pruneEndedPolls(polls, poll.messageId);
   writePolls(polls);
 }
 
 function getPoll(messageId) {
-  return readPolls()[messageId] || null;
+  const polls = readPolls();
+  return Object.hasOwn(polls, messageId) ? polls[messageId] || null : null;
 }
 
 function getPollCounts(poll) {
@@ -149,23 +229,53 @@ async function createPoll(interaction, { question, options, durationMinutes }) {
     return;
   }
 
-  await interaction.deferReply();
-  const placeholder = await interaction.editReply('正在建立投票...');
-  const now = Date.now();
-  const poll = {
-    guildId: interaction.guildId,
-    channelId: interaction.channelId,
-    messageId: placeholder.id,
-    question: validation.question,
-    options: validation.options,
-    votes: {},
-    createdBy: interaction.user.id,
-    createdAt: now,
-    endsAt: now + validation.durationMinutes * 60 * 1000,
-    endedAt: null,
-  };
+  const scope = pollScope(interaction);
+  const memberId = interaction.user.id;
+  const openPolls = Object.values(readPolls()).filter((stored) => stored && !isPollEnded(stored));
+  const memberOpen = openPolls.filter((stored) => stored.createdBy === memberId).length +
+    (pendingMemberCreations.get(memberId) || 0);
+  if (memberOpen >= MAX_OPEN_POLLS_PER_MEMBER) {
+    await interaction.reply({
+      content: `你同時最多只能有 ${MAX_OPEN_POLLS_PER_MEMBER} 個進行中的投票，請等其中一個結束後再建立新的投票。`,
+      ephemeral: true,
+    });
+    return;
+  }
+  const scopeOpen = openPolls.filter((stored) => pollScope(stored) === scope).length +
+    (pendingCreations.get(scope) || 0);
+  if (scopeOpen >= MAX_OPEN_POLLS_PER_SCOPE) {
+    await interaction.reply({
+      content: `進行中的投票已達 ${MAX_OPEN_POLLS_PER_SCOPE} 個上限，請等其中一個結束後再建立新的投票。`,
+      ephemeral: true,
+    });
+    return;
+  }
 
-  savePoll(poll);
+  reserveCreation(pendingCreations, scope);
+  reserveCreation(pendingMemberCreations, memberId);
+  let poll;
+  try {
+    await interaction.deferReply();
+    const placeholder = await interaction.editReply('正在建立投票...');
+    const now = Date.now();
+    poll = {
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      messageId: placeholder.id,
+      question: validation.question,
+      options: validation.options,
+      votes: {},
+      createdBy: interaction.user.id,
+      createdAt: now,
+      endsAt: now + validation.durationMinutes * 60 * 1000,
+      endedAt: null,
+    };
+
+    savePoll(poll);
+  } finally {
+    releaseCreation(pendingCreations, scope);
+    releaseCreation(pendingMemberCreations, memberId);
+  }
   schedulePollEnd(interaction.client, poll);
   await interaction.editReply(buildPollPayload(poll));
 }
@@ -191,15 +301,19 @@ async function endPoll(client, poll, now = Date.now()) {
     const message = await channel.messages.fetch(currentPoll.messageId);
     await message.edit(buildPollPayload(currentPoll));
   } catch (error) {
-    logger.warn(`Failed to close poll ${poll.messageId}: ${error?.code ?? 'unknown'} ${error?.message ?? ''}`);
+    if (!String(error?.code || '').startsWith('TEST_')) {
+      logger.warn(`Failed to close poll ${poll.messageId}: ${error?.code ?? 'unknown'} ${error?.message ?? ''}`);
+    }
   }
 
   return currentPoll;
 }
 
+// A scheduled close runs as the background job `poll.end`, whether it is due at once
+// (restored after a restart) or later from its timer.
 function schedulePollEnd(client, poll) {
   if (isPollEnded(poll)) {
-    void endPoll(client, poll);
+    void runWithBackgroundContext('poll.end', () => endPoll(client, poll));
     return;
   }
 
@@ -209,7 +323,7 @@ function schedulePollEnd(client, poll) {
   }
 
   const timer = setTimeout(() => {
-    void endPoll(client, poll);
+    void runWithBackgroundContext('poll.end', () => endPoll(client, poll));
   }, Math.max(0, poll.endsAt - Date.now()));
 
   if (typeof timer.unref === 'function') {
@@ -224,7 +338,9 @@ async function handlePollButton(interaction) {
   const optionIndex = Number(optionIndexText);
   const poll = getPoll(messageId);
 
-  if (!poll || !Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex >= (poll.options?.length || 0)) {
+  // A button is only valid on the poll message it was made for, in the server that poll belongs to.
+  if (!poll || poll.guildId !== interaction.guildId || poll.messageId !== interaction.message?.id ||
+      !Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex >= (poll.options?.length || 0)) {
     await interaction.reply({ content: '找不到這個投票，可能已經被清除。', ephemeral: true });
     return;
   }

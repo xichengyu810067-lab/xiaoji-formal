@@ -79,12 +79,7 @@ module.exports = {
         await interaction.reply({
           content: [
             '**小吉賭場｜下注區**',
-            '`/casino dice`：骰子',
-            '`/casino slots`：角子機',
-            '`/casino blackjack`：21 點',
-            '`/casino roulette`：輪盤',
-            '`/casino baccarat`：百家樂',
-            '`/casino poker`：五張牌撲克牌',
+            '`/board start`：從統一遊戲目錄選擇骰子、角子機、21 點、輪盤、百家樂或五張牌撲克',
             '',
             '下注區一律優先使用籌碼；籌碼不足時，小吉會自動用吉幣補足下注所需籌碼。',
           ].join('\n'),

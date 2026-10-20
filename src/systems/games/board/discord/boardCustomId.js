@@ -1,4 +1,4 @@
-const { BoardCoreError, requireIdentifier, requireRevision } = require('../../../../games/contracts');
+const { BoardCoreError, requireIdentifier, requireRevision } = require('../core/contracts');
 
 const CUSTOM_ID_PREFIX = 'board|1|';
 const CUSTOM_ID_LIMIT = 100;

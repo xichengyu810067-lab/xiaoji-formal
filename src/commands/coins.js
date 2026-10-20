@@ -2,11 +2,13 @@ const { SlashCommandBuilder } = require('discord.js');
 const { getPlayerBalance } = require('../services/coinService');
 const { formatCoins, formatUser, replyCoinError } = require('../utils/coinPresentation');
 
+// /coins answers about the caller only. It takes no user option: the wallet is one account shared by every server,
+// so looking somebody else up would show a person's money to a server that has nothing to do with them. The
+// owner-only lookup command is the one place that reads another account.
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('coins')
-    .setDescription('查詢吉幣餘額')
-    .addUserOption((option) => option.setName('user').setDescription('要查詢的使用者')),
+    .setDescription('查詢自己的吉幣餘額'),
 
   async execute(interaction) {
     const resolveDisplayUser = async (guild, user) => {
@@ -36,8 +38,9 @@ module.exports = {
         return;
       }
 
-      const user = interaction.options.getUser('user') || interaction.user;
+      const user = interaction.user;
       const displayTarget = await resolveDisplayUser(interaction.guild, user);
+      // Looking at one's own balance files one under this guild, as every coin command does.
       const player = await getPlayerBalance(interaction.guildId, user.id);
 
       await interaction.reply({
