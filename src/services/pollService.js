@@ -221,12 +221,13 @@ function validatePollInput(question, options, durationMinutes) {
   };
 }
 
+// Resolves to the poll that was opened, or null when it was refused (the member was told why).
 async function createPoll(interaction, { question, options, durationMinutes }) {
   const validation = validatePollInput(question, options, durationMinutes);
 
   if (!validation.ok) {
     await interaction.reply({ content: validation.message, ephemeral: true });
-    return;
+    return null;
   }
 
   const scope = pollScope(interaction);
@@ -239,7 +240,7 @@ async function createPoll(interaction, { question, options, durationMinutes }) {
       content: `你同時最多只能有 ${MAX_OPEN_POLLS_PER_MEMBER} 個進行中的投票，請等其中一個結束後再建立新的投票。`,
       ephemeral: true,
     });
-    return;
+    return null;
   }
   const scopeOpen = openPolls.filter((stored) => pollScope(stored) === scope).length +
     (pendingCreations.get(scope) || 0);
@@ -248,7 +249,7 @@ async function createPoll(interaction, { question, options, durationMinutes }) {
       content: `進行中的投票已達 ${MAX_OPEN_POLLS_PER_SCOPE} 個上限，請等其中一個結束後再建立新的投票。`,
       ephemeral: true,
     });
-    return;
+    return null;
   }
 
   reserveCreation(pendingCreations, scope);
@@ -278,6 +279,7 @@ async function createPoll(interaction, { question, options, durationMinutes }) {
   }
   schedulePollEnd(interaction.client, poll);
   await interaction.editReply(buildPollPayload(poll));
+  return poll;
 }
 
 async function endPoll(client, poll, now = Date.now()) {

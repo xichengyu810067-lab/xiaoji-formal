@@ -24,7 +24,7 @@ function siteSupportBlocks() {
 test('the published policy version equals the archive policy version the code checks', () => {
   // A mismatch silently turns AI conversation archiving off, so the two must move together.
   assert.equal(publication.version, ARCHIVE_POLICY_VERSION);
-  assert.match(read('docs/releases/1.2.0.md'),
+  assert.match(read(`docs/releases/${ARCHIVE_POLICY_VERSION}.md`),
     new RegExp(`XIAOJI_ARCHIVE_POLICY_VERSION=${ARCHIVE_POLICY_VERSION.replaceAll('.', '\\.')}`));
 });
 

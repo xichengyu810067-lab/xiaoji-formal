@@ -1,6 +1,7 @@
 const { Events } = require('discord.js');
 const { handleMentionMessage, isPublicPersistenceSuppressed } = require('../services/mentionService');
 const { routeMessageFeatures } = require('../services/messageFeatureRouter');
+const { handleStudentMessage } = require('../systems/conversation/student');
 const { recordPublicMessage } = require('../services/memoryService');
 const { recordPublicInteraction } = require('../services/publicStatusService');
 const logger = require('../utils/logger');
@@ -49,6 +50,17 @@ module.exports = {
       if (extensionResults.some((item) => item.result?.handled)) return;
     } catch (error) {
       logger.error('private message hook failed', error);
+    }
+
+    // An answer in a running /student round (student.js); every other message goes on.
+    try {
+      if ((!message.client.testControlPolicy || message.client.testControlPolicy.allowsMessageFeature('conversation')) &&
+          await handleStudentMessage(message)) {
+        await recordPublicInteraction();
+        return;
+      }
+    } catch (error) {
+      logger.error('student message handling failed', error);
     }
 
     try {

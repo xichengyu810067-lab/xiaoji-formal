@@ -258,7 +258,7 @@ const TABLE_FAMILIES = Object.freeze([
     name: 'conversation',
     tables: new RegExp('^(?:user_chat_preferences|user_romance_preferences|access_audit|ai_events|'
       + 'archive_identity|deletion_receipts|import_quarantine|import_receipts|private_summaries|'
-      + 'public_messages)$', 'u'),
+      + 'public_messages|xiaoji_memory_consent|xiaoji_memory_preferences)$', 'u'),
     owners: systemPaths('conversation'),
   },
   {

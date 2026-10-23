@@ -23,10 +23,17 @@ const DEFAULT_AI_PRIVATE_CONTEXT_RECORDS = 12;
 const DEFAULT_AI_PRIVATE_CONTEXT_CHARACTERS = 2400;
 const recentPublicMessages = new Map();
 
+// Worded without "我目前…紀錄": the output gate reads that as 小吉 describing its own records and refuses it.
+const MEMORY_NOT_FOUND_REPLY = '目前在可查的公開訊息裡沒有找到，不代表真的沒有發生喔。';
+
+// A time word alone ("你剛剛的做法沒說完") is not a memory question; it needs a speech verb as well (see isMemoryQuery).
+const recallTimeTerms = ['剛剛', '剛才', '之前', '昨天'];
+const RECALL_VERB = /(?:說|講|提|聊)/;
+// A sentence that opens with "你剛剛說的…", "你昨天跟我說的…": the member is talking about 小吉's own earlier reply, which
+// the model answers from the conversation. "阿明跟你說過什麼" does not open with it and stays a memory question.
+const ASKS_OWN_REPLY = /^(?:那|欸|誒|請問)?\s*(?:你|妳)\s*(?:剛剛|剛才|之前|昨天)?\s*(?:跟我|對我|和我|有|有沒有|是不是)?\s*(?:說|講|提|回|推薦|的)/;
+
 const memoryQueryTerms = [
-  '剛剛',
-  '之前',
-  '昨天',
   '有沒有說',
   '是不是說',
   '誰說',
@@ -291,7 +298,11 @@ function getPrivateMemoryContext(
 
 function isMemoryQuery(text) {
   const normalized = normalizeText(text);
-  return memoryQueryTerms.some((term) => normalized.includes(term));
+  // Private conversations always take the memory path, which refuses them in a public channel.
+  if (/(?:私下|私人|私訊|\bdm\b)/i.test(normalized)) return true;
+  if (!/<@!?\d+>/.test(String(text || '')) && ASKS_OWN_REPLY.test(normalized.replace(/^小吉[，,：:\s]*/, ''))) return false;
+  if (memoryQueryTerms.some((term) => normalized.includes(term))) return true;
+  return recallTimeTerms.some((term) => normalized.includes(term)) && RECALL_VERB.test(normalized);
 }
 
 function asksPrivateAboutOther(text) {
@@ -507,7 +518,7 @@ function answerMemoryQuery({ text, message }) {
       return formatPublicFound(publicRecord, keyword);
     }
 
-    return '我目前沒有在可查的公開紀錄中找到，不代表真的沒有發生喔。';
+    return MEMORY_NOT_FOUND_REPLY;
   }
 
   if (wholeChannel) {
@@ -517,7 +528,7 @@ function answerMemoryQuery({ text, message }) {
       return formatPublicFound(publicRecord, keyword);
     }
 
-    return '我目前沒有在可查的公開紀錄中找到，不代表真的沒有發生喔。';
+    return MEMORY_NOT_FOUND_REPLY;
   }
 
   const targetUserId = mentionedUserId;
@@ -554,7 +565,7 @@ function answerMemoryQuery({ text, message }) {
       }
     }
 
-    return '我目前沒有在可查的公開紀錄中找到，不代表真的沒有發生喔。';
+    return MEMORY_NOT_FOUND_REPLY;
   }
 
   return null;
@@ -629,6 +640,7 @@ function deleteMemoryProjection({ userId, guildId = null, scope = guildId ? 'gui
 module.exports = {
   DEFAULT_AI_PRIVATE_CONTEXT_CHARACTERS,
   DEFAULT_AI_PRIVATE_CONTEXT_RECORDS,
+  MEMORY_NOT_FOUND_REPLY,
   answerMemoryQuery,
   clearMemoryForTests,
   deleteMemoryProjection,

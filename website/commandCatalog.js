@@ -44,6 +44,8 @@
     ['status', '顯示小吉目前狀態', 'general', 'public'],
     ['chat-style', '查看或變更小吉與你的對話風格', 'general', 'public', ['current', 'set']],
     ['romance', '管理小吉與你的跨伺服器文字戀愛模式', 'general', 'public', ['start', 'stop', 'status']],
+    ['memory', '查看或管理小吉記住的你的喜好', 'general', 'public', ['view', 'export', 'add', 'forget', 'off', 'on', 'delete', 'share']],
+    ['student', '小吉化身好奇寶寶向你提問', 'general', 'public'],
     ['about', '顯示小吉的公開資訊', 'general', 'public'],
     ['help', '列出小吉可用指令', 'general', 'public'],
 

@@ -36,7 +36,7 @@ const { initializeSideEffectLedger, openSideEffectLedger } = require('../src/sys
 const { handleMentionMessage } = require('../src/systems/conversation/chatFlow');
 const { INTERNAL_REPLY } = require('../src/systems/conversation/disclosurePolicy');
 const { providerCallGuard } = require('../src/systems/conversation/providerGuard');
-const { clearMemoryForTests } = require('../src/systems/conversation/projection');
+const { MEMORY_NOT_FOUND_REPLY, clearMemoryForTests } = require('../src/systems/conversation/projection');
 const { resetConversationHistoryForTests } = require('../src/services/conversationHistoryService');
 const { clearConversationStateForTests } = require('../src/services/conversationModeService');
 const { openArchive } = require('../src/systems/conversation/aiArchive');
@@ -289,6 +289,194 @@ test('an alert raised outside the host\'s operation is not sent, and costs nothi
   assert.equal(replies.at(-1).content, INTERNAL_REPLY);
   assert.deepEqual(owner.texts(), []);
   assert.deepEqual(owner.logs, ['[OWNER_SAFETY] code=OWNER_SAFETY_SOURCE_UNAVAILABLE']);
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Ordinary requests that were refused after 小吉 went public: each reaches the model or the right fixed answer, and
+// none raises an alert.
+// ---------------------------------------------------------------------------------------------------------
+
+const MEMBER_ID = '666666666666666666';
+const MEMBER = Object.freeze({ displayName: '星野小光', user: { username: 'hoshino', bot: false } });
+
+// A guild message whose server holds one member, found by mention or by a name search.
+function guildMessageWithMember(fields) {
+  const message = guildMessage(fields);
+  const members = new Map([[MEMBER_ID, MEMBER]]);
+  message.guild = {
+    ...message.guild,
+    members: {
+      cache: members,
+      async fetch(query) {
+        if (typeof query === 'string') return members.get(query) || null;
+        return new Map([...members].filter(([, member]) => member.displayName.startsWith(query.query) ||
+          member.user.username.startsWith(query.query)));
+      },
+    },
+  };
+  message.mentions = { members };
+  return message;
+}
+
+async function askOrdinary(t, content, providerReply = '小吉回覆') {
+  await chatEnvironment(t);
+  const owner = ownerFixture(t);
+  const replies = [];
+  const prompts = [];
+  await sendThroughHost(guildMessageWithMember({ content, replies }), {
+    generateChatReplyImpl: async ({ userText }) => {
+      prompts.push(userText);
+      return providerReply;
+    },
+  });
+  await owner.idle();
+  assert.deepEqual(owner.texts(), [], `${content}: no alert`);
+  return { reply: replies.at(-1)?.content, prompts };
+}
+
+test('asking 小吉 to finish or repeat its own last reply goes to the model, not the memory lookup', async (t) => {
+  for (const content of ['你剛剛的芝麻湯圓做法沒有說完', '你剛剛說的三明治做法再說一次', '你昨天推薦的歌是什麼']) {
+    const { reply, prompts } = await askOrdinary(t, content, '接著說完：水滾後放入湯圓，浮起再煮兩分鐘。');
+    assert.deepEqual(prompts, [content]);
+    assert.equal(reply, '接著說完：水滾後放入湯圓，浮起再煮兩分鐘。', content);
+  }
+});
+
+test('a memory question that finds nothing gets the fixed not-found answer, not the refusal', async (t) => {
+  const { reply, prompts } = await askOrdinary(t, '我剛剛有沒有說晚安');
+  assert.deepEqual(prompts, []);
+  assert.match(reply, new RegExp(MEMORY_NOT_FOUND_REPLY));
+  assert.notEqual(reply, INTERNAL_REPLY);
+});
+
+test('look-up and general "who" questions go to the model instead of the member lookup', async (t) => {
+  for (const content of ['小吉幫我搜尋一下鬼滅之刃的介紹', '誰發明電燈', '介紹一下台北101', '幫我查一下颱風的最新資料']) {
+    const { reply, prompts } = await askOrdinary(t, content);
+    assert.deepEqual(prompts, [content], content);
+    assert.equal(reply, '小吉回覆', content);
+  }
+});
+
+test('"who is" a member, by mention after 小吉 or by name, answers from this server\'s member data', async (t) => {
+  for (const content of [`<@${MEMBER_ID}> 是誰`, '你知道星野小光是誰嗎', '星野小光是誰']) {
+    const { reply, prompts } = await askOrdinary(t, content);
+    assert.deepEqual(prompts, [], content);
+    assert.match(reply, /顯示名稱是「星野小光」/u, content);
+  }
+});
+
+test('a member name that matches no one gets the mention hint only when the question is about members', async (t) => {
+  const inServer = await askOrdinary(t, '這個伺服器的阿明是誰');
+  assert.deepEqual(inServer.prompts, []);
+  assert.match(inServer.reply, /請直接提及那位成員/u);
+  const general = await askOrdinary(t, '愛迪生是誰');
+  assert.deepEqual(general.prompts, ['愛迪生是誰']);
+});
+
+test('a name prefix finds a member only when the question is about members, and a pronoun is never looked up', async (t) => {
+  const inServer = await askOrdinary(t, '這個伺服器的星野是誰');
+  assert.match(inServer.reply, /顯示名稱是「星野小光」/u);
+  for (const content of ['星野是誰', '他是誰', '我是誰']) {
+    const { prompts } = await askOrdinary(t, content);
+    assert.deepEqual(prompts, [content], content);
+  }
+});
+
+test('the model saying 小吉 cannot browse the web is delivered, not turned into the refusal', async (t) => {
+  const line = '小吉目前沒有連網查詢的功能，建議你到中央氣象署網站查看最新颱風資訊喔！';
+  const { reply } = await askOrdinary(t, '幫我查一下颱風的最新資料', line);
+  assert.equal(reply, line);
+});
+
+test('a reply that names an internal topic next to "cannot browse" is still refused and reported', async (t) => {
+  await chatEnvironment(t);
+  const owner = ownerFixture(t);
+  const replies = [];
+  await sendThroughHost(guildMessage({ content: '你會上網嗎', replies }), {
+    generateChatReplyImpl: async () => '小吉沒有連網功能，我使用的是 llama 模型。',
+  });
+  await owner.idle();
+  assert.equal(replies.at(-1).content, INTERNAL_REPLY);
+  assert.equal(owner.texts().length, 1);
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// Tool results of a provider with tools: a poll preview, kept preferences and the one-time memory notice follow
+// only a reply that passed the output check, and none of them raises an alert.
+// ---------------------------------------------------------------------------------------------------------
+
+const preferenceMemory = require('../src/systems/conversation/preferenceMemory');
+const { clearChatPollsForTests } = require('../src/systems/conversation/chatPoll');
+
+test('a reply with a poll proposal and a preference sends the preview, keeps the preference and asks about memory once',
+  async (t) => {
+    await chatEnvironment(t);
+    preferenceMemory.configureMemoryStoreForTests(preferenceMemory.createInMemoryMemoryStore());
+    clearChatPollsForTests();
+    t.after(() => preferenceMemory.configureMemoryStoreForTests(null));
+    const owner = ownerFixture(t);
+    const replies = [];
+    const toolReply = async ({ memoryEnabled }) => {
+      assert.equal(memoryEnabled, true);
+      return {
+        text: '好呀，小吉準備好投票了，請按確認！',
+        pollProposal: { question: '週末吃什麼', options: ['拉麵', '火鍋'], duration_minutes: 30 },
+        preferences: [{ category: 'food', preference: '喜歡拉麵' }],
+      };
+    };
+    await sendThroughHost(guildMessage({ content: '幫我開一個投票，週末吃拉麵還是火鍋，我超愛拉麵', replies }),
+      { generateChatReplyImpl: toolReply });
+    await owner.idle();
+    assert.deepEqual(owner.texts(), []);
+    assert.equal(replies[0].content, '好呀，小吉準備好投票了，請按確認！');
+    assert.match(replies[1].content, /週末吃什麼/u);
+    assert.equal(replies[1].components[0].components.length, 2);
+    assert.match(replies[2].content, /是否允許小吉公開聊天記憶/u);
+    assert.deepEqual((await preferenceMemory.loadMemoryContext({ userId: ACTOR, guildId: GUILD })).preferences,
+      [{ category: 'food', value: '喜歡拉麵' }]);
+
+    // The next chat (past the 3-second channel cooldown) uses the remembered preference and does not ask again.
+    clearConversationStateForTests();
+    providerCallGuard.resetForTests();
+    const seen = [];
+    await sendThroughHost(guildMessage({ content: '推薦我晚餐', replies }), {
+      generateChatReplyImpl: async ({ rememberedPreferences }) => { seen.push(rememberedPreferences); return '吃拉麵吧！'; },
+    });
+    assert.deepEqual(seen, [[{ category: 'food', value: '喜歡拉麵' }]]);
+    assert.equal(replies.filter((reply) => /是否允許小吉公開聊天記憶/u.test(reply.content || '')).length, 1);
+  });
+
+test('a poll proposal whose text names a deployed model is not shown, while the reply itself is sent', async (t) => {
+  await chatEnvironment(t);
+  clearChatPollsForTests();
+  ownerFixture(t);
+  const replies = [];
+  await sendThroughHost(guildMessage({ content: '幫我開投票，選項放兩個 AI 名稱', replies }), {
+    generateChatReplyImpl: async () => ({
+      text: '好的，請按確認！',
+      pollProposal: { question: '你喜歡哪個', options: ['claude-opus-5-5', 'gpt-4.1-mini'], duration_minutes: 10 },
+      preferences: [],
+    }),
+  });
+  assert.deepEqual(replies.map((reply) => reply.content), ['好的，請按確認！']);
+});
+
+test('a refused reply sends no poll preview and keeps no preference', async (t) => {
+  await chatEnvironment(t);
+  preferenceMemory.configureMemoryStoreForTests(preferenceMemory.createInMemoryMemoryStore());
+  clearChatPollsForTests();
+  t.after(() => preferenceMemory.configureMemoryStoreForTests(null));
+  ownerFixture(t);
+  const replies = [];
+  await sendThroughHost(guildMessage({ content: '開個投票', replies }), {
+    generateChatReplyImpl: async () => ({
+      text: '小吉沒有連網功能，我使用的是 llama 模型。',
+      pollProposal: { question: 'q', options: ['a', 'b'], duration_minutes: 10 },
+      preferences: [{ category: 'food', preference: '喜歡拉麵' }],
+    }),
+  });
+  assert.deepEqual(replies.map((reply) => reply.content), [INTERNAL_REPLY]);
+  assert.deepEqual(await preferenceMemory.listOwnPreferences(ACTOR), []);
 });
 
 // ---------------------------------------------------------------------------------------------------------

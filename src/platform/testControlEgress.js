@@ -2,7 +2,7 @@
 
 const { isCanonicalRoute } = require('./discordRoute');
 const { createTestControlInventory } = require('./testControlInventory');
-const { TestControlError } = require('./testControlPolicy');
+const { TestControlError, claimOwnThreadRecorder } = require('./testControlPolicy');
 
 const SYNTHETIC_EGRESS_SYMBOL = Symbol.for('xiaoji.liveTestSyntheticEgress');
 
@@ -116,6 +116,8 @@ function createTestControlEgress(policy, {
 } = {}) {
   const interactions = new Map();
   const channelGuilds = new Map();
+  // Only this egress can add the test bot's own threads to the scope (see claimOwnThreadRecorder).
+  const recordOwnThread = claimOwnThreadRecorder(policy);
   let diagnosticPhase = 'identity_preflight';
   let inventory = null;
 
@@ -152,6 +154,19 @@ function createTestControlEgress(policy, {
   function rememberChannelResponse(route, method, result) {
     const match = normalizeMethod(method) === 'GET' && route.match(/^\/channels\/(\d{16,22})$/u);
     if (match) rememberChannel(match[1], result?.guild_id);
+  }
+
+  // A thread the test bot opened in an allowed channel (from a message or on its own) joins the scope from Discord's
+  // answer: the parent named in the route must be the parent Discord reports, and the policy checks the owner.
+  function rememberOwnThreadResponse(route, method, result) {
+    if (normalizeMethod(method) !== 'POST') return;
+    const match = route.match(/^\/channels\/(\d{16,22})\/(?:messages\/\d{16,22}\/)?threads$/u);
+    if (!match || String(result?.parent_id || '') !== match[1]) return;
+    if (recordOwnThread?.({
+      threadId: result?.id, parentId: match[1], guildId: result?.guild_id, ownerId: result?.owner_id,
+    })) {
+      rememberChannel(result.id, result.guild_id);
+    }
   }
 
   function inventoryMessageRequest(route, method) {
@@ -224,6 +239,11 @@ function createTestControlEgress(policy, {
     let match = route.match(/^\/channels\/(\d{16,22})(?:\/|$)/);
     if (match) {
       if (!policy.allowsChannel(match[1])) deny(policy, 'TEST_CHANNEL_EGRESS_DENIED', 'discord_rest');
+      // A new thread when the run already holds its most is refused before Discord opens it.
+      if (verb === 'POST' && /^\/channels\/\d{16,22}\/(?:messages\/\d{16,22}\/)?threads$/u.test(route) &&
+          policy.hasOwnThreadRoom?.() === false) {
+        deny(policy, 'TEST_OWN_THREAD_LIMIT', 'discord_rest');
+      }
       return true;
     }
 
@@ -306,6 +326,7 @@ function createTestControlEgress(policy, {
         if (request) pending = inventory.beginMessage(request);
         const result = await original(outgoing);
         rememberChannelResponse(route, method, result);
+        rememberOwnThreadResponse(route, method, result);
         if (pending !== null) {
           const sequence = pending;
           pending = null;
