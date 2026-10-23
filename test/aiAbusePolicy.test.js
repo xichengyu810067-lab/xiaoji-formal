@@ -194,7 +194,7 @@ test('provider guard treats a missing quota namespace as the default one and adm
 });
 
 test('provider guard lists its quota namespaces and refuses any other name before counting anything', async () => {
-  assert.deepEqual(QUOTA_NAMESPACES, { TURTLE_SOUP: 'turtle-soup' });
+  assert.deepEqual(QUOTA_NAMESPACES, { TURTLE_SOUP: 'turtle-soup', STUDENT: 'student' });
   assert.equal(Object.isFrozen(QUOTA_NAMESPACES), true);
 
   // One request is allowed per player and side, so a call that had been counted would show up below.

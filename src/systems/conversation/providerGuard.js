@@ -18,6 +18,9 @@ const DEFAULT_PROVIDER_GUARD_CONFIG = Object.freeze({
   maxTrackedUsers: 2_048,
 });
 
+// The longest any one call may be given (see execute's timeoutMs).
+const MAX_TIMEOUT_MS = 60_000;
+
 const BLOCK_REASONS = Object.freeze({
   DUPLICATE: 'duplicate',
   GLOBAL_BUSY: 'global_busy',
@@ -84,7 +87,7 @@ const QUOTA_NAMESPACE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/u;
 
 // Every quota namespace a caller may name. A name that is not listed (a misspelling, say) is refused
 // instead of quietly opening a separate, empty allowance beside the one it was meant to share.
-const QUOTA_NAMESPACES = Object.freeze({ TURTLE_SOUP: 'turtle-soup' });
+const QUOTA_NAMESPACES = Object.freeze({ TURTLE_SOUP: 'turtle-soup', STUDENT: 'student' });
 const KNOWN_QUOTA_NAMESPACES = new Set(Object.values(QUOTA_NAMESPACES));
 
 function normalizeQuotaNamespace(value) {
@@ -265,9 +268,15 @@ class ProviderCallGuard {
   // stateKeyFor). Leaving it out, or passing null, is the default namespace that chat uses; any
   // other value must be one of QUOTA_NAMESPACES, or the call is refused with a TypeError before
   // anything is counted.
+  //
+  // `options.timeoutMs` lets a slower provider call (one that may search the web first) wait longer than the
+  // configured timeout, up to MAX_TIMEOUT_MS; it never shortens it.
   async execute(context, input, operation, options = {}) {
     if (typeof operation !== 'function') throw new TypeError('AI provider operation must be a function.');
     const emitSafetyEvents = options?.emitSafetyEvents !== false;
+    const timeoutMs = options?.timeoutMs === undefined
+      ? this.config.timeoutMs
+      : Math.max(this.config.timeoutMs, Math.min(MAX_TIMEOUT_MS, positiveInteger(options.timeoutMs, 'timeoutMs')));
     const lease = this.acquire(context, input, { emitSafetyEvents, quotaNamespace: options?.quotaNamespace });
     const controller = new AbortController();
     let timer;
@@ -278,7 +287,7 @@ class ProviderCallGuard {
         timedOut = true;
         controller.abort();
         reject(this.blocked(BLOCK_REASONS.TIMEOUT, lease.state, lease.context, this.currentTime(), emitSafetyEvents));
-      }, this.config.timeoutMs);
+      }, timeoutMs);
     });
     try {
       return await Promise.race([operationPromise, timeout]);

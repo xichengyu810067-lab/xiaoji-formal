@@ -15,7 +15,7 @@ const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r
 
 test('the README stays short enough to read in about thirty seconds', () => {
   assert.ok(readme.length <= 2600, `README.md has ${readme.length} characters`);
-  assert.match(readme, /\n## 30 秒看懂 1\.2\.0 大更新\n/u);
+  assert.match(readme, /\n## 30 秒看懂 1\.3\.0 大更新\n/u);
 });
 
 test('the README has no setup, code or engineering words', () => {
