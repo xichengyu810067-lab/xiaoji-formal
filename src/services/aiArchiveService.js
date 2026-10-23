@@ -13,7 +13,7 @@ const {
 const ARCHIVE_UNAVAILABLE_REPLY = '小吉目前無法安全保存這次對話，請稍後再試。';
 // Must equal `version` in website/policyPublication.js; the host .env must carry the same
 // XIAOJI_ARCHIVE_POLICY_VERSION or capture stays off.
-const ARCHIVE_POLICY_VERSION = '1.2.0';
+const ARCHIVE_POLICY_VERSION = '1.3.0';
 let archive = null;
 let currentPath = null;
 let alerted = false;

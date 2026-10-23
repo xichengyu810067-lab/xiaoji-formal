@@ -1,6 +1,8 @@
 const { Events } = require('discord.js');
 const { handleBlackjackButton } = require('../services/casinoService');
 const { handlePollButton } = require('../services/pollService');
+const { CUSTOM_ID_PREFIX: CHAT_POLL_PREFIX, handleChatPollButton } = require('../systems/conversation/chatPoll');
+const { CUSTOM_ID_PREFIX: MEMORY_CONSENT_PREFIX, handleMemoryConsentButton } = require('../systems/conversation/memoryConsent');
 const { replyEphemeral } = require('../utils/moderation');
 const { recordPublicInteraction } = require('../services/publicStatusService');
 const logger = require('../utils/logger');
@@ -71,6 +73,39 @@ module.exports = {
       } catch (error) {
         logger.error('blackjack button handling failed', error);
         await replyEphemeral(interaction, '21點處理失敗，請稍後再試。');
+      }
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(CHAT_POLL_PREFIX)) {
+      try {
+        await handleChatPollButton(interaction);
+        await recordPublicInteraction();
+      } catch (error) {
+        logger.error('chat poll button handling failed', error);
+        await replyEphemeral(interaction, '投票處理失敗，請稍後再試。');
+      }
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('memdelete|1|')) {
+      const command = interaction.client.commands.get('memory');
+      try {
+        if (!command?.handleComponent) throw new Error('memory command unavailable');
+        await command.handleComponent(interaction);
+      } catch (error) {
+        logger.error('memory delete button handling failed', error);
+        await replyEphemeral(interaction, '刪除失敗，請稍後再用 /memory delete 試一次。');
+      }
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(MEMORY_CONSENT_PREFIX)) {
+      try {
+        await handleMemoryConsentButton(interaction);
+      } catch (error) {
+        logger.error('memory consent button handling failed', error);
+        await replyEphemeral(interaction, '記憶設定失敗，請稍後用 /memory share 設定。');
       }
       return;
     }

@@ -42,7 +42,8 @@ const SECRET_FILE_NAME_PATTERNS = [
 const FORBIDDEN_CONTENT = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /SYNTHETIC[_-]SECRET[_-]CANARY/i,
-  /^(?:\s*export\s+)?(?:DISCORD_TOKEN|OPENAI_API_KEY|GROQ_API_KEY|JEV_API_KEY)\s*=\s*(?!your_|optional_|$)[^\s]+/gmi,
+  // Spaces and tabs only around "=": an empty value must not run on into the next line's key.
+  /^(?:[ \t]*export[ \t]+)?(?:DISCORD_TOKEN|OPENAI_API_KEY|GROQ_API_KEY|ANTHROPIC_API_KEY|TURSO_AUTH_TOKEN|JEV_API_KEY)[ \t]*=[ \t]*(?!your_|optional_|$)[^\s]+/gmi,
 ];
 
 // Turtle-soup scenarios, their answers, and the retrieval index are private. Three layers keep

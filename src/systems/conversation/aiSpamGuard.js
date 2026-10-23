@@ -315,13 +315,15 @@ class AiSpamGuard {
   // Only explicit requests count toward a cooldown or get a notice: a continuing message may not have
   // been meant for 小吉 at all. `topic` only scopes the repeat check (the turtle soup judge passes the
   // kind, so a guess is never a repeat of a question with the same words); the limits are shared.
-  evaluate({ guildId = null, channelId, userId, text, explicit = true, topic = '' } = {}) {
+  // `hasAttachment` is true when the message carries a file or image: that is content, so a message with no
+  // meaningful text is not "meaningless"; every rate limit still counts it.
+  evaluate({ guildId = null, channelId, userId, text, explicit = true, topic = '', hasAttachment = false } = {}) {
     const now = this.currentTime();
     const { user, channel, guildKey } = this.states({ guildId, channelId, userId }, now);
     const context = { guildKey, channelId, userId, explicit: Boolean(explicit) };
 
     if (now < user.cooldownUntil) return this.block(AI_SPAM_BLOCK_REASONS.COOLDOWN, user, channel, context, now);
-    if (classifyMeaningless(text, this.limits)) {
+    if (!hasAttachment && classifyMeaningless(text, this.limits)) {
       return this.block(AI_SPAM_BLOCK_REASONS.MEANINGLESS, user, channel, context, now);
     }
 

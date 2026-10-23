@@ -1,11 +1,11 @@
 (function publishPolicyPublication(root, factory) {
   const publication = factory({
-    version: '1.2.0',
-    lastUpdatedDate: '2026 年 10 月 20 日',
-    // Left empty until 1.2.0 is deployed; the factory then renders the pending-notice text.
-    // On deployment day: set the real date here, run `node scripts/render-policy-publication.js`,
-    // and set XIAOJI_ARCHIVE_POLICY_VERSION=1.2.0 in the host .env (otherwise archive capture stays off).
-    effectiveDate: '2026 年 10 月 21 日',
+    version: '1.3.0',
+    lastUpdatedDate: '2026 年 10 月 23 日',
+    // Empty renders the pending-notice text. After changing any field, run
+    // `node scripts/render-policy-publication.js`; the host .env needs XIAOJI_ARCHIVE_POLICY_VERSION=1.3.0
+    // (otherwise archive capture stays off).
+    effectiveDate: '2026 年 10 月 24 日',
   });
 
   if (typeof module === 'object' && module.exports) {

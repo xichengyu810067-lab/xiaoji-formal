@@ -483,12 +483,15 @@ async function prepareChat(t) {
     providerCalls += 1;
     return providerCallGuard.execute({ userId, guildId, channelId }, userText, async () => `小吉回覆第${providerCalls}則`);
   };
-  const send = (content, { mention = true, stickers = 0, impl = generateChatReplyImpl, reply = false } = {}) => {
+  const send = (content, {
+    mention = true, stickers = 0, impl = generateChatReplyImpl, reply = false, files = [], vision = () => true,
+    imageFetch = undefined,
+  } = {}) => {
     sequence += 1;
     return handleMentionMessage({
       ...(reply ? { reference: { messageId: '600000000000009999' } } : {}),
       stickers: { size: stickers },
-      attachments: { size: 0 },
+      attachments: new Map(files.map((file, index) => [String(index), file])),
       id: `60000000000000${String(sequence).padStart(4, '0')}`,
       content: mention ? `<@${BOT_ID}> ${content}` : content,
       author: { id: CHAT_USER, username: '甲', tag: '甲', bot: false },
@@ -506,6 +509,8 @@ async function prepareChat(t) {
     }, {
       generateChatReplyImpl: impl,
       statusPort: { recordInteraction: async () => { statusRecorded += 1; } },
+      visionAvailable: vision,
+      imageFetch,
     });
   };
   const attempts = () => providerCallGuard.users.get(`\u0000${CHAT_USER}`)?.attempts.length ?? 0;
@@ -513,6 +518,7 @@ async function prepareChat(t) {
   const archived = () => getArchive().listEvents({ userId: CHAT_USER, scope: 'dm', channelId: DM_CHANNEL }).rows.length;
   return {
     sent, send, attempts, turns, archived, conversationEvents, safetyEvents,
+    history: () => getRecentConversationTurns({ userId: CHAT_USER, guildId: null, channelId: DM_CHANNEL }),
     providerCalls: () => providerCalls,
     statusRecorded: () => statusRecorded,
     tick: (ms) => t.mock.timers.tick(ms),
@@ -1165,4 +1171,145 @@ test('a reply to 小吉 with only emoji or punctuation is ignored: no notice, no
   await chat.send('', { mention: false, reply: true, stickers: 1 });
   assert.equal(chat.sent.at(-1).content, AI_SPAM_NOTICES[REASONS.MEANINGLESS]);
   assert.equal(chat.providerCalls(), 2);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Images attached to a chat (imageInput.js)
+// ---------------------------------------------------------------------------------------------
+
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7, 7]);
+const imageFile = (name, contentType = 'image/png') =>
+  ({ url: `https://cdn.discordapp.com/attachments/1/2/${name}`, contentType, size: PNG_BYTES.length });
+const pngFetch = async () => ({
+  ok: true, headers: new Map([['content-length', String(PNG_BYTES.length)]]), arrayBuffer: async () => PNG_BYTES,
+});
+
+test('an image alone reaches the model; the history keeps only how many images there were', async (t) => {
+  const chat = await prepareChat(t);
+  const seen = [];
+  const impl = async ({ userText, images }) => { seen.push({ userText, images }); return '是一隻貓咪！'; };
+  assert.equal(await chat.send('', { files: [imageFile('a.png')], impl, imageFetch: pngFetch }), undefined);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].userText, '[附圖 1 張]');
+  assert.deepEqual(seen[0].images, [{ mediaType: 'image/png', data: PNG_BYTES.toString('base64') }]);
+  assert.match(chat.sent.at(-1).content, /是一隻貓咪/u);
+  const history = chat.history();
+  assert.equal(history.length, 1);
+  assert.equal(history[0].user, '[附圖 1 張]');
+  assert.doesNotMatch(JSON.stringify(history), new RegExp(PNG_BYTES.toString('base64').slice(0, 8), 'u'));
+  assert.doesNotMatch(JSON.stringify(history), /cdn\.discordapp\.com/u);
+});
+
+test('more than three images: three are read and the reply says the rest were not', async (t) => {
+  const chat = await prepareChat(t);
+  const seen = [];
+  const impl = async ({ userText, images }) => { seen.push({ userText, count: images.length }); return '看到了'; };
+  const files = ['a.png', 'b.png', 'c.png', 'd.png'].map((name) => imageFile(name));
+  await chat.send('這些是什麼', { files, impl, imageFetch: pngFetch });
+  assert.deepEqual(seen, [{ userText: '這些是什麼 [附圖 3 張]', count: 3 }]);
+  assert.match(chat.sent.at(-1).content, /看到了/u);
+  assert.match(chat.sent.at(-1).content, /只看了前 3 張圖/u);
+});
+
+test('files that are not images, without text, get one fixed line and no model call', async (t) => {
+  const chat = await prepareChat(t);
+  const calls = [];
+  const impl = async (request) => { calls.push(request); return 'x'; };
+  const result = await chat.send('', { files: [imageFile('a.pdf', 'application/pdf')], impl });
+  assert.deepEqual(result, { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE });
+  assert.equal(calls.length, 0);
+  assert.match(chat.sent.at(-1).content, /只看得懂圖片/u);
+  assert.equal(chat.turns(), 0);
+});
+
+test('without a provider that reads images: an image alone gets a fixed line, with text the text is answered and noted', async (t) => {
+  const chat = await prepareChat(t);
+  const seen = [];
+  let fetched = 0;
+  const impl = async ({ userText, images }) => { seen.push({ userText, count: images.length }); return '好喔'; };
+  const imageFetch = async () => { fetched += 1; return pngFetch(); };
+  const vision = () => false;
+  assert.deepEqual(await chat.send('', { files: [imageFile('a.png')], impl, vision, imageFetch }),
+    { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE });
+  assert.match(chat.sent.at(-1).content, /小吉現在看不到圖片，可以用文字/u);
+  assert.equal(seen.length, 0);
+  chat.tick(MINUTE);
+  await chat.send('幫我看看這張', { files: [imageFile('b.png')], impl, vision, imageFetch });
+  assert.deepEqual(seen, [{ userText: '幫我看看這張 [附圖 1 張]', count: 0 }]);
+  assert.match(chat.sent.at(-1).content, /好喔/u);
+  assert.match(chat.sent.at(-1).content, /只看了你的文字/u);
+  assert.equal(fetched, 0);
+});
+
+test('an image that cannot be read (wrong bytes, failed download) is not sent; alone it gets a fixed line', async (t) => {
+  const chat = await prepareChat(t);
+  const calls = [];
+  const impl = async (request) => { calls.push(request); return 'x'; };
+  const fakeBytes = async () => ({ ok: true, headers: new Map(), arrayBuffer: async () => Buffer.from('<html>not an image</html>') });
+  assert.deepEqual(await chat.send('', { files: [imageFile('a.png')], impl, imageFetch: fakeBytes }),
+    { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE });
+  assert.equal(calls.length, 0);
+  assert.match(chat.sent.at(-1).content, /打不開這張圖片/u);
+});
+
+test('in a continuing conversation (no mention, name or reply), an image alone is not read and costs nothing', async (t) => {
+  const chat = await prepareChat(t);
+  const seen = [];
+  let fetched = 0;
+  const impl = async ({ userText, images }) => { seen.push({ userText, count: images.length }); return '嗯嗯'; };
+  const imageFetch = async () => { fetched += 1; return pngFetch(); };
+  await chat.send('嗨', { impl });
+  chat.tick(MINUTE);
+  const sentBefore = chat.sent.length;
+  await chat.send('', { mention: false, files: [imageFile('a.png')], impl, imageFetch });
+  assert.equal(seen.length, 1);
+  assert.equal(fetched, 0);
+  assert.equal(chat.sent.length, sentBefore);
+});
+
+test('two image-only messages in a row with different images are both answered; the same words with other images are not a repeat', async (t) => {
+  const chat = await prepareChat(t);
+  const seen = [];
+  const impl = async ({ userId, guildId, channelId, userText, images }) =>
+    providerCallGuard.execute({ userId, guildId, channelId }, userText, async () => { seen.push(images.length); return '看到了'; });
+  const bytes = (n) => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, n, n, n, n]);
+  const fetchFor = (n) => async () => ({ ok: true, headers: new Map(), arrayBuffer: async () => bytes(n) });
+  // The real provider guard keys duplicates on its input; generateChatReply adds the image digest (see the provider test).
+  const { imageFingerprint } = require('../src/systems/conversation/imageInput');
+  const keyed = async (request) => impl({
+    ...request,
+    userText: `${request.userText}\u0000${imageFingerprint(request.images.map((image) => image.data))}`,
+  });
+  await chat.send('', { files: [{ ...imageFile('a.png'), size: 12 }], impl: keyed, imageFetch: fetchFor(1) });
+  chat.tick(5_000);
+  await chat.send('', { files: [{ ...imageFile('b.png'), size: 12 }], impl: keyed, imageFetch: fetchFor(2) });
+  assert.deepEqual(seen, [1, 1]);
+  for (const [index, name] of ['c.png', 'd.png', 'e.png'].entries()) {
+    chat.tick(MINUTE);
+    const result = await chat.send('這是什麼動物', { files: [{ ...imageFile(name), size: 12 }], impl: keyed, imageFetch: fetchFor(3 + index) });
+    assert.equal(result, undefined, name);
+  }
+  assert.deepEqual(seen, [1, 1, 1, 1, 1]);
+});
+
+test('meaningless text is still meaningless with a file that is not an image attached', async (t) => {
+  const chat = await prepareChat(t);
+  const calls = [];
+  const impl = async (request) => { calls.push(request); return 'x'; };
+  const result = await chat.send('哈哈哈哈哈哈哈哈哈哈', { files: [imageFile('a.txt', 'text/plain')], impl });
+  assert.deepEqual(result, { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE });
+  assert.equal(calls.length, 0);
+});
+
+test('only punctuation or emoji with a file that is not an image gets the fixed line, not the model', async (t) => {
+  const chat = await prepareChat(t);
+  const calls = [];
+  const impl = async (request) => { calls.push(request); return 'x'; };
+  for (const text of ['。。。。', '😀😀']) {
+    assert.deepEqual(await chat.send(text, { files: [imageFile('a.pdf', 'application/pdf')], impl }),
+      { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE }, text);
+    assert.match(chat.sent.at(-1).content, /只看得懂圖片/u, text);
+    chat.tick(MINUTE);
+  }
+  assert.equal(calls.length, 0);
 });

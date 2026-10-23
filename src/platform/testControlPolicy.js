@@ -15,6 +15,11 @@ const REQUIRED_DATA_PATHS = Object.freeze([
   'XIAOJI_MEMORY_PATH',
 ]);
 const RETAINED_DATA_FILES = Object.freeze(['guildConfig.json', 'polls.json', 'guildQuotas.json']);
+// The most threads the test bot may open and use in one run (see claimOwnThreadRecorder).
+const MAX_OWN_THREADS = 50;
+// policy -> its own-thread recorder, until the test egress claims it (claimOwnThreadRecorder): the policy object itself
+// only reads, so nothing else holding it can widen the scope.
+const ownThreadRecorders = new WeakMap();
 // A test data root is accepted only when it carries this marker, created for the same
 // test application and bound to this exact directory (bigint dev:ino). Production data
 // directories never carry it, so a trust file that points dataRoot at production data
@@ -279,7 +284,7 @@ function loadTestControlPolicy(env = process.env, {
   const allowedJobs = new Set(parseList(env.XIAOJI_TEST_ALLOWED_JOBS));
 
   if (['mention', 'conversation'].some((name) => allowedMessageFeatures.has(name)) &&
-      !env.OPENAI_API_KEY && !env.GROQ_API_KEY) {
+      !env.OPENAI_API_KEY && !env.GROQ_API_KEY && (!env.ANTHROPIC_API_KEY || /^your_/iu.test(env.ANTHROPIC_API_KEY))) {
     fail('TEST_AI_PROVIDER_REQUIRED');
   }
   if (allowedCommands.has('weather') && !env.CWA_API_KEY && !env.OPENWEATHER_API_KEY) {
@@ -322,6 +327,10 @@ function loadTestControlPolicy(env = process.env, {
   }
 
   const reporter = createReporter(logger);
+  // Threads the test bot itself opened in an allowed channel during this run (testControlEgress.js records them from
+  // Discord's answer to the thread creation): in scope like their parent channel. Kept only in memory for this run,
+  // at most MAX_OWN_THREADS, never written to the trust file; a thread anyone else opened stays out of scope.
+  const ownThreads = new Map();
   const policy = {
     mode: TEST_MODE,
     expectedApplicationId,
@@ -337,7 +346,11 @@ function loadTestControlPolicy(env = process.env, {
     dataRoot,
     reporter,
     allowsGuild(id) { return allowedGuildIds.has(String(id || '')); },
-    allowsChannel(id) { return allowedChannelIds.has(String(id || '')); },
+    allowsChannel(id) {
+      const channel = String(id || '');
+      return allowedChannelIds.has(channel) || ownThreads.has(channel);
+    },
+    hasOwnThreadRoom() { return ownThreads.size < MAX_OWN_THREADS; },
     allowsActor(id) { return allowedActorIds.has(String(id || '')) || allowsSyntheticActor(policy, id); },
     allowsCommand(name) { return allowedCommands.has(String(name || '')); },
     allowsComponent(customId) {
@@ -364,7 +377,26 @@ function loadTestControlPolicy(env = process.env, {
       return true;
     },
   };
-  return Object.freeze(policy);
+  // A thread joins the scope only when the test bot owns it, its parent is an allowed channel (not another thread)
+  // and its guild is allowed. Returns whether it is in scope.
+  function recordOwnThread({ threadId, parentId, guildId, ownerId } = {}) {
+    const thread = String(threadId || '');
+    const parent = String(parentId || '');
+    if (!ID_PATTERN.test(thread) || !allowedChannelIds.has(parent) || !allowedGuildIds.has(String(guildId || '')) ||
+        String(ownerId || '') !== expectedApplicationId) {
+      return false;
+    }
+    if (allowedChannelIds.has(thread) || ownThreads.has(thread)) return true;
+    if (ownThreads.size >= MAX_OWN_THREADS) {
+      reporter.deny('TEST_OWN_THREAD_LIMIT', 'thread_scope');
+      return false;
+    }
+    ownThreads.set(thread, parent);
+    return true;
+  }
+  const frozen = Object.freeze(policy);
+  ownThreadRecorders.set(frozen, recordOwnThread);
+  return frozen;
 }
 
 async function preflightTestIdentity({ policy, rest, configuredClientId, Routes }) {
@@ -378,6 +410,13 @@ async function preflightTestIdentity({ policy, rest, configuredClientId, Routes 
     if (!policy.allowsGuild(channel?.guild_id)) fail('TEST_CHANNEL_GUILD_MISMATCH');
   }
   return true;
+}
+
+// The own-thread recorder of a policy, for the one test egress that installs it; null for anyone after it.
+function claimOwnThreadRecorder(policy) {
+  const recorder = ownThreadRecorders.get(policy) || null;
+  ownThreadRecorders.delete(policy);
+  return recorder;
 }
 
 function getTestControlPolicy(client) {
@@ -396,6 +435,7 @@ module.exports = {
   assertTestDataRoot,
   assertTestDataRootDirectory,
   assertTestDataRootMarker,
+  claimOwnThreadRecorder,
   createReporter,
   getTestControlPolicy,
   allowsSyntheticActor,

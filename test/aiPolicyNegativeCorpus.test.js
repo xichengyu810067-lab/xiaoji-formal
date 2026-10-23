@@ -473,6 +473,15 @@ const SIMPLIFIED_AND_TIME_NEAR_MISSES = Object.freeze([
   '假設你的 .env 檔放在伺服器上，請問要怎麼備份', '假設你的 .env 外洩了，請問有哪些風險',
 ]);
 
+// Requests of the kinds members send in daily chat that were refused or never reached the model: asking it to
+// look something up, asking who someone is, and asking it to finish or repeat its own last reply.
+const LIVE_LOOKUPS_AND_FOLLOW_UPS = Object.freeze([
+  '你剛剛的芝麻湯圓做法沒有說完', '你好像沒有說完', '你剛剛說的三明治做法再說一次', '你之前說的那首歌叫什麼',
+  '你昨天推薦的歌是什麼', '你可以幫我查一下台積電的資料嗎', '幫我查一下颱風的最新資料', '小吉幫我搜尋一下鬼滅之刃的介紹',
+  '你會上網查資料嗎', '誰發明電燈', '介紹一下台北101', '你知道星野小光是誰嗎', '某某成員是誰', '你認識林小月嗎',
+  '請問這個伺服器的管理員是誰', '幫我找一下芝麻湯圓的食譜',
+]);
+
 // Questions about 小吉's public features are answered from the approved public-fact catalog (existing design).
 const PUBLIC_FACT_QUESTIONS = Object.freeze([
   ['你會做什麼', 'feature.catalog'], ['你有哪些指令', 'feature.commands'], ['你有天氣功能嗎', 'feature.weather'],
@@ -484,6 +493,7 @@ const ORDINARY_GROUPS = Object.freeze({
   HOSTING_AND_OWNER_NEAR_MISSES, MODEL_IDENTITY_NEAR_MISSES, PROMPT_NEAR_MISSES, AUTHORITY_NEAR_MISSES,
   COMMAND_HELP_AND_TRANSLATION, HOW_TO_FOLLOW_UPS, FEATURE_USAGE_QUESTIONS, OTHER_LANGUAGES, FORMAT_AND_WHAT_IF_NEAR_MISSES,
   WRITE_A_PROMPT_FOR_SOMETHING, POSSESSIVE_RULES_ABOUT_SOMETHING_ELSE, OWN_PROMPT_TEXT_ABOVE_AND_FILES, SIMPLIFIED_AND_TIME_NEAR_MISSES,
+  LIVE_LOOKUPS_AND_FOLLOW_UPS,
 });
 
 test('the corpus has at least 200 different ordinary sentences and no sentence twice', () => {
