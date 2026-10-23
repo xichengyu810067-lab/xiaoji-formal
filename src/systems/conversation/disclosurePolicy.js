@@ -119,7 +119,7 @@ const DISCORD_TOKEN_PATTERN = /\b[MNO][A-Za-z\d_-]{23,27}\.[A-Za-z\d_-]{6,7}\.[A
 const PROVIDER_KEY_PATTERN = /\b(?:sk|gsk)[-_][A-Za-z0-9_-]{8,}\b/g;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+\/-]{8,}\b/gi;
 const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/g;
-const SECRET_ASSIGNMENT_PATTERN = /\b(DISCORD_TOKEN|OPENAI_API_KEY|GROQ_API_KEY|OPENWEATHER_API_KEY|CWA_API_KEY|BOT_OWNER_ID|ACCESS_TOKEN|CLIENT_SECRET)\s*[:=]\s*([^\s,;]+)/gi;
+const SECRET_ASSIGNMENT_PATTERN = /\b(DISCORD_TOKEN|OPENAI_API_KEY|GROQ_API_KEY|ANTHROPIC_API_KEY|TURSO_AUTH_TOKEN|OPENWEATHER_API_KEY|CWA_API_KEY|BOT_OWNER_ID|ACCESS_TOKEN|CLIENT_SECRET)\s*[:=]\s*([^\s,;]+)/gi;
 const SECRET_QUERY_PATTERN = /([?&](?:api_?key|access_?token|token|secret)=)[^&#\s]+/gi;
 const PRIVATE_PATH_PATTERN = /(?:[A-Za-z]:\\Users\\[^\s"'<>]+|\/home\/(?:container|runner|[^/\s]+)\/[^\s"'<>]+)/g;
 const ASSISTANT_REFERENCE = /(?:小吉|這(?:個|台)(?:機器人|助手)|此(?:機器人|助手)|本(?:機器人|助手|專案)|\bxiao\s*ji\b|\bthis\s+(?:bot|chatbot)\b)/i;
@@ -1379,6 +1379,14 @@ function buildCommandWordAfterSlashCommand(names) {
   return new RegExp(String.raw`((?<![\w.:/])\/(?!(?:${names.map(escapeRegExp).join('|')})(?![\w-]))[a-z][\w-]*[^\n。！？!?]{0,20}?)(?<!系統|隱藏|秘密|內部|私有)指令`, 'gi');
 }
 let COMMAND_WORD_AFTER_SLASH_COMMAND = buildCommandWordAfterSlashCommand(NON_PUBLIC_COMMAND_NAMES);
+// A public command named in a reply is the command list, not a topic: "/memory" is not 小吉's memory. Only the exact
+// names /help lists are masked (to "/◇"), so a private or removed name is still read as written.
+const PUBLIC_COMMAND_TOKEN = new RegExp(String.raw`(?<![\w.:/])\/(?:${commandCatalog.COMMAND_CATALOG
+  .filter((command) => command.listInHelp === true && command.audience !== 'owner' && !NON_PUBLIC_COMMAND_NAMES.includes(command.name))
+  .map((command) => escapeRegExp(command.name)).join('|')})(?![\w-])`, 'giu');
+function withoutPublicCommandNames(text) {
+  return text.replace(PUBLIC_COMMAND_TOKEN, '/◇');
+}
 const EXTENSION_COMMAND_NAME = /^[a-z0-9_-]{1,32}$/u;
 
 // The command names of the extension that is loaded (host.ownedCommandNames()) join the non-public ones, so "輸入 /some-tool 指令"
@@ -2738,6 +2746,19 @@ function withoutPublicSelfDescriptionWords(text) {
     : sentence.replace(SELF_INTRODUCTION_PUBLIC_WORDS, ''))).join('');
 }
 
+// The assistant saying it cannot go online or look things up ("小吉目前沒有連網查詢的功能", "我沒辦法即時搜尋") tells
+// nothing internal; the phrase is masked in its own replies so the rest of the reply is still checked. Only web and
+// look-up words count, and 功能 or 能力 only right after them, so no other word is masked with the phrase ("不能查詢測試帳號
+// 紀錄的功能" keeps 測試帳號紀錄). Plain alternatives of literal text: linear time.
+const CAPABILITY_NEGATION = /(?:沒有|沒|無法|不能|不會|不支援|做不到)(?:辦法)?(?:直接|即時|實時|主動)?(?:上網|連網|聯網|網路|線上)?(?:搜尋|搜索|瀏覽|查詢|查資料|查網路|查最新|上網|連網|聯網)(?:網路|網頁|資料|最新資料)?(?:的)?(?:功能|能力)?/gu;
+
+// Only a reply that names no internal topic anywhere ("沒有連網功能，資料庫放在雲端") is masked; any other is checked as
+// written.
+function withoutCapabilityNegation(text) {
+  if (STRONG_DEICTIC_TOPIC.test(text)) return text;
+  return text.replace(CAPABILITY_NEGATION, (phrase) => '◇'.repeat(phrase.length));
+}
+
 // secondPersonIsUser is true for the assistant's own replies: "你" there is the user, so "你的資料庫" is not
 // read as 小吉's database (see withSecondPersonAsUser). Public memory keeps the default.
 function hasUnauthorizedAssistantFact(value, options = {}) {
@@ -2754,7 +2775,8 @@ function hasUnauthorizedAssistantFactPlain(value, {
   const text = withoutPublicSelfDescriptionWords(normalizePolicyText(value));
   if (!text) return false;
   if (asksDirectRestrictedMaterial(text) || containsInternalDisclosure(text)) return true;
-  const attributed = secondPersonIsUser ? withSecondPersonAsUser(text) : text;
+  const attributed = secondPersonIsUser
+    ? withoutCapabilityNegation(withoutPublicCommandNames(withSecondPersonAsUser(text))) : text;
   // Blank lines before "我" are matched from the last line break only (linear on long runs of them).
   const assistantFirstPerson = /(?:^|[。！？!?\n][^\S\n]*)(?:我|我們)(?:的|是|用|使用|採用|由|有|目前|現在|把|將|保存|儲存|存入|寫入|擁有|執行)/i.test(attributed);
   // A bare pronoun in a reply is read as the assistant beside any topic word, unless OUT_DEICTIC_FACT is waived: then

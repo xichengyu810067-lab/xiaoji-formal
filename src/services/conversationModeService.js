@@ -134,7 +134,10 @@ function isLikelyAddressedElsewhere(content) {
   return /^<@!?\d+>/.test(normalized) || /^<@&\d+>/.test(normalized) || /^@(?:everyone|here)\b/i.test(normalized);
 }
 
-function validateChatInput(content) {
+// addressedToBot: the member mentioned 小吉 or called it by name, so a member mention that opens the rest
+// ("@小吉 @某人 是誰") names who the question is about, not who it is for. Role, @everyone and @here openers
+// are still dropped.
+function validateChatInput(content, { addressedToBot = false } = {}) {
   const normalized = normalizeContent(content);
 
   if (!normalized) {
@@ -149,7 +152,7 @@ function validateChatInput(content) {
     };
   }
 
-  if (isLikelyAddressedElsewhere(normalized)) {
+  if (isLikelyAddressedElsewhere(normalized) && !(addressedToBot && /^<@!?\d+>/.test(normalized))) {
     return { ok: false, reason: 'addressed_elsewhere' };
   }
 

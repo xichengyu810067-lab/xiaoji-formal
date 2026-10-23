@@ -641,3 +641,92 @@ test('in the order the bot installs them, test-control, the egress guard and pro
       fixture.cleanup();
     }
   });
+
+// Threads the test bot opens in an allowed channel (/student) are in scope for the rest of the run; nothing else is.
+const THREAD = '999999999999999991';
+const OTHER_THREAD = '999999999999999992';
+
+function threadFixture() {
+  const fixture = createFixture({ XIAOJI_TEST_ALLOWED_MESSAGE_FEATURES: 'word_chain' });
+  const policy = loadTestControlPolicy(fixture.env, { cwd: process.cwd() });
+  const answers = [];
+  const rest = { request: async () => answers.shift() };
+  createTestControlEgress(policy).install(rest);
+  return { fixture, policy, rest, answers };
+}
+
+test('a thread the test bot opens in an allowed channel joins the scope for egress and ingress', async () => {
+  const { fixture, policy, rest, answers } = threadFixture();
+  try {
+    const { authorizeMessage } = require('../src/platform/testControlIngress');
+    assert.throws(() => createTestControlEgress(policy).allowRequest({ method: 'POST', fullRoute: `/channels/${THREAD}/messages` }),
+      (error) => error.code === 'TEST_CHANNEL_EGRESS_DENIED');
+    answers.push({ id: THREAD, parent_id: IDS.channel, guild_id: IDS.guild, owner_id: IDS.app, type: 11 });
+    await rest.request({ method: 'POST', fullRoute: `/channels/${IDS.channel}/messages/${IDS.interaction}/threads` });
+    assert.equal(policy.allowsChannel(THREAD), true);
+    assert.equal(createTestControlEgress(policy).allowRequest({ method: 'POST', fullRoute: `/channels/${THREAD}/messages` }), true);
+    const client = { testControlPolicy: policy, user: { id: IDS.app } };
+    assert.equal(authorizeMessage({ client, guildId: IDS.guild, channelId: THREAD, author: { id: IDS.actor },
+      mentions: { has: () => false } }).allowed, true);
+    // A thread opened on its own (no starter message) is recorded the same way.
+    answers.push({ id: OTHER_THREAD, parent_id: IDS.channel, guild_id: IDS.guild, owner_id: IDS.app, type: 11 });
+    await rest.request({ method: 'POST', fullRoute: `/channels/${IDS.channel}/threads` });
+    assert.equal(policy.allowsChannel(OTHER_THREAD), true);
+  } finally { fixture.cleanup(); }
+});
+
+test('a thread someone else owns, a parent that does not match, or a read of a thread object stays out of scope', async () => {
+  const { fixture, policy, rest, answers } = threadFixture();
+  try {
+    answers.push({ id: THREAD, parent_id: IDS.channel, guild_id: IDS.guild, owner_id: IDS.actor });
+    await rest.request({ method: 'POST', fullRoute: `/channels/${IDS.channel}/threads` });
+    answers.push({ id: THREAD, parent_id: IDS.otherChannel, guild_id: IDS.guild, owner_id: IDS.app });
+    await rest.request({ method: 'POST', fullRoute: `/channels/${IDS.channel}/threads` });
+    answers.push({ id: THREAD, parent_id: IDS.channel, guild_id: IDS.otherGuild, owner_id: IDS.app });
+    await rest.request({ method: 'POST', fullRoute: `/channels/${IDS.channel}/threads` });
+    answers.push({ id: THREAD, parent_id: IDS.channel, guild_id: IDS.guild, owner_id: IDS.app });
+    await rest.request({ method: 'GET', fullRoute: `/channels/${IDS.channel}/threads` }).catch(() => {});
+    assert.equal(policy.allowsChannel(THREAD), false);
+    // A thread in a channel that is not allowed is refused before any request.
+    await assert.rejects(rest.request({ method: 'POST', fullRoute: `/channels/${IDS.otherChannel}/threads` }),
+      (error) => error.code === 'TEST_CHANNEL_EGRESS_DENIED');
+    // A thread of a thread is not a thread of an allowed channel.
+    answers.push({ id: OTHER_THREAD, parent_id: THREAD, guild_id: IDS.guild, owner_id: IDS.app });
+    await rest.request({ method: 'POST', fullRoute: `/channels/${IDS.channel}/threads` });
+    assert.equal(policy.allowsChannel(OTHER_THREAD), false);
+  } finally { fixture.cleanup(); }
+});
+
+test('only the first test egress can add own threads, and the policy object itself cannot', () => {
+  const fixture = createFixture();
+  try {
+    const { claimOwnThreadRecorder } = require('../src/platform/testControlPolicy');
+    const policy = loadTestControlPolicy(fixture.env, { cwd: process.cwd() });
+    assert.equal('rememberOwnThread' in policy, false);
+    createTestControlEgress(policy);
+    assert.equal(claimOwnThreadRecorder(policy), null);
+  } finally { fixture.cleanup(); }
+});
+
+test('one run keeps at most 50 own threads, and a new thread past that is refused before Discord opens it', () => {
+  const fixture = createFixture();
+  try {
+    const { claimOwnThreadRecorder } = require('../src/platform/testControlPolicy');
+    const warnings = [];
+    const policy = loadTestControlPolicy(fixture.env, { cwd: process.cwd(), logger: { warn: (value) => warnings.push(value) } });
+    const record = claimOwnThreadRecorder(policy);
+    const id = (index) => String(900000000000000000n + BigInt(index));
+    for (let index = 0; index < 50; index += 1) {
+      assert.equal(record({ threadId: id(index), parentId: IDS.channel, guildId: IDS.guild, ownerId: IDS.app }), true);
+    }
+    assert.equal(record({ threadId: id(50), parentId: IDS.channel, guildId: IDS.guild, ownerId: IDS.app }), false);
+    assert.equal(policy.allowsChannel(id(50)), false);
+    assert.ok(warnings.some((line) => line.includes('TEST_OWN_THREAD_LIMIT')));
+    // Recording one that is already in scope again is fine.
+    assert.equal(record({ threadId: id(0), parentId: IDS.channel, guildId: IDS.guild, ownerId: IDS.app }), true);
+    const egress = createTestControlEgress(policy);
+    assert.throws(() => egress.allowRequest({ method: 'POST', fullRoute: `/channels/${IDS.channel}/threads` }),
+      (error) => error.code === 'TEST_OWN_THREAD_LIMIT');
+    assert.equal(egress.allowRequest({ method: 'POST', fullRoute: `/channels/${IDS.channel}/messages` }), true);
+  } finally { fixture.cleanup(); }
+});

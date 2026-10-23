@@ -24,6 +24,8 @@
 - `/status` - 顯示小吉目前狀態
 - `/chat-style current/set` - 查看或變更小吉與你的對話風格；永久變更，跨伺服器共用
 - `/romance start/stop/status` - 管理小吉與你的跨伺服器文字戀愛模式
+- `/memory view/export/add/forget/off/on/delete/share` - 查看或管理小吉記住的你的喜好
+- `/student` - 小吉化身好奇寶寶向你提問
 - `/about` - 顯示小吉的公開資訊
 - `/help` - 列出小吉可用指令
 

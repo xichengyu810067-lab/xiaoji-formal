@@ -4,6 +4,7 @@ const {
   getDeployedModelIds,
   getProtectedPromptTexts,
   isGuildQuotaExhaustedError,
+  isVisionAvailable,
   isLocalProviderGuardError,
   isProviderRateLimitError,
   QUOTA_EXHAUSTED_MESSAGE,
@@ -35,6 +36,20 @@ const {
 } = require('../../services/conversationModeService');
 const { answerMemoryQuery, recordPrivateInteraction } = require('./projection');
 const { resolveMemberFacts } = require('./memberFacts');
+const { loadMemoryContext, rememberPreferences } = require('./preferenceMemory');
+const { offerChatPoll, preparePollProposal } = require('./chatPoll');
+const { maybeOfferMemoryConsent } = require('./memoryConsent');
+const {
+  EXTRA_IMAGES_NOTE,
+  NO_VISION_NOTE,
+  NO_VISION_REPLY,
+  UNREADABLE_IMAGE_REPLY,
+  UNSUPPORTED_FILE_REPLY,
+  attachmentTopic,
+  readMessageImages,
+  selectImageAttachments,
+  withImageMarker,
+} = require('./imageInput');
 const {
   INTERNAL_REPLY,
   decideAssistantOutput,
@@ -444,6 +459,45 @@ async function replyToBlockedRequest(message, verdict) {
   return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
 }
 
+// The full output check of one piece of model text shown outside the reply (a poll question or option), the same as
+// for a reply (prompt copies and deployed model names included): the text as it would be sent, or null when it is
+// refused.
+function checkedModelText(text, { userId, displayName, ingressDecision, chatStyle, romanceEnabled }) {
+  const candidate = finalizeAssistantReply(String(text || ''), userId, { displayNames: [displayName] });
+  if (!candidate || candidate === INTERNAL_REPLY) return null;
+  const decision = getConversationDecisionPayload(decideAssistantOutput({
+    ingressDecision,
+    rawCandidate: candidate,
+    source: 'provider',
+    protectedInstructions: getProtectedPromptTexts(chatStyle, romanceEnabled),
+    protectedModelIds: getDeployedModelIds(),
+    displayNames: [displayName],
+  }));
+  return decision.kind === 'allowed' ? decision.text : null;
+}
+
+// What follows an allowed model reply: the poll preview it proposed, the preferences it asked to keep, and the
+// member's one-time preference-memory notice. None of them may fail the reply that was already sent.
+async function finishAllowedReply(message, { toolResult, memory, displayName, ingressDecision, chatStyle, romanceEnabled }) {
+  const userId = message.author.id;
+  if (toolResult?.pollProposal) {
+    const poll = preparePollProposal(toolResult.pollProposal, {
+      checkText: (text) => checkedModelText(text, { userId, displayName, ingressDecision, chatStyle, romanceEnabled }),
+    });
+    try {
+      if (poll) await offerChatPoll(message, poll);
+    } catch (error) {
+      logger.warn(`[CHAT_POLL] code=CHAT_POLL_PREVIEW_NOT_SENT reason=${String(error?.code || 'unknown').slice(0, 60)}`);
+    }
+  }
+  if (memory?.enabled && toolResult?.preferences?.length) {
+    await rememberPreferences({ userId, guildId: message.guildId ?? null, entries: toolResult.preferences });
+  }
+  if (memory?.available) {
+    await maybeOfferMemoryConsent(userId, (payload) => message.reply(payload));
+  }
+}
+
 async function sendUnpersistedDecision(message, decision) {
   const payload = getConversationDecisionPayload(decision);
   if (payload.archiveAllowed || payload.historyAllowed || payload.privateMemoryAllowed) {
@@ -460,6 +514,9 @@ async function handleMentionMessage(message, {
   statusPort = DEFAULT_STATUS_PORT,
   // The optional second opinion ({ config, judgeAssistantReply }); undefined uses the one the environment configures.
   jevRuntime = undefined,
+  // Whether the configured provider can read images, and the fetch used to download them (imageInput.js).
+  visionAvailable = isVisionAvailable,
+  imageFetch = undefined,
 } = {}) {
   const activeWeatherPort = requireWeatherPort(weatherPort);
   const activeStatusPort = requireStatusPort(statusPort);
@@ -494,7 +551,9 @@ async function handleMentionMessage(message, {
   // Silencing always applies; only the acknowledgement is rate limited.
   if (isStopCommand) silenceConversation(message);
 
-  const inputValidation = !isStopCommand && userText ? validateChatInput(userText) : { ok: true };
+  const inputValidation = !isStopCommand && userText
+    ? validateChatInput(userText, { addressedToBot: isMentioned || isExplicitCall })
+    : { ok: true };
 
   // A message meant for someone else, or nothing but spaces, is not a request: nothing counts it.
   if (!inputValidation.ok && !inputValidation.message) return;
@@ -519,13 +578,25 @@ async function handleMentionMessage(message, {
     return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
   }
 
+  // Attachments (imageInput.js): the images 小吉 can read, how many more were left out, and files it cannot read.
+  // They count only when the member called 小吉 (mention, name or reply): a message that only continues a
+  // conversation may be a photo for someone else, so without text it stays a message with no content.
+  const explicitRequest = isMentioned || isExplicitCall || isReply;
+  const attachments = explicitRequest
+    ? selectImageAttachments(message)
+    : { images: [], extraImages: 0, unsupported: 0, hasAttachments: false };
+
   // Every request passes the anti-spam gate before anything else that costs (see replyToBlockedRequest).
   const spamVerdict = aiSpamGuard.evaluate({
     guildId: message.guildId ?? null,
     channelId: message.channelId,
     userId: message.author.id,
     text: userText,
-    explicit: isMentioned || isExplicitCall || isReply,
+    explicit: explicitRequest,
+    // An image is content; another file only spares a message with no text at all (it gets the fixed line below),
+    // never one whose text is meaningless.
+    hasAttachment: attachments.images.length > 0 || (attachments.hasAttachments && isBareCall(userText)),
+    topic: attachmentTopic(attachments),
   });
   if (!spamVerdict.allowed) return replyToBlockedRequest(message, spamVerdict);
   // A request that ends without an answer is taken back out of the repeat history, so sending it again is
@@ -550,8 +621,19 @@ async function handleMentionMessage(message, {
     return;
   }
 
+  // Only punctuation or emoji is no text here either, so it never carries an attachment to the model alone.
+  const hasText = !isBareCall(userText);
+  // Only files 小吉 cannot read and no text: one fixed line, no model call.
+  if (!hasText && attachments.hasAttachments && attachments.images.length === 0) {
+    unanswered();
+    if (admitPreflightReply(message, userText)) await replyInChunks(message, UNSUPPORTED_FILE_REPLY);
+    return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+  }
+  // The text the request is judged, answered and remembered by: the member's words, marked when images came with it.
+  const requestText = withImageMarker(userText, attachments.images.length);
+
   const ingressDecision = decideRequestIngress({
-    userText,
+    userText: requestText,
     priorUserStatements: getPriorUserStatements(message),
     context: getMessageDecisionContext(message),
   });
@@ -609,6 +691,8 @@ async function handleMentionMessage(message, {
     resolveUserRomancePreference(message.author.id),
   ]);
 
+  // Set once a reply reached the channel whole; what follows a reply (finishAllowedReply) waits for it.
+  let replyDelivered = false;
   const sendDecision = async (decision) => {
     const payload = getConversationDecisionPayload(decision);
     verifyConversationDecisionContext(decision, getMessageDecisionContext(message), 'send');
@@ -636,6 +720,7 @@ async function handleMentionMessage(message, {
       if (deliveredChunks > 0) await markArchivePartialDelivery(message);
       return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
     }
+    replyDelivered = true;
     if (!await confirmArchiveInteraction(message, decision)) {
       return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
     }
@@ -720,9 +805,34 @@ async function handleMentionMessage(message, {
   let providerRateLimitError = null;
   let localProviderGuardError = null;
   let guildQuotaExhausted = false;
+  // The images, read only now that the model is about to be asked; notes say what was left out.
+  let images = [];
+  const notes = [];
+  if (attachments.images.length) {
+    if (!visionAvailable()) {
+      if (!hasText) {
+        unanswered();
+        await replyInChunks(message, NO_VISION_REPLY);
+        return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+      }
+      notes.push(NO_VISION_NOTE);
+    } else {
+      images = (await readMessageImages(message, imageFetch ? { fetchImpl: imageFetch } : {})).images;
+      if (!images.length && !hasText) {
+        unanswered();
+        await replyInChunks(message, UNREADABLE_IMAGE_REPLY);
+        return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+      }
+      if (attachments.extraImages) notes.push(EXTRA_IMAGES_NOTE);
+    }
+  }
+
+  // The member's remembered preferences (off when preference memory is not configured or was stopped).
+  const memory = await loadMemoryContext({ userId: message.author.id, guildId: message.guildId ?? null });
   try {
     reply = await generateChatReplyImpl({
-      userText,
+      userText: requestText,
+      images,
       displayName,
       userId: message.author.id,
       channelId: message.channelId,
@@ -732,6 +842,8 @@ async function handleMentionMessage(message, {
       memberFacts: memberResult.facts,
       ingressDecision,
       message,
+      rememberedPreferences: memory.preferences,
+      memoryEnabled: memory.enabled,
     });
   } catch (error) {
     if (isProviderRateLimitError(error)) {
@@ -764,12 +876,17 @@ async function handleMentionMessage(message, {
   }
 
   if (reply) {
+    // A provider with tools answers with { text, pollProposal, preferences }; the others with the text alone.
+    const toolResult = typeof reply === 'object' ? reply : null;
+    const modelText = toolResult ? String(toolResult.text || '') || (toolResult.pollProposal ? '好的！' : '') : reply;
+    // Program notes (images left out, images not read) follow the model's words and are checked with them.
+    const replyText = notes.length ? `${modelText}\n${notes.join('\n')}` : modelText;
     // The one place the optional second opinion can matter (see jevOutputGate.js). With it off, or for a server
     // that is not listed, this is the single check it always was.
     const output = await resolveProviderOutput({
       evaluate: (waiveSoft) => evaluateProviderReply({
         ingressDecision,
-        reply,
+        reply: replyText,
         displayName,
         userId: message.author.id,
         chatStyle: chatPreference.style,
@@ -777,12 +894,21 @@ async function handleMentionMessage(message, {
         waiveSoft,
       }),
       userText,
-      replyText: reply,
+      replyText,
       displayNames: [displayName],
       guildId: message.guildId ?? null,
       runtime: jevRuntime,
     });
-    return sendDecision(output.decision);
+    const sent = await sendDecision(output.decision);
+    // A poll preview, new preferences and the one-time memory notice follow only a reply that passed the checks and
+    // reached the channel.
+    if (replyDelivered && getConversationDecisionPayload(output.decision).kind === 'allowed') {
+      await finishAllowedReply(message, {
+        toolResult, memory, displayName, ingressDecision,
+        chatStyle: chatPreference.style, romanceEnabled: romancePreference.enabled,
+      });
+    }
+    return sent;
   }
 
   const finalReply = getMentionFallbackReply(

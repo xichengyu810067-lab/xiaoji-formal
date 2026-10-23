@@ -81,6 +81,14 @@ test('conversation guard rejects too long and obviously addressed elsewhere mess
   assert.equal(validateChatInput('<@123> 你覺得呢').reason, 'addressed_elsewhere');
 });
 
+test('a member mention right after calling 小吉 names who is asked about; role, @everyone and @here still drop', () => {
+  assert.equal(validateChatInput('<@123> 是誰', { addressedToBot: true }).ok, true);
+  assert.equal(validateChatInput('<@!123> 是誰', { addressedToBot: true }).ok, true);
+  assert.equal(validateChatInput('<@&123> 是誰', { addressedToBot: true }).reason, 'addressed_elsewhere');
+  assert.equal(validateChatInput('@everyone 看這裡', { addressedToBot: true }).reason, 'addressed_elsewhere');
+  assert.equal(validateChatInput('@here 看這裡', { addressedToBot: true }).reason, 'addressed_elsewhere');
+});
+
 test('conversation cooldown blocks repeated user triggers briefly', () => {
   clearConversationStateForTests();
   const message = createMessage();
