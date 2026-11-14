@@ -287,12 +287,12 @@ test.after(() => {
   });
 });
 
-test('board 是 19 款遊戲的唯一開局入口，舊開局子命令不再註冊', () => {
+test('board 是 21 款遊戲的唯一開局入口，舊開局子命令不再註冊', () => {
   const json = boardCommand.data.toJSON();
   const start = json.options.find((option) => option.name === 'start');
   const status = json.options.find((option) => option.name === 'status');
   const choices = start.options.find((option) => option.name === 'game').choices;
-  assert.equal(GAME_CATALOG.length, 19);
+  assert.equal(GAME_CATALOG.length, 21);
   assert.deepEqual(choices.map((choice) => choice.value), GAME_CATALOG.map((game) => game.key));
   assert.deepEqual(status.options[0].choices.map((choice) => choice.value), GAME_CATALOG.map((game) => game.key));
   assert.ok(GAME_CATALOG.every((game) => SUPPORTED_START_LAUNCHERS.has(game.launcher)));

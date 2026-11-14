@@ -2,6 +2,7 @@ const { Events } = require('discord.js');
 const { handleMentionMessage, isPublicPersistenceSuppressed } = require('../services/mentionService');
 const { routeMessageFeatures } = require('../services/messageFeatureRouter');
 const { handleStudentMessage } = require('../systems/conversation/student');
+const { recordMemberMessage } = require('../systems/conversation/channelMemory');
 const { recordPublicMessage } = require('../services/memoryService');
 const { recordPublicInteraction } = require('../services/publicStatusService');
 const logger = require('../utils/logger');
@@ -83,6 +84,14 @@ module.exports = {
     }
 
     if (isPublicPersistenceSuppressed(mentionResult)) return;
+
+    // Channel memory: a server message of a member who chats with 小吉, within their monthly quota (channelMemory.js).
+    // Direct messages are never kept.
+    try {
+      await recordMemberMessage(message);
+    } catch (error) {
+      logger.error('channel memory recording failed', error);
+    }
 
     try {
       recordPublicMessage(message);

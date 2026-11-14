@@ -9,7 +9,6 @@
   });
 
   let refreshTimer = null;
-  const expandedSystems = new Set();
 
   function getWorkerBase() {
     const configured = document.querySelector('meta[name="xiaoji-api-base"]')?.content?.trim();
@@ -40,92 +39,6 @@
     }).format(timestamp)}`;
   }
 
-  function setAccordionState({ panel, trigger, content, indicator, expanded }) {
-    trigger.setAttribute('aria-expanded', String(expanded));
-    content.hidden = !expanded;
-    panel.classList.toggle('is-open', expanded);
-    indicator.textContent = expanded ? '－' : '＋';
-  }
-
-  function createFeatureDetail(feature) {
-    const item = document.createElement('li');
-    item.className = 'feature-detail';
-
-    const name = document.createElement('h3');
-    name.textContent = feature.name;
-    const details = document.createElement('dl');
-    [
-      ['用途', feature.purpose],
-      ['如何使用', feature.howTo],
-      ['使用限制', feature.limitation],
-    ].forEach(([label, value]) => {
-      const term = document.createElement('dt');
-      term.textContent = label;
-      const description = document.createElement('dd');
-      description.textContent = value;
-      details.append(term, description);
-    });
-    item.append(name, details);
-    return item;
-  }
-
-  function createSystemPanel(system, index) {
-    const panel = document.createElement('article');
-    panel.className = 'service-panel system-panel';
-
-    const trigger = document.createElement('button');
-    trigger.className = 'accordion-trigger';
-    trigger.type = 'button';
-    trigger.id = `public-system-trigger-${index}`;
-    trigger.setAttribute('aria-controls', `public-system-panel-${index}`);
-
-    const title = document.createElement('span');
-    title.className = 'system-title';
-    title.textContent = system.name;
-    const indicator = document.createElement('span');
-    indicator.className = 'accordion-indicator';
-    indicator.setAttribute('aria-hidden', 'true');
-    trigger.append(title, indicator);
-
-    const content = document.createElement('div');
-    content.className = 'accordion-content system-content';
-    content.id = `public-system-panel-${index}`;
-    content.setAttribute('role', 'region');
-    content.setAttribute('aria-labelledby', trigger.id);
-
-    const list = document.createElement('ul');
-    list.className = 'feature-detail-list';
-    system.features.forEach((feature) => list.append(createFeatureDetail(feature)));
-    content.append(list);
-
-    const applyState = (expanded) => setAccordionState({ panel, trigger, content, indicator, expanded });
-    applyState(expandedSystems.has(system.name));
-    trigger.addEventListener('click', () => {
-      const expanded = trigger.getAttribute('aria-expanded') !== 'true';
-      if (expanded) expandedSystems.add(system.name);
-      else expandedSystems.delete(system.name);
-      applyState(expanded);
-    });
-
-    panel.append(trigger, content);
-    return panel;
-  }
-
-  function renderPublicSystems() {
-    const container = document.querySelector('[data-status-groups]');
-    const systems = getPublicSystems();
-    container.replaceChildren();
-    if (systems.length === 0) {
-      const message = document.createElement('p');
-      message.className = 'catalog-load-error';
-      message.textContent = '公開功能清冊暫時無法載入。';
-      container.append(message);
-    } else {
-      systems.forEach((system, index) => container.append(createSystemPanel(system, index + 1)));
-    }
-    container.setAttribute('aria-busy', 'false');
-  }
-
   function setCatalogSummary() {
     const systems = getPublicSystems();
     const featureCount = systems.reduce((count, system) => count + system.features.length, 0);
@@ -151,7 +64,6 @@
     navDot.classList.add(overall.className);
     document.querySelector('[data-status-unavailable]').hidden = true;
     setCatalogSummary();
-    renderPublicSystems();
   }
 
   function renderUnavailable() {
@@ -166,7 +78,6 @@
     navDot.classList.remove('is-operational', 'is-outage');
     navDot.classList.add('is-degraded');
     setCatalogSummary();
-    renderPublicSystems();
   }
 
   const statusLoader = window.XiaojiStatusData.createStatusLoader({
@@ -197,7 +108,6 @@
     if (!document.hidden) refreshStatus();
   });
   setCatalogSummary();
-  renderPublicSystems();
   scheduleRefresh();
   refreshStatus();
 })();

@@ -1,0 +1,72 @@
+/* 功能與指令頁（guide.html）。只用 styles.css 的設計變數。 */
+.guide-main { padding-block: 70px 110px; }
+.guide-hero { padding-bottom: 36px; }
+.guide-hero h1 { max-width: 820px; margin: 10px 0 18px; font-size: clamp(2.5rem, 5.4vw, 4.6rem); line-height: 1.08; letter-spacing: -0.05em; }
+
+.guide-search { margin-top: 30px; padding: 22px; display: grid; gap: 16px; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-soft); }
+.guide-search[hidden] { display: none; }
+.guide-search-box { display: flex; gap: 10px; align-items: center; padding: 6px 6px 6px 16px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-soft); }
+.guide-search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--pink-pale); }
+.guide-search-icon { color: var(--accent-text); font-size: 1.3rem; line-height: 1; }
+.guide-search-box input { min-width: 0; flex: 1; padding: 10px 4px; color: var(--ink); border: 0; background: transparent; font-size: 1rem; }
+.guide-search-box input:focus-visible { outline: none; }
+.guide-search-box input::placeholder { color: var(--ink-faint); }
+.guide-reset { min-height: 40px; padding: 6px 14px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; background: transparent; cursor: pointer; }
+.guide-reset:hover { color: var(--accent-text); border-color: var(--line-strong); }
+
+.guide-filter { margin: 0; padding: 0; border: 0; }
+.guide-filter legend { margin-bottom: 8px; padding: 0; color: var(--ink-soft); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.filter-chip { position: relative; cursor: pointer; }
+.filter-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.filter-chip span { display: inline-block; padding: 7px 14px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; background: var(--surface-soft); font-size: 0.84rem; font-weight: 600; transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }
+.filter-chip:hover span { border-color: var(--line-strong); color: var(--ink); }
+.filter-chip input:checked + span { color: var(--on-accent); border-color: transparent; background: linear-gradient(110deg, var(--button-from), var(--button-to)); }
+.filter-chip input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: 2px; }
+.guide-summary { min-height: 1.4em; margin: 0; color: var(--ink-soft); font-size: 0.86rem; }
+
+.guide-section { padding-top: 70px; scroll-margin-top: 90px; }
+.guide-section-head { display: flex; gap: 16px; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
+.guide-section-head h2 { margin: 0; font-size: clamp(1.7rem, 3.2vw, 2.4rem); letter-spacing: -0.03em; }
+.guide-count { margin: 0; color: var(--ink-faint); font-size: 0.86rem; }
+.guide-note { margin: 0 0 20px; max-width: 820px; color: var(--ink-soft); font-size: 0.86rem; }
+.guide-empty { margin: 0 0 18px; padding: 18px 20px; color: var(--ink-soft); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); }
+.guide-empty[hidden] { display: none; }
+
+.guide-group { margin-bottom: 26px; }
+.guide-group[hidden] { display: none; }
+.guide-group-title { margin: 0 0 10px; color: var(--accent-text); font-size: 0.95rem; letter-spacing: 0.04em; }
+.guide-list { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; list-style: none; }
+.guide-item { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); transition: border-color 160ms ease, box-shadow 160ms ease; }
+.guide-item[hidden] { display: none; }
+.guide-item:hover { border-color: var(--line-strong); box-shadow: var(--shadow-soft); }
+.guide-item details { height: 100%; }
+.guide-item summary { padding: 16px 18px; display: grid; gap: 6px; cursor: pointer; list-style: none; }
+.guide-item summary::-webkit-details-marker { display: none; }
+.guide-item summary::after { justify-self: end; margin-top: -4px; color: var(--ink-faint); font-size: 0.75rem; content: "看怎麼用 ＋"; }
+.guide-item details[open] summary::after { content: "收起 －"; }
+.guide-item-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.guide-item-name { font-size: 1rem; }
+.guide-item-purpose { color: var(--ink-soft); font-size: 0.88rem; line-height: 1.6; }
+.guide-item-detail { margin: 0; padding: 0 18px 18px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; color: var(--ink-soft); font-size: 0.84rem; line-height: 1.65; }
+.guide-item-detail dt { color: var(--ink); font-weight: 800; }
+.guide-item-detail dd { margin: 0; }
+
+.guide-command { padding: 14px 18px; display: grid; gap: 6px; align-content: start; }
+.guide-usage { padding: 2px 8px; color: var(--accent-2-text); border-radius: 8px; background: var(--lavender-pale); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.86rem; overflow-wrap: anywhere; }
+
+.who-badge { padding: 2px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.who-badge.is-public { color: var(--mint-text); background: var(--mint-pale); }
+.who-badge.is-admin { color: var(--warn-text); background: var(--peach-pale); }
+
+@media (max-width: 900px) {
+  .guide-list { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .guide-main { padding-block: 50px 82px; }
+  .guide-search { padding: 16px; border-radius: 24px; }
+  .guide-section-head { flex-direction: column; gap: 2px; }
+  .guide-item-detail { grid-template-columns: 1fr; gap: 2px; }
+  .guide-item-detail dd { margin-bottom: 8px; }
+}

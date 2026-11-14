@@ -7,9 +7,10 @@
       name="description"
       content="小吉 Discord 機器人官方網站：認識小吉、查看公開功能、版本資訊與目前狀態。"
     />
-    <meta name="theme-color" content="#100d1b" />
+    <meta name="theme-color" content="#241923" />
     <meta name="xiaoji-api-base" content="https://xiaoji-public-status.xichengyu810067.workers.dev" />
     <title>小吉｜Discord 聊天與社群助手</title>
+    <script src="./theme.js"></script>
     <link rel="icon" href="./assets/xiaoji-hero.png" type="image/png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -22,6 +23,7 @@
     <script src="./app.js" defer></script>
     <script src="./policyPublication.js" defer></script>
     <script src="./siteSupport.js" defer></script>
+    <script src="./siteChrome.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">跳到主要內容</a>
@@ -31,29 +33,32 @@
         <span class="brand-mark" aria-hidden="true">吉</span>
         <span>
           <strong>小吉</strong>
-          <small>Discord 小管家</small>
+          <small>Discord 聊天與社群助手</small>
         </span>
       </a>
 
-      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-nav-toggle>
-        <span class="sr-only">開啟選單</span>
-        <span></span><span></span><span></span>
-      </button>
-
       <nav id="site-nav" class="site-nav" aria-label="主要導覽" data-nav>
-        <a href="#live-overview">即時概況</a>
         <a href="#about">關於小吉</a>
         <a href="#features">功能亮點</a>
+        <a href="./guide.html">功能與指令</a>
         <a class="nav-status" href="./status.html">
           <span class="status-dot" data-nav-status-dot></span>
           狀態頁
         </a>
         <a href="https://github.com/xichengyu810067-lab/xiaoji-formal/releases" target="_blank" rel="noopener noreferrer">公開版本資訊</a>
       </nav>
+
+      <div class="header-actions">
+        <button class="theme-toggle" type="button" data-theme-toggle hidden><span aria-hidden="true" data-theme-icon>◐</span></button>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-nav-toggle>
+          <span class="sr-only">開啟選單</span>
+          <span></span><span></span><span></span>
+        </button>
+      </div>
     </header>
 
     <main id="main">
-      <section id="top" class="hero section-shell">
+      <section id="top" class="hero section-shell" data-scene="pink">
         <div class="hero-copy reveal">
           <div class="eyebrow"><span aria-hidden="true">✦</span> 今天也由小吉陪著大家</div>
           <h1>
@@ -71,26 +76,34 @@
           <p class="hero-note"><span aria-hidden="true">♡</span> 隱私優先・跨伺服器偏好・台北時間每日活動</p>
         </div>
 
-        <div class="hero-art reveal" aria-label="小吉角色插畫">
+        <div class="hero-art reveal">
           <div class="sparkle sparkle-one" aria-hidden="true">✦</div>
           <div class="sparkle sparkle-two" aria-hidden="true">♡</div>
-          <div class="portrait-frame">
-            <img
-              src="./assets/xiaoji-hero.png"
-              alt="粉紫色系的小吉少女角色插畫"
-              width="1024"
-              height="1024"
-            />
-          </div>
-          <div class="speech-card">
+          <button class="portrait-button" type="button" data-portrait aria-label="摸摸小吉">
+            <span class="portrait-frame">
+              <img
+                class="portrait-base"
+                src="./assets/xiaoji-hero.png"
+                alt="粉紫色系的小吉少女角色插畫"
+                width="1024"
+                height="1024"
+              />
+              <span class="portrait-eyes" data-eye-layer hidden>
+                <img src="./assets/xiaoji-hero-eyes-white.png" alt="" width="1024" height="1024" decoding="async" />
+                <span class="portrait-eyes-track"><img src="./assets/xiaoji-hero-eyes.png" alt="" width="1024" height="1024" decoding="async" /></span>
+              </span>
+              <img class="portrait-smile" data-smile-layer src="./assets/xiaoji-hero-smile.png" alt="" width="1024" height="1024" decoding="async" />
+            </span>
+          </button>
+          <div class="speech-card" aria-live="polite">
             <span aria-hidden="true">૮ ˶ᵔ ᵕ ᵔ˶ ა</span>
-            <strong>小吉在線中～</strong>
-            <small>隨時準備陪大家聊天</small>
+            <strong data-speech-title>小吉在線中～</strong>
+            <small data-speech-detail>隨時準備陪大家聊天</small>
           </div>
         </div>
       </section>
 
-      <section id="live-overview" class="live-strip" aria-labelledby="overview-title">
+      <section id="live-overview" class="live-strip" aria-labelledby="overview-title" data-scene="mint" data-companion="這裡看得到小吉今天的狀態！">
         <div class="section-shell">
           <div class="section-heading compact reveal">
             <div>
@@ -134,14 +147,14 @@
         </div>
       </section>
 
-      <section id="about" class="about section-shell">
+      <section id="about" class="about section-shell" data-scene="lavender" data-companion="想多認識小吉一點嗎？嘿嘿">
         <div class="section-heading reveal">
           <div>
             <p class="kicker">MEET XIAOJI</p>
             <h2>嗨嗨，小吉就是小吉！</h2>
           </div>
           <p>
-            不是冷冰冰的工具，而是一位懂得把事情做好、也願意好好陪伴大家的數位小管家。
+            不是冷冰冰的工具，而是一位懂得把事情做好、也願意好好陪伴大家的數位小夥伴。
           </p>
         </div>
 
@@ -177,45 +190,90 @@
         </div>
       </section>
 
-      <section id="features" class="features">
+      <section id="features" class="features" data-scene="peach" data-companion="想找特定功能？用搜尋框問小吉～">
         <div class="section-shell">
           <div class="section-heading reveal">
             <div>
               <p class="kicker">FEATURES</p>
-          <h2>一位小吉，很多種陪伴</h2>
+              <h2>一位小吉，很多種陪伴</h2>
             </div>
-          <p>聊天、社群活動、遊戲與實用服務各自有清楚邊界；完整公開功能清冊與整體狀態，都能在狀態頁查看。</p>
+            <p>聊天、社群活動、遊戲與實用服務各自有清楚邊界。想找特定功能或指令，直接搜尋就好。</p>
           </div>
 
+          <form class="home-search reveal" action="./guide.html" method="get" role="search">
+            <label class="sr-only" for="home-search-q">搜尋功能或指令</label>
+            <input id="home-search-q" name="q" type="search" maxlength="60" placeholder="例如：天氣、提醒、remind" autocomplete="off" />
+            <button class="button button-primary" type="submit">找功能 <span aria-hidden="true">→</span></button>
+          </form>
+
           <div class="feature-grid">
+            <!-- generated:home-highlights:start -->
             <article class="feature-card feature-wide reveal">
               <span class="feature-number">01</span>
               <div class="feature-glyph" aria-hidden="true">☁</div>
-              <h3>有記憶的風格聊天</h3>
-              <p>六種對話風格、跨伺服器偏好，以及可自由開關的親暱模式，全部保留安全與隱私界線。</p>
-              <div class="style-chips" aria-label="可選風格">
-                <span>可愛</span><span>御姐</span><span>霸總</span><span>冰冷</span><span>傲嬌</span><span>病嬌</span>
-              </div>
+              <h3>AI 與聊天</h3>
+              <p>會記得你的喜好與聊天風格，也能自由開關親暱模式，全部保留安全與隱私界線。</p>
+              <ul class="style-chips" aria-label="AI 與聊天的功能">
+                <li>@小吉聊天</li>
+                <li>個人化對話風格</li>
+                <li>情侶模式</li>
+                <li>聊天記憶</li>
+                <li>好奇寶寶 /student</li>
+                <li>看圖</li>
+                <li>上網搜尋</li>
+              </ul>
+              <a class="feature-link" href="./guide.html?cat=AI%20%E8%88%87%E8%81%8A%E5%A4%A9">看 7 項功能怎麼用 <span aria-hidden="true">→</span></a>
             </article>
             <article class="feature-card reveal">
               <span class="feature-number">02</span>
               <div class="feature-glyph" aria-hidden="true">⌁</div>
-              <h3>台灣每日簽到與商店</h3>
-              <p>每日簽到依台灣日期計算；普通與精品商品、背包和限購會跟著你的帳號跨伺服器共用。</p>
+              <h3>吉幣、工作與銀行</h3>
+              <p>台灣日期簽到、全域商店、工作與銀行，跟著你的帳號跨伺服器共用。</p>
+              <ul class="style-chips" aria-label="吉幣、工作與銀行的功能">
+                <li>吉幣與台灣每日簽到</li>
+                <li>全域商店與背包</li>
+                <li>銀行與定存</li>
+                <li>工作系統</li>
+                <li>小吉農場與廚房</li>
+                <li>籌碼兌換</li>
+              </ul>
+              <a class="feature-link" href="./guide.html?cat=%E5%90%89%E5%B9%A3%E3%80%81%E5%B7%A5%E4%BD%9C%E8%88%87%E9%8A%80%E8%A1%8C">看 6 項功能怎麼用 <span aria-hidden="true">→</span></a>
             </article>
             <article class="feature-card reveal">
               <span class="feature-number">03</span>
               <div class="feature-glyph" aria-hidden="true">✓</div>
-              <h3>安心的社群互動</h3>
-              <p>投票、每日活動與新人歡迎各有清楚的使用限制，讓社群互動更有秩序。</p>
+              <h3>社群互動</h3>
+              <p>投票、接龍與每日活動各有清楚的規則，讓大家自然地聊起來。</p>
+              <ul class="style-chips" aria-label="社群互動的功能">
+                <li>投票</li>
+                <li>文字接龍</li>
+                <li>數字接龍</li>
+                <li>每日猜謎</li>
+                <li>每日議題</li>
+              </ul>
+              <a class="feature-link" href="./guide.html?cat=%E7%A4%BE%E7%BE%A4%E4%BA%92%E5%8B%95">看 5 項功能怎麼用 <span aria-hidden="true">→</span></a>
             </article>
             <article class="feature-card feature-wide reveal">
               <span class="feature-number">04</span>
               <div class="feature-glyph" aria-hidden="true">▦</div>
-              <h3>一起下棋與推理</h3>
-              <p>在同一個頻道開一局，和朋友下棋、推理或一起玩海龜湯；輪到誰、怎麼操作與何時結束都清楚可見。</p>
+              <h3>棋盤與推理遊戲</h3>
+              <p>在同一個頻道開一局，和朋友下棋或一起玩海龜湯；輪到誰、怎麼操作都清楚可見。</p>
+              <ul class="style-chips" aria-label="棋盤與推理遊戲的功能">
+                <li>開局與共通限制</li>
+                <li>五子棋</li>
+                <li>西洋棋</li>
+                <li>圍棋</li>
+                <li>六角星跳棋</li>
+                <li>象棋</li>
+                <li>海龜湯</li>
+                <li>狼人殺</li>
+              </ul>
+              <a class="feature-link" href="./guide.html?cat=%E6%A3%8B%E7%9B%A4%E8%88%87%E6%8E%A8%E7%90%86%E9%81%8A%E6%88%B2">看 8 項功能怎麼用 <span aria-hidden="true">→</span></a>
             </article>
+            <!-- generated:home-highlights:end -->
           </div>
+
+          <p class="features-more reveal"><a class="button button-secondary" href="./guide.html">看全部功能與指令</a></p>
         </div>
       </section>
 

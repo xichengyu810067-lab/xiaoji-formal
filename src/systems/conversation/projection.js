@@ -33,6 +33,11 @@ const RECALL_VERB = /(?:說|講|提|聊)/;
 // the model answers from the conversation. "阿明跟你說過什麼" does not open with it and stays a memory question.
 const ASKS_OWN_REPLY = /^(?:那|欸|誒|請問)?\s*(?:你|妳)\s*(?:剛剛|剛才|之前|昨天)?\s*(?:跟我|對我|和我|有|有沒有|是不是)?\s*(?:說|講|提|回|推薦|的)/;
 
+// The member asks whether 小吉 knows or remembers who they are ("小吉你知道我是誰嗎", "你不記得我是你的開發者了嗎",
+// "你還記得我嗎", "你認識我嗎"). "你記得我說過什麼" is not one: it asks what was said and stays a memory question.
+const ASKS_WHO_I_AM = /(?:知道|記得|認得|認識|記不記得|認不認得)\s*我\s*(?:是誰|是什麼人|是你的|是小吉的|嗎|了嗎|吧|嘛|\?|？|$)|我是誰/u;
+// A question about how 小吉's memory works ("你的記憶是怎麼做的", "小吉有記憶嗎").
+const ASKS_ABOUT_OWN_MEMORY = /(?:你|妳|小吉)(?:的)?記憶|(?:你|妳|小吉)(?:有沒有|有|會)記憶/u;
 const memoryQueryTerms = [
   '有沒有說',
   '是不是說',
@@ -300,6 +305,11 @@ function isMemoryQuery(text) {
   const normalized = normalizeText(text);
   // Private conversations always take the memory path, which refuses them in a public channel.
   if (/(?:私下|私人|私訊|\bdm\b)/i.test(normalized)) return true;
+  // "你知道我是誰嗎", "你還記得我嗎", "你的記憶是怎麼做的": about the member or about 小吉, not a search of what someone
+  // said. The model answers them with the member's own memory (rememberedPreferences, the conversation).
+  if (!/<@!?\d+>/.test(String(text || '')) && (ASKS_WHO_I_AM.test(normalized) || ASKS_ABOUT_OWN_MEMORY.test(normalized))) {
+    return false;
+  }
   if (!/<@!?\d+>/.test(String(text || '')) && ASKS_OWN_REPLY.test(normalized.replace(/^小吉[，,：:\s]*/, ''))) return false;
   if (memoryQueryTerms.some((term) => normalized.includes(term))) return true;
   return recallTimeTerms.some((term) => normalized.includes(term)) && RECALL_VERB.test(normalized);
@@ -647,6 +657,7 @@ module.exports = {
   extractKeyword,
   getMemoryPath,
   getPrivateMemoryContext,
+  isMemoryQuery,
   recordPrivateInteraction,
   recordPublicMessage,
 };

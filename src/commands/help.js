@@ -22,6 +22,8 @@ const HELP_NOTES = Object.freeze({
   work: '目前不開放辭職（cancel 只顯示說明），工作期滿後自動結算',
   'coin-admin': 'history 指定 campaign-id 的活動對帳限小吉擁有者',
   board: `開始或查看遊戲：${gameNames}；加入、離開或結束適用的公開桌遊與推理遊戲；/board stop 也能結束你自己的個人遊戲`,
+  farm: '個人農場，跨伺服器共用；作物與料理每天合計最多賣 500 吉幣；也能從 /board start 打開',
+  kitchen: '每天最多送出 5 道料理，收到的料理只能吃',
   'word-chain': '開局請用 /board start',
   'number-chain': '開局請用 /board start',
   'daily-riddle': '加入或開啟當日題目請用 /board start',

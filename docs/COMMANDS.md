@@ -15,6 +15,8 @@
 - `/fortune` - 抽一則小吉籤
 - `/roll` - 擲骰子
 - `/weather` - 查詢天氣；可查城市或臺灣縣市行政區
+- `/stock quote/chart/watchlist/watch-add/watch-remove` - 查詢台股、美股、ETF 與加密貨幣報價
+- `/food recipe/nearby/add/list/remove` - 食譜查詢、附近美食推薦；伺服器美食地圖測試中，限授權伺服器
 - `/poll` - 建立按鈕投票
 - `/remind add/list/delete` - 管理提醒
 - `/calendar add/list/delete` - 管理自己的跨伺服器個人行事曆
@@ -24,7 +26,7 @@
 - `/status` - 顯示小吉目前狀態
 - `/chat-style current/set` - 查看或變更小吉與你的對話風格；永久變更，跨伺服器共用
 - `/romance start/stop/status` - 管理小吉與你的跨伺服器文字戀愛模式
-- `/memory view/export/add/forget/off/on/delete/share` - 查看或管理小吉記住的你的喜好
+- `/memory view/export/add/forget/off/on/delete/share` - 查看或管理小吉記住的你的喜好與聊天紀錄
 - `/student` - 小吉化身好奇寶寶向你提問
 - `/about` - 顯示小吉的公開資訊
 - `/help` - 列出小吉可用指令
@@ -49,7 +51,9 @@
 - `/casino-venue delete-menu/reassign/reassign-waiter/cancel` - 管理子指令；需管理權限
 - `/luxury list/buy/inventory/history` - 奢侈品商店街
 - `/pawn quote/sell/active/redeem/history` - 奢侈品當鋪
-- `/board start/join/leave/status/stop` - 小吉的統一遊戲入口；開始或查看遊戲：海龜湯、西洋棋、五子棋、圍棋、六角星跳棋、象棋、俄羅斯方塊、數字配對、數獨、文字接龍、數字接龍、每日猜謎、決鬥塔台、賭場骰子、賭場角子機、賭場 21 點、賭場輪盤、賭場百家樂、賭場五張牌撲克；加入、離開或結束適用的公開桌遊與推理遊戲；/board stop 也能結束你自己的個人遊戲
+- `/board start/join/leave/status/stop` - 小吉的統一遊戲入口；開始或查看遊戲：海龜湯、西洋棋、五子棋、圍棋、六角星跳棋、象棋、狼人殺、俄羅斯方塊、數字配對、數獨、文字接龍、數字接龍、每日猜謎、決鬥塔台、賭場骰子、賭場角子機、賭場 21 點、賭場輪盤、賭場百家樂、賭場五張牌撲克、小吉農場；加入、離開或結束適用的公開桌遊與推理遊戲；/board stop 也能結束你自己的個人遊戲
+- `/farm view/shop/plant/water/harvest/sell/fertilize/expand/reclaim` - 小吉農場：播種、澆水、收成與出售作物；個人農場，跨伺服器共用；作物與料理每天合計最多賣 500 吉幣；也能從 /board start 打開
+- `/kitchen recipes/cook/pantry/eat/gift/sell/collection` - 小吉廚房：用農場作物做料理、出售、品嚐或送人；每天最多送出 5 道料理，收到的料理只能吃
 - `/economy overview/user/audit` - 吉幣經濟總覽與紀錄查詢；需管理權限
 - `/coin-admin history/enable/disable` - 管理吉幣系統（全域錢包變更限小吉擁有者）；history 指定 campaign-id 的活動對帳限小吉擁有者；需管理權限
 
@@ -61,5 +65,6 @@
 - `/number-chain stop/status` - 管理小吉安全數字接龍；開局請用 /board start；需管理權限
 - `/daily-riddle enable/disable/status` - 管理小吉每日猜謎；加入或開啟當日題目請用 /board start；需管理權限
 - `/daily-discussion enable/disable/status/run-now` - 管理小吉每日議題討論；需管理權限
+- `/spark-relay start/tasks/submit/status` - 星火接續：隨機分組，每天輪一人完成小任務
 
 活動設定沿用各指令既有的 Discord 權限檢查；它們不是私有伺服器管理模組。

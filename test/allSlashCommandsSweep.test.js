@@ -115,6 +115,8 @@ const KNOWN_DEFECTS = Object.freeze({});
 const NETWORK_COMMANDS = Object.freeze(new Set([
   // /weather asks the weather services; offline it answers that the weather cannot be read now.
   'weather',
+  // /stock asks the exchanges and Twelve Data for quotes; offline it answers that the quotes cannot be read now.
+  'stock',
 ]));
 
 // Runs whose result differs from what the command catalog says about who may run the path, by "path|run", with the
@@ -163,6 +165,7 @@ const GAME_LAUNCHED = Object.freeze({
   'daily-riddle': (result) => /^今天的每日猜謎在 <#\d+>/u.test(result.reply),
   duel: (result) => result.reply.startsWith('**決鬥塔台｜挑戰結算**'),
   casino: (result) => /^\*\*小吉賭場｜|開了一局 21 點/u.test(result.reply),
+  farm: (result) => result.customIds.some((customId) => customId.startsWith('farm|1|')),
 });
 
 // Paths whose run changes what every later path sees. After every user ran it, the state is put back through
@@ -589,6 +592,9 @@ const COMPONENT_SOURCES = Object.freeze([
   Object.freeze({ path: 'board start', variant: 'member, game=gomoku', label: 'board gomoku, lobby the member hosts',
     first: Object.freeze(['stop']), actors: Object.freeze(['owner', 'member']) }),
   Object.freeze({ path: 'poll', variant: 'owner', label: 'poll' }),
+  // The farm panel, as /board start and /farm view open it: water, harvest, sell all and refresh.
+  Object.freeze({ path: 'board start', variant: 'owner, game=farm', label: 'board farm' }),
+  Object.freeze({ path: 'farm view', variant: 'member', label: 'farm view' }),
   Object.freeze({ path: 'coin-admin add', variant: 'owner', label: 'coin-admin add, user preview' }),
   Object.freeze({ path: 'coin-admin add', variant: 'owner, role preview', label: 'coin-admin add, role preview' }),
 ]);
@@ -614,6 +620,7 @@ function controlOf(customId) {
   if (customId.startsWith('poll:')) return { family: 'poll', control: `vote ${customId.split(':')[2]}` };
   if (customId.startsWith('casino:blackjack:')) return { family: 'blackjack', control: customId.split(':')[2] };
   if (customId.startsWith('coin-admin|1|add|')) return { family: 'coin-admin', control: parts[3] };
+  if (customId.startsWith('farm|1|')) return { family: 'farm', control: parts[2] };
   return { family: 'other', control: customId };
 }
 
@@ -627,8 +634,8 @@ function controlRank(control, first = []) {
 
 // Every control the public core can show, by family: the board's own buttons and every game control of
 // src/systems/games/board/discord/boardControls.js, the personal games' buttons, blackjack, the poll's first two
-// options (a poll has at least two) and the coin-admin preview. The pass has to press each of them, or the control is
-// in CONTROLS_NOT_DRIVEN with the reason.
+// options (a poll has at least two), the coin-admin preview and the farm panel. The pass has to press each of them,
+// or the control is in CONTROLS_NOT_DRIVEN with the reason.
 const CONTROL_INVENTORY = Object.freeze({
   board: Object.freeze(['join', 'leave', 'begin', 'stop', 'status', 'reveal',
     ...new Set(Object.values(BOARD_CONTROL_DEFINITIONS).flatMap((controls) => controls.map((control) => `act.${control.id}`)))]),
@@ -636,10 +643,14 @@ const CONTROL_INVENTORY = Object.freeze({
   blackjack: Object.freeze(['hit', 'stand']),
   poll: Object.freeze(['vote 0', 'vote 1']),
   'coin-admin': Object.freeze(['confirm', 'cancel']),
+  farm: Object.freeze(['water', 'harvest', 'sell', 'refresh']),
 });
 const CONTROLS_NOT_DRIVEN = Object.freeze({
   'solo menu': 'the game menu select is only shown by the old /games menu, which no public slash command reaches now',
   'solo difficulty': 'the difficulty select follows that menu only; /board start takes the difficulty as an option',
+  ...Object.fromEntries(['act.role', 'act.action', 'act.ready', 'act.start-vote'].map((control) => [`board ${control}`,
+    'werewolf needs six players to begin and the sweep world has fewer, so a running table never shows; ' +
+    'test/werewolfRuntime.test.js presses these through the real board runtime'])),
 });
 
 // The text a user types into a modal field: by the field's custom ID, or the example its placeholder gives, or

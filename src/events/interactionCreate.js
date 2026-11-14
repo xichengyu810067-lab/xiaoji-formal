@@ -3,12 +3,15 @@ const { handleBlackjackButton } = require('../services/casinoService');
 const { handlePollButton } = require('../services/pollService');
 const { CUSTOM_ID_PREFIX: CHAT_POLL_PREFIX, handleChatPollButton } = require('../systems/conversation/chatPoll');
 const { CUSTOM_ID_PREFIX: MEMORY_CONSENT_PREFIX, handleMemoryConsentButton } = require('../systems/conversation/memoryConsent');
+const { CUSTOM_ID_PREFIX: SPARK_RELAY_PREFIX, handleSparkRelayInteraction } = require('../systems/community/sparkRelay/discord');
 const { replyEphemeral } = require('../utils/moderation');
 const { recordPublicInteraction } = require('../services/publicStatusService');
 const logger = require('../utils/logger');
 const { getClientExtensionHost } = require('../extensions/extensionHost');
 const { getBoardRuntime } = require('../systems/games/board/core/boardRuntimeRegistry');
 const { getSoloRuntime } = require('../systems/games/soloRuntimeRegistry');
+const { handleFarmComponent } = require('../systems/farm/discord/farmDiscord');
+const { CUSTOM_ID_PREFIX: FARM_PREFIX } = require('../systems/farm/discord/farmPresenter');
 const { authorizeInteraction } = require('../platform/testControlIngress');
 
 // An AutocompleteInteraction has no reply()/followUp(); the only valid answer is a suggestion list. The interaction
@@ -60,9 +63,21 @@ module.exports = {
       return;
     }
 
-    if ((interaction.isButton() || interaction.isModalSubmit()) && interaction.customId?.startsWith('board|')) {
+    if ((interaction.isButton() || interaction.isModalSubmit() || interaction.isStringSelectMenu?.()) &&
+      interaction.customId?.startsWith('board|')) {
       await getBoardRuntime().handleInteraction(interaction);
       await recordPublicInteraction();
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith(FARM_PREFIX)) {
+      try {
+        await handleFarmComponent(interaction);
+        await recordPublicInteraction();
+      } catch (error) {
+        logger.error('farm button handling failed', error);
+        await replyEphemeral(interaction, '農場面板處理失敗，請用 /farm view 重新打開。');
+      }
       return;
     }
 
@@ -107,6 +122,12 @@ module.exports = {
         logger.error('memory consent button handling failed', error);
         await replyEphemeral(interaction, '記憶設定失敗，請稍後用 /memory share 設定。');
       }
+      return;
+    }
+
+    if ((interaction.isButton() || interaction.isModalSubmit()) && interaction.customId?.startsWith(SPARK_RELAY_PREFIX)) {
+      await handleSparkRelayInteraction(interaction);
+      await recordPublicInteraction();
       return;
     }
 

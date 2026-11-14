@@ -6,12 +6,15 @@
 // - public: one memory shared by every server 小吉 is in (and direct messages);
 // - private (also before they choose): a separate memory per server, and one for direct messages.
 // A member can stop collection (and its use) at any time and delete everything (/memory). Only the member can read
-// their own memory; the bot owner can read the shared memory of members who chose public (private extension).
+// their own memory; the bot owner can read the shared memory of members who chose public (private extension), and
+// every 168 hours receives what was added to the memory of every member, public or not, in one report
+// (listMemoryAddedBetween, for the weeklyMemoryReport hook of an extension; see memoryReportSchedule.js).
 //
 // Nothing sensitive is kept: health, religion, politics, sexuality, real names, addresses, phone numbers, schools,
 // accounts or passwords, other people, links, mentions and long numbers are refused before anything is written.
 
 const { createFixedCodeLog } = require('./fixedCodeLog');
+const { recordServiceOutcome, registerServiceConfiguration } = require('../../platform/serviceHealth');
 const {
   INTERNAL_DATA_REPLACEMENT,
   containsInternalDisclosure,
@@ -61,7 +64,11 @@ function withStoreTimeout(work) {
       { code: 'PREFERENCE_MEMORY_TIMEOUT' })), storeTimeoutMs);
     timer.unref?.();
   });
-  return Promise.race([Promise.resolve().then(work), timeout]).finally(() => clearTimeout(timer));
+  // Every store call is an outcome for the status page (serviceHealth.js).
+  return Promise.race([Promise.resolve().then(work), timeout])
+    .then((value) => { recordServiceOutcome('memory_store', true); return value; },
+      (error) => { recordServiceOutcome('memory_store', false); throw error; })
+    .finally(() => clearTimeout(timer));
 }
 
 function scopeForGuild(guildId) {
@@ -92,6 +99,28 @@ function createTursoMemoryStore({ url, authToken, createClientImpl } = {}) {
         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, scope TEXT NOT NULL, category TEXT NOT NULL,
         value TEXT NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL)`,
       'CREATE INDEX IF NOT EXISTS xiaoji_memory_preferences_user ON xiaoji_memory_preferences (user_id, scope)',
+      // Channel memory (channelMemory.js): what members who chat with 小吉 say in servers, and 小吉's replies there.
+      `CREATE TABLE IF NOT EXISTS xiaoji_memory_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, period TEXT NOT NULL, user_id TEXT NOT NULL, scope TEXT NOT NULL,
+        guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, message_id TEXT NOT NULL, role TEXT NOT NULL,
+        author_name TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+      'CREATE UNIQUE INDEX IF NOT EXISTS xiaoji_memory_messages_message ON xiaoji_memory_messages (message_id, role)',
+      'CREATE INDEX IF NOT EXISTS xiaoji_memory_messages_channel ON xiaoji_memory_messages (guild_id, channel_id, created_at)',
+      'CREATE INDEX IF NOT EXISTS xiaoji_memory_messages_user ON xiaoji_memory_messages (user_id, period, created_at)',
+      `CREATE TABLE IF NOT EXISTS xiaoji_memory_usage (
+        user_id TEXT NOT NULL, period TEXT NOT NULL, day INTEGER NOT NULL, count INTEGER NOT NULL,
+        PRIMARY KEY (user_id, period, day))`,
+      // The server food maps of /food (src/systems/food/foodGuide.js): places members recommend.
+      `CREATE TABLE IF NOT EXISTS xiaoji_food_spots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL,
+        area TEXT NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+      'CREATE INDEX IF NOT EXISTS xiaoji_food_spots_guild ON xiaoji_food_spots (guild_id, created_at)',
+      // /stock watchlists (src/systems/stocks/watchlist.js): the symbols a member follows.
+      `CREATE TABLE IF NOT EXISTS xiaoji_stock_watchlist (
+        user_id TEXT NOT NULL, symbol TEXT NOT NULL, added_at INTEGER NOT NULL, PRIMARY KEY (user_id, symbol))`,
+      // Which revision of the memory notice each member has seen; a new revision asks everyone once more.
+      `CREATE TABLE IF NOT EXISTS xiaoji_memory_prompts (
+        user_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, prompted_at INTEGER NOT NULL)`,
     ], 'write').catch((error) => {
       ready = null;
       throw error;
@@ -111,6 +140,27 @@ function createTursoMemoryStore({ url, authToken, createClientImpl } = {}) {
     lastUsedAt: Number(rowValue(row, 'last_used_at', 5)),
   });
   const COLUMNS = 'id, scope, category, value, created_at, last_used_at';
+  const MESSAGE_COLUMNS = 'id, user_id, scope, guild_id, channel_id, role, author_name, content, created_at, message_id';
+  const toMessage = (row) => ({
+    id: Number(rowValue(row, 'id', 0)),
+    userId: String(rowValue(row, 'user_id', 1)),
+    scope: String(rowValue(row, 'scope', 2)),
+    guildId: String(rowValue(row, 'guild_id', 3)),
+    channelId: String(rowValue(row, 'channel_id', 4)),
+    role: String(rowValue(row, 'role', 5)),
+    authorName: String(rowValue(row, 'author_name', 6)),
+    content: String(rowValue(row, 'content', 7)),
+    createdAt: Number(rowValue(row, 'created_at', 8)),
+    messageId: String(rowValue(row, 'message_id', 9)),
+  });
+  const toAddedPreference = (row) => ({
+    id: Number(rowValue(row, 'id', 0)),
+    userId: String(rowValue(row, 'user_id', 1)),
+    scope: String(rowValue(row, 'scope', 2)),
+    category: String(rowValue(row, 'category', 3)),
+    value: String(rowValue(row, 'value', 4)),
+    createdAt: Number(rowValue(row, 'created_at', 5)),
+  });
   return Object.freeze({
     async getConsent(userId) {
       const result = await execute(
@@ -170,6 +220,110 @@ function createTursoMemoryStore({ url, authToken, createClientImpl } = {}) {
     async pruneInactive(before) {
       await execute('DELETE FROM xiaoji_memory_preferences WHERE last_used_at < ?', [before]);
     },
+    async countFoodSpots(guildId) {
+      const result = await execute('SELECT COUNT(*) AS n FROM xiaoji_food_spots WHERE guild_id = ?', [guildId]);
+      return Number(rowValue(result.rows?.[0], 'n', 0)) || 0;
+    },
+    async addFoodSpot({ guildId, userId, name, area, kind, note, createdAt }) {
+      const result = await execute(`INSERT INTO xiaoji_food_spots (guild_id, user_id, name, area, kind, note, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`, [guildId, userId, name, area, kind, note, createdAt]);
+      return { id: Number(rowValue(result.rows?.[0], 'id', 0)), guildId, userId, name, area, kind, note, createdAt };
+    },
+    async listFoodSpots(guildId, { area = '', kind = '' } = {}) {
+      const result = await execute(`SELECT id, user_id, name, area, kind, note, created_at FROM xiaoji_food_spots
+        WHERE guild_id = ? AND (? = '' OR area LIKE '%' || ? || '%') AND (? = '' OR kind LIKE '%' || ? || '%')
+        ORDER BY created_at DESC, id DESC LIMIT 50`, [guildId, area, area, kind, kind]);
+      return (result.rows || []).map((row) => ({
+        id: Number(rowValue(row, 'id', 0)), userId: String(rowValue(row, 'user_id', 1)), name: String(rowValue(row, 'name', 2)),
+        area: String(rowValue(row, 'area', 3)), kind: String(rowValue(row, 'kind', 4)), note: String(rowValue(row, 'note', 5)),
+        createdAt: Number(rowValue(row, 'created_at', 6)),
+      }));
+    },
+    async getFoodSpot(guildId, id) {
+      const result = await execute('SELECT id, user_id FROM xiaoji_food_spots WHERE guild_id = ? AND id = ?', [guildId, id]);
+      const row = result.rows?.[0];
+      return row ? { id: Number(rowValue(row, 'id', 0)), userId: String(rowValue(row, 'user_id', 1)) } : null;
+    },
+    async deleteFoodSpot(guildId, id) {
+      await execute('DELETE FROM xiaoji_food_spots WHERE guild_id = ? AND id = ?', [guildId, id]);
+    },
+    async listWatchlist(userId) {
+      const result = await execute('SELECT symbol FROM xiaoji_stock_watchlist WHERE user_id = ? ORDER BY added_at, symbol', [userId]);
+      return (result.rows || []).map((row) => String(rowValue(row, 'symbol', 0)));
+    },
+    async addToWatchlist(userId, symbol, now) {
+      const result = await execute('INSERT OR IGNORE INTO xiaoji_stock_watchlist (user_id, symbol, added_at) VALUES (?, ?, ?)',
+        [userId, symbol, now]);
+      return Number(result.rowsAffected) > 0;
+    },
+    async removeFromWatchlist(userId, symbol) {
+      const result = await execute('DELETE FROM xiaoji_stock_watchlist WHERE user_id = ? AND symbol = ?', [userId, symbol]);
+      return Number(result.rowsAffected) > 0;
+    },
+    async getPromptRevision(userId) {
+      const result = await execute('SELECT revision FROM xiaoji_memory_prompts WHERE user_id = ?', [userId]);
+      const row = result.rows?.[0];
+      return row ? Number(rowValue(row, 'revision', 0)) : 0;
+    },
+    async savePromptRevision(userId, revision, now) {
+      await execute(`INSERT INTO xiaoji_memory_prompts (user_id, revision, prompted_at) VALUES (?, ?, ?)
+        ON CONFLICT (user_id) DO UPDATE SET revision = excluded.revision, prompted_at = excluded.prompted_at`,
+      [userId, revision, now]);
+    },
+    async usageByDay(userId, period) {
+      const result = await execute('SELECT day, count FROM xiaoji_memory_usage WHERE user_id = ? AND period = ?', [userId, period]);
+      return (result.rows || []).map((row) => ({ day: Number(rowValue(row, 'day', 0)), count: Number(rowValue(row, 'count', 1)) }));
+    },
+    // Adds one message; false when it was already kept (the same Discord message again). A member message is counted.
+    async addMessage(entry) {
+      const result = await execute(`INSERT OR IGNORE INTO xiaoji_memory_messages
+        (period, user_id, scope, guild_id, channel_id, message_id, role, author_name, content, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [entry.period, entry.userId, entry.scope, entry.guildId, entry.channelId,
+        entry.messageId, entry.role, entry.authorName, entry.content, entry.createdAt]);
+      const added = Number(result.rowsAffected) > 0;
+      if (added && entry.role === 'member') {
+        await execute(`INSERT INTO xiaoji_memory_usage (user_id, period, day, count) VALUES (?, ?, ?, 1)
+          ON CONFLICT (user_id, period, day) DO UPDATE SET count = count + 1`, [entry.userId, entry.period, entry.day]);
+      }
+      return added;
+    },
+    async listChannelMessages(guildId, channelId, period, limit) {
+      const result = await execute(`SELECT ${MESSAGE_COLUMNS} FROM xiaoji_memory_messages
+        WHERE guild_id = ? AND channel_id = ? AND period = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+      [guildId, channelId, period, limit]);
+      return (result.rows || []).map(toMessage).reverse();
+    },
+    async listOwnMessages(userId, scopes, period, limit) {
+      const result = await execute(`SELECT ${MESSAGE_COLUMNS} FROM xiaoji_memory_messages
+        WHERE user_id = ? AND role = 'member' AND period = ? AND scope IN (${scopes.map(() => '?').join(', ')})
+        ORDER BY created_at DESC, id DESC LIMIT ?`, [userId, period, ...scopes, limit]);
+      return (result.rows || []).map(toMessage).reverse();
+    },
+    async countOwnMessages(userId, period) {
+      const result = await execute(`SELECT COUNT(*) AS n FROM xiaoji_memory_messages
+        WHERE user_id = ? AND role = 'member' AND period = ?`, [userId, period]);
+      return Number(rowValue(result.rows?.[0], 'n', 0)) || 0;
+    },
+    async deleteOwnMessages(userId) {
+      const result = await execute('DELETE FROM xiaoji_memory_messages WHERE user_id = ?', [userId]);
+      return Number(result.rowsAffected) || 0;
+    },
+    // Everything of an earlier month: its messages and its counts.
+    async deleteMessagesBefore(period) {
+      await execute('DELETE FROM xiaoji_memory_messages WHERE period < ?', [period]);
+      await execute('DELETE FROM xiaoji_memory_usage WHERE period < ?', [period]);
+    },
+    // What every member added in [since, until), oldest first, at most limit of each kind.
+    async listPreferencesAddedBetween(since, until, limit) {
+      const result = await execute(`SELECT id, user_id, scope, category, value, created_at FROM xiaoji_memory_preferences
+        WHERE created_at >= ? AND created_at < ? ORDER BY created_at, id LIMIT ?`, [since, until, limit]);
+      return (result.rows || []).map(toAddedPreference);
+    },
+    async listMessagesAddedBetween(since, until, limit) {
+      const result = await execute(`SELECT ${MESSAGE_COLUMNS} FROM xiaoji_memory_messages
+        WHERE created_at >= ? AND created_at < ? ORDER BY created_at, id LIMIT ?`, [since, until, limit]);
+      return (result.rows || []).map(toMessage);
+    },
   });
 }
 
@@ -178,6 +332,16 @@ function createInMemoryMemoryStore() {
   const consents = new Map();
   let preferences = [];
   let nextId = 1;
+  const prompts = new Map();
+  const watchlists = new Map();
+  let foodSpots = [];
+  let nextFoodSpotId = 1;
+  const usage = new Map();
+  let messages = [];
+  let nextMessageId = 1;
+  const byTime = (a, b) => a.createdAt - b.createdAt || a.id - b.id;
+  const publicMessage = ({ id, userId, scope, guildId, channelId, role, authorName, content, createdAt, messageId }) =>
+    ({ id, userId, scope, guildId, channelId, role, authorName, content, createdAt, messageId });
   const copy = (entry) => ({ ...entry });
   const order = (a, b) => b.lastUsedAt - a.lastUsedAt || b.id - a.id;
   return Object.freeze({
@@ -220,6 +384,89 @@ function createInMemoryMemoryStore() {
     async pruneInactive(before) {
       preferences = preferences.filter((entry) => entry.lastUsedAt >= before);
     },
+    async countFoodSpots(guildId) {
+      return foodSpots.filter((spot) => spot.guildId === guildId).length;
+    },
+    async addFoodSpot(spot) {
+      const entry = { ...spot, id: nextFoodSpotId++ };
+      foodSpots.push(entry);
+      return { ...entry };
+    },
+    async listFoodSpots(guildId, { area = '', kind = '' } = {}) {
+      return foodSpots.filter((spot) => spot.guildId === guildId && (!area || spot.area.includes(area)) && (!kind || spot.kind.includes(kind)))
+        .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id).slice(0, 50)
+        .map(({ id, userId, name, area: place, kind: type, note, createdAt }) => ({ id, userId, name, area: place, kind: type, note, createdAt }));
+    },
+    async getFoodSpot(guildId, id) {
+      const spot = foodSpots.find((entry) => entry.guildId === guildId && entry.id === id);
+      return spot ? { id: spot.id, userId: spot.userId } : null;
+    },
+    async deleteFoodSpot(guildId, id) {
+      foodSpots = foodSpots.filter((entry) => entry.guildId !== guildId || entry.id !== id);
+    },
+    async listWatchlist(userId) {
+      return [...(watchlists.get(userId) || [])];
+    },
+    async addToWatchlist(userId, symbol) {
+      const list = watchlists.get(userId) || [];
+      if (list.includes(symbol)) return false;
+      watchlists.set(userId, [...list, symbol]);
+      return true;
+    },
+    async removeFromWatchlist(userId, symbol) {
+      const list = watchlists.get(userId) || [];
+      if (!list.includes(symbol)) return false;
+      watchlists.set(userId, list.filter((entry) => entry !== symbol));
+      return true;
+    },
+    async getPromptRevision(userId) {
+      return prompts.get(userId) || 0;
+    },
+    async savePromptRevision(userId, revision) {
+      prompts.set(userId, revision);
+    },
+    async usageByDay(userId, period) {
+      return [...usage.entries()].filter(([key]) => key.startsWith(`${userId}|${period}|`))
+        .map(([key, count]) => ({ day: Number(key.split('|')[2]), count }));
+    },
+    async addMessage(entry) {
+      if (messages.some((row) => row.messageId === entry.messageId && row.role === entry.role)) return false;
+      messages.push({ ...entry, id: nextMessageId++ });
+      if (entry.role === 'member') {
+        const key = `${entry.userId}|${entry.period}|${entry.day}`;
+        usage.set(key, (usage.get(key) || 0) + 1);
+      }
+      return true;
+    },
+    async listChannelMessages(guildId, channelId, period, limit) {
+      return messages.filter((row) => row.guildId === guildId && row.channelId === channelId && row.period === period)
+        .sort(byTime).slice(-limit).map(publicMessage);
+    },
+    async listOwnMessages(userId, scopes, period, limit) {
+      return messages.filter((row) => row.userId === userId && row.role === 'member' && row.period === period &&
+        scopes.includes(row.scope)).sort(byTime).slice(-limit).map(publicMessage);
+    },
+    async countOwnMessages(userId, period) {
+      return messages.filter((row) => row.userId === userId && row.role === 'member' && row.period === period).length;
+    },
+    async deleteOwnMessages(userId) {
+      const before = messages.length;
+      messages = messages.filter((row) => row.userId !== userId);
+      return before - messages.length;
+    },
+    async deleteMessagesBefore(period) {
+      messages = messages.filter((row) => row.period >= period);
+      for (const key of [...usage.keys()]) if (key.split('|')[1] < period) usage.delete(key);
+    },
+    async listPreferencesAddedBetween(since, until, limit) {
+      return preferences.filter((entry) => entry.createdAt >= since && entry.createdAt < until)
+        .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id).slice(0, limit)
+        .map(({ id, userId, scope, category, value, createdAt }) => ({ id, userId, scope, category, value, createdAt }));
+    },
+    async listMessagesAddedBetween(since, until, limit) {
+      return messages.filter((row) => row.createdAt >= since && row.createdAt < until)
+        .sort(byTime).slice(0, limit).map(publicMessage);
+    },
   });
 }
 
@@ -242,6 +489,8 @@ function getMemoryStore() {
 function isMemoryConfigured() {
   return Boolean(getMemoryStore());
 }
+
+registerServiceConfiguration('memory_store', isMemoryConfigured);
 
 function reportStoreFailure(error) {
   log.write('PREFERENCE_MEMORY_UNAVAILABLE', 'warn',
@@ -310,7 +559,8 @@ async function loadMemoryContext({ userId, guildId = null, now = Date.now() } = 
 // Keeps what passes acceptPreference, where the member's choice says. Returns how many were kept.
 async function rememberPreferences({ userId, guildId = null, entries = [], now = Date.now() } = {}) {
   const store = getMemoryStore();
-  if (!store || !userId) return 0;
+  // Nothing said in direct messages is remembered.
+  if (!store || !userId || !guildId) return 0;
   const accepted = entries.slice(0, 3).map(acceptPreference).filter(Boolean);
   if (!accepted.length) return 0;
   try {
@@ -325,6 +575,18 @@ async function rememberPreferences({ userId, guildId = null, entries = [], now =
     reportStoreFailure(error);
     return 0;
   }
+}
+
+async function getPromptRevision(userId) {
+  const store = getMemoryStore();
+  if (!store) return null;
+  return withStoreTimeout(() => store.getPromptRevision(userId));
+}
+
+async function savePromptRevision(userId, revision, now = Date.now()) {
+  const store = getMemoryStore();
+  if (!store) return;
+  await withStoreTimeout(() => store.savePromptRevision(userId, revision, now));
 }
 
 async function getConsent(userId) {
@@ -373,6 +635,34 @@ async function listPublicPreferencesForOwner(userId) {
   });
 }
 
+// The most rows of each kind one report reads.
+const MEMORY_REPORT_ROW_LIMIT = 5000;
+const MEMORY_REPORT_TIMEOUT_MS = 30_000;
+
+// For the bot owner's weekly memory report (memoryReportSchedule.js): every preference and channel-memory message any
+// member added in [since, until), whatever the member chose about sharing. null when the memory is off. truncated
+// says a kind reached MEMORY_REPORT_ROW_LIMIT (the oldest are kept). A failure is thrown.
+async function listMemoryAddedBetween({ since, until, limit = MEMORY_REPORT_ROW_LIMIT } = {}) {
+  const store = getMemoryStore();
+  if (!store) return null;
+  if (!Number.isFinite(since) || !Number.isFinite(until) || until < since) throw new RangeError('A report window is required.');
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error('Preference memory did not answer in time.'),
+      { code: 'PREFERENCE_MEMORY_TIMEOUT' })), MEMORY_REPORT_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  try {
+    const [preferences, messages] = await Promise.race([Promise.all([
+      store.listPreferencesAddedBetween(since, until, limit),
+      store.listMessagesAddedBetween(since, until, limit),
+    ]), timeout]);
+    return { preferences, messages, truncated: preferences.length >= limit || messages.length >= limit };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function describeScope(scope, guildId) {
   if (scope === GLOBAL_SCOPE) return '所有伺服器共用';
   if (scope === DM_SCOPE) return '私訊';
@@ -382,8 +672,15 @@ function describeScope(scope, guildId) {
 
 module.exports = {
   CATEGORY_LABELS,
+  DM_SCOPE,
+  getMemoryStore,
+  normalizeConsent,
+  readableScopes,
+  withStoreTimeout,
+  writableScope,
   GLOBAL_SCOPE,
   MAX_PREFERENCES_PER_SCOPE,
+  MEMORY_REPORT_ROW_LIMIT,
   PREFERENCE_CATEGORIES,
   RETENTION_MS,
   acceptPreference,
@@ -394,11 +691,14 @@ module.exports = {
   forgetAllOwnPreferences,
   forgetOwnPreference,
   getConsent,
+  getPromptRevision,
   isMemoryConfigured,
   listOwnPreferences,
+  listMemoryAddedBetween,
   listPublicPreferencesForOwner,
   loadMemoryContext,
   rememberPreferences,
+  savePromptRevision,
   scopeForGuild,
   updateConsent,
 };

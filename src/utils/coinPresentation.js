@@ -48,6 +48,8 @@ const transactionTypeLabels = Object.freeze({
   [TransactionType.LUXURY_PURCHASE]: '購買奢侈品',
   [TransactionType.PAWN_PAYOUT]: '典當入帳',
   [TransactionType.PAWN_REDEEM]: '贖回典當品',
+  farm_purchase: '農場支出',
+  farm_sale: '農場與廚房出售',
   event_reward: '活動獎勵',
   tip_income: '小費收入',
 });

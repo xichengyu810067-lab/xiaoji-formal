@@ -1,4 +1,5 @@
-// Both corpora are closed: no external service or generative model judges a move.
+// Both corpora are closed. A word that neither holds may still be accepted by the word chain judge
+// (src/systems/community/wordChainJudge.js, Claude), asked only for an otherwise valid move; the corpora themselves never change.
 // Historical sessions retain their stored version; active legacy sessions may be
 // promoted transactionally by wordChainService after their next accepted move.
 const crypto = require('node:crypto');

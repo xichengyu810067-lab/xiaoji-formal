@@ -2573,9 +2573,9 @@ function containsInternalDisclosure(value, { secretValues } = {}) {
 // and secret-request checks read the reply as written, so a display name such as "by" or "model" cannot cut a
 // self-description apart. The returned text is always the whole reply.
 function finalizePublicAssistantText(value, options = {}) {
-  const { assistantVoice = true, displayNames = [], templatePrefix = '', waiveSoft = null } = options;
+  const { assistantVoice = true, displayNames = [], templatePrefix = '', waiveSoft = null, developerAddressee = false } = options;
   const text = sanitizeUntrustedText(value, options).trim();
-  const body = withoutTemplatePrefix(String(value ?? '').trim(), templatePrefix);
+  const body = maskDeveloperAddress(withoutTemplatePrefix(String(value ?? '').trim(), templatePrefix), developerAddressee);
   return requestsInternalDetails(maskDisplayNames(body, displayNames), { secondPersonIsUser: assistantVoice, waiveSoft }) ||
     containsInternalDisclosure(maskDisplayNames(body, disclosureTermNames(displayNames)), options) ||
     (assistantVoice && (statesAssistantInternals(body) || asksUserForSecret(body)))
@@ -2943,6 +2943,14 @@ function sanitizeDecisionOutput(value, ingressDecision) {
   return sanitizeUserFacingOutput(value, { context: binding?.context || {} });
 }
 
+// For the verified developer only: "你是小吉的開發者", "開發者鯊菜" in a reply to them name the person 小吉 is talking to,
+// not 小吉's internals, so the word is replaced by a neutral one for the checks (the reply is sent as written). Records
+// and modes ("開發者模式", "開發者日誌") are not replaced and stay checked.
+const DEVELOPER_ADDRESS = /(?:小吉|我)?(?:的)?(?:開發者|研發者|開發人員)(?!\s*(?:模式|日誌|紀錄|記錄|指令|權限|訊息|message|mode))/gu;
+function maskDeveloperAddress(text, developerAddressee) {
+  return developerAddressee ? String(text).replace(DEVELOPER_ADDRESS, '朋友') : text;
+}
+
 function decideAssistantOutput({
   ingressDecision,
   rawCandidate,
@@ -2961,6 +2969,9 @@ function decideAssistantOutput({
   templatePrefix = '',
   // Soft output rules to leave out (a Set; see SOFT_OUTPUT_RULES). Everything else is checked as usual.
   waiveSoft = null,
+  // The author is 小吉's developer, confirmed by the program from the Discord account ID (never from text): 小吉 may
+  // call them its developer. Only that word is let through (see maskDeveloperAddress); every other rule applies.
+  developerAddressee = false,
 } = {}) {
   const ingress = getRequestDecisionPayload(ingressDecision);
   if (ingress.kind === 'refusal') return refusalDecision(ingress, ingressDecision);
@@ -3005,9 +3016,9 @@ function decideAssistantOutput({
     return refusalDecision(ingress, ingressDecision);
   }
 
-  const raw = sanitizeUntrustedText(rawCandidate).trim();
+  const raw = maskDeveloperAddress(sanitizeUntrustedText(rawCandidate).trim(), developerAddressee);
   const styled = sanitizeUntrustedText(styledCandidate).trim();
-  const styledBody = withoutTemplatePrefix(styled, templatePrefix);
+  const styledBody = maskDeveloperAddress(withoutTemplatePrefix(styled, templatePrefix), developerAddressee);
   // Self-description rules apply wherever the assistant may speak for itself; only replies that quote
   // stored user text or service data are exempt. An unknown source is checked.
   const assistantVoice = !['memory', 'weather', 'member_fact', 'public_fact'].includes(source);
@@ -3050,6 +3061,40 @@ function decideAssistantOutput({
     CONVERSATION_PURPOSES.CONFIRM,
     CONVERSATION_PURPOSES.PRIVATE_MEMORY,
     ...(allowHistory ? [CONVERSATION_PURPOSES.HISTORY] : [])]);
+}
+
+// For the developer's report of a refused reply (blockedReplyReports.js): the name of the first output rule the raw
+// model reply breaks, checked in the order decideAssistantOutput reads them. Diagnostic only; it decides nothing.
+function describeOutputRefusal({
+  ingressDecision, rawCandidate, protectedInstructions = null, protectedModelIds = null, displayNames = [],
+  waiveSoft = null, developerAddressee = false,
+} = {}) {
+  const ingress = getRequestDecisionPayload(ingressDecision);
+  if (ingress.kind === 'refusal') return `ingress:${ingress.reason || 'refusal'}`;
+  if (containsUnapprovedXiaojiReleaseUrl(rawCandidate)) return 'unapproved_release_url';
+  const raw = maskDeveloperAddress(sanitizeUntrustedText(rawCandidate).trim(), developerAddressee);
+  const checked = maskDisplayNames(raw, displayNames);
+  const checks = [
+    ['empty_reply', () => !raw],
+    ['fixed_refusal_text', () => raw === INTERNAL_REPLY],
+    ['too_long', () => exceedsPolicyLength(raw)],
+    ['copies_prompt', () => leaksProtectedInstructions(raw, protectedInstructions)],
+    ['paraphrases_prompt', () => paraphrasesProtectedInstructions(raw, protectedInstructions)],
+    ['unauthorized_assistant_fact', () => hasUnauthorizedAssistantFact(checked, { ...ingress, secondPersonIsUser: true, waiveSoft })],
+    ['internal_disclosure', () => containsInternalDisclosure(maskDisplayNames(raw, disclosureTermNames(displayNames)))],
+    ['states_assistant_internals', () => statesAssistantInternals(raw)],
+    ['asks_user_for_secret', () => asksUserForSecret(raw)],
+    ['names_deployed_model', () => mentionsUndisclosedModelId(raw, ingress.userText, protectedModelIds)],
+    ['requests_internal_details', () => requestsInternalDetails(checked, { secondPersonIsUser: true, waiveSoft })],
+  ];
+  for (const [name, check] of checks) {
+    try {
+      if (check()) return name;
+    } catch {
+      return `${name}:check_failed`;
+    }
+  }
+  return 'styled_reply_refused';
 }
 
 // Says whether a reply was held back only by the soft output rules (see SOFT_OUTPUT_RULES). evaluate(waiveSoft) runs
@@ -3137,6 +3182,7 @@ function looksLikeInjectionAttempt(value) {
 }
 
 module.exports = {
+  describeOutputRefusal,
   AI_LOCAL_BUSY_REPLY,
   registerNonPublicCommandNames,
   BOT_REFERENCE_WITHOUT_BARE_BOT,

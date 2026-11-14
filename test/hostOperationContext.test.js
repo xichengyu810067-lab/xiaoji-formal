@@ -35,6 +35,8 @@ const EVENT_CONTEXT_WITH_GRANT = Object.freeze({
   publicEffectEventGrant: Object.freeze({ kind: 'synthetic-grant' }),
 });
 const SCHEDULED_JOBS = Object.freeze([
+  // The public feature status watch (publicStatusService.js createFeatureStatusWatcher).
+  ['status.watch', 60 * 1000],
   ['work.payroll', 5 * 60 * 1000],
   ['work.reminder', 60 * 60 * 1000],
   ['work.expired-tasks', 15 * 60 * 1000],
@@ -45,6 +47,7 @@ const SCHEDULED_JOBS = Object.freeze([
   ['venue.expired-orders', 15 * 60 * 1000],
   ['word-chain.reaction-outbox', 30 * 1000],
   ['number-chain.reaction-outbox', 30 * 1000],
+  ['spark-relay.clock', 5 * 60 * 1000],
 ]);
 
 function readyContextFor(botId) {
@@ -444,6 +447,7 @@ function createReadyHarness() {
       },
     },
     'services/statusSnapshotPublisher.js': { startStatusSnapshotPublisher: job('status.publisher') },
+    'services/publicStatusService.js': { createFeatureStatusWatcher: () => job('status.watch') },
     'services/dailyRiddleService.js': { startDailyRiddleScheduler: job('riddle.scheduler') },
     'services/dailyDiscussionService.js': { startDailyDiscussionScheduler: job('discussion.scheduler') },
     'services/pollService.js': {
@@ -471,6 +475,7 @@ function createReadyHarness() {
     'services/venueService.js': { processExpiredVenueOrderItems: job('venue.expired-orders') },
     'services/wordChainService.js': { processWordChainReactionOutbox: job('word-chain.reaction-outbox') },
     'services/numberChainService.js': { processNumberChainReactionOutbox: job('number-chain.reaction-outbox') },
+    'systems/community/sparkRelay/discord.js': { processSparkRelayClock: job('spark-relay.clock') },
     'utils/logger.js': {
       info: (...args) => infos.push(args),
       warn: (...args) => warnings.push(args),

@@ -12,6 +12,7 @@
     ['go', '圍棋（2 人）', 'board'],
     ['checkers', '六角星跳棋（2、3、4、6 人）', 'board'],
     ['xiangqi', '象棋（2 人）', 'board'],
+    ['werewolf', '狼人殺（6–12 人）', 'board'],
     ['tetris', '俄羅斯方塊', 'solo', ['difficulty'], 'tetris'],
     ['number-match', '數字配對', 'solo', ['difficulty'], 'number_match'],
     ['sudoku', '數獨', 'solo', ['difficulty'], 'sudoku'],
@@ -25,6 +26,7 @@
     ['casino-roulette', '賭場輪盤', 'casino', ['amount', 'choice']],
     ['casino-baccarat', '賭場百家樂', 'casino', ['amount', 'choice']],
     ['casino-poker', '賭場五張牌撲克', 'casino', ['amount']],
+    ['farm', '小吉農場', 'farm'],
   ].map(([key, name, launcher, parameters = [], publicFeatureKey = null]) => Object.freeze({
     key, name, launcher, parameters: Object.freeze(parameters), publicFeatureKey,
   }));
