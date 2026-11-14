@@ -3,6 +3,8 @@ const path = require('node:path');
 const defaultCommandCatalog = require('../website/commandCatalog');
 const { PUBLIC_SYSTEM_CATALOG } = require('../website/publicFeatureCatalog');
 const { ADMIN_MARKER, buildHelpSections } = require('../src/commands/help');
+const { PUBLIC_FEATURE_CATALOG } = require('../website/statusData');
+const { listPublicCommands } = require('../src/platform/publicCommandStatus');
 
 // The website writes its feature and command lists into the HTML ahead of time, so the lists can be
 // read without JavaScript (search engines, link previews and AI readers). The parts between the
@@ -43,6 +45,8 @@ const MARKERS = Object.freeze({
   features: 'guide-features',
   commands: 'guide-commands',
   highlights: 'home-highlights',
+  statusFeatures: 'status-features',
+  statusCommands: 'status-commands',
 });
 
 function escapeHtml(value) {
@@ -235,10 +239,68 @@ function renderHighlights(model) {
   return lines;
 }
 
+// The status page lists every feature and every public command with an unknown status; status.js fills in the live
+// one. Feature groups follow the categories of website/statusData.js, command groups the /help groups.
+const UNKNOWN_PILL = '<span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span>';
+
+function renderStatusGroup(title, kind, items) {
+  return [
+    `<div class="status-group" data-status-group data-kind="${kind}">`,
+    '  <details data-status-group-details>',
+    `    <summary><span class="status-group-title">${escapeHtml(title)}</span><span class="status-group-count" data-status-group-count>${items.length} 項</span></summary>`,
+    `    <ul class="status-list">`,
+    ...indent(items.flat(), 6),
+    '    </ul>',
+    '  </details>',
+    '</div>',
+  ];
+}
+
+function renderStatusFeatures({ features = PUBLIC_FEATURE_CATALOG } = {}) {
+  const categories = [];
+  for (const feature of features) {
+    let category = categories.find((entry) => entry.name === feature.category);
+    if (!category) categories.push(category = { name: feature.category, features: [] });
+    category.features.push(feature);
+  }
+  return categories.flatMap((category) => renderStatusGroup(category.name, 'feature', category.features.map((feature) => [
+    `<li class="status-row" data-status-item data-kind="feature" data-key="${escapeHtml(feature.key)}" data-search="${escapeHtml(`${feature.name} ${category.name}`.toLowerCase())}">`,
+    `  <span class="status-row-head"><strong class="status-row-name">${escapeHtml(feature.name)}</strong></span>`,
+    `  <span class="status-row-state">${UNKNOWN_PILL}</span>`,
+    '</li>',
+  ])));
+}
+
+function renderStatusCommands({ catalog = defaultCommandCatalog } = {}) {
+  const commands = listPublicCommands(catalog);
+  return catalog.COMMAND_GROUPS.flatMap((group) => {
+    const entries = commands.filter((command) => command.group === group.id);
+    if (!entries.length) return [];
+    return renderStatusGroup(group.title, 'command', entries.map((command) => {
+      const description = catalog.getCommand(command.name).description;
+      const search = [`/${command.name}`, description, ...command.subcommands].join(' ').toLowerCase();
+      const head = `<span class="status-row-head"><code class="status-usage">/${escapeHtml(command.name)}</code><span class="status-row-purpose">${escapeHtml(description)}</span></span>`;
+      const open = `<li class="status-row status-command" data-status-item data-kind="command" data-key="${escapeHtml(command.name)}" data-search="${escapeHtml(search)}">`;
+      if (!command.subcommands.length) return [open, `  ${head}`, `  <span class="status-row-state">${UNKNOWN_PILL}</span>`, '</li>'];
+      return [
+        open,
+        '  <details>',
+        `    <summary>${head}<span class="status-row-state">${UNKNOWN_PILL}</span><span class="status-sub-toggle">${command.subcommands.length} 個子指令</span></summary>`,
+        '    <ul class="status-sublist">',
+        ...command.subcommands.map((sub) => `      <li class="status-subrow" data-status-sub data-key="${escapeHtml(sub)}"><code class="status-usage">/${escapeHtml(command.name)} ${escapeHtml(sub)}</code><span class="status-row-state">${UNKNOWN_PILL}</span></li>`),
+        '    </ul>',
+        '  </details>',
+        '</li>',
+      ];
+    }));
+  });
+}
+
 // Each page and the generated blocks it carries, with the indentation of the marker line.
 const PAGES = Object.freeze([
   { file: 'guide.html', blocks: [[MARKERS.filters, renderFilters], [MARKERS.features, renderFeatures], [MARKERS.commands, renderCommands]] },
   { file: 'index.html', blocks: [[MARKERS.highlights, renderHighlights]] },
+  { file: 'status.html', blocks: [[MARKERS.statusFeatures, () => renderStatusFeatures()], [MARKERS.statusCommands, () => renderStatusCommands()]] },
 ]);
 
 function replaceBlock(source, marker, lines, file) {
@@ -297,6 +359,8 @@ module.exports = {
   buildGuideModel,
   findCommandMentions,
   findWebsiteGuideIssues,
+  renderStatusCommands,
+  renderStatusFeatures,
   renderWebsitePages,
   synchronizeWebsitePages,
 };

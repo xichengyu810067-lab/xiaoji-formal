@@ -1,4 +1,5 @@
 import { handleSupport } from './support.mjs';
+import { PUBLIC_COMMANDS } from './publicCommands.mjs';
 
 const ALLOWED_ORIGIN = 'https://xiaoji-zeta.vercel.app';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -20,6 +21,12 @@ const FEATURE_KEYS = Object.freeze([
   'tetris', 'number_match', 'sudoku', 'official_website', 'status_website',
 ]);
 const FEATURE_STATUSES = new Set(['normal', 'maintenance', 'broken']);
+// Why a command is not normal. A bot newer than this worker may send a word it does not know yet: the status is kept
+// and the word dropped. 'stale' is the worker's own, for a snapshot that stopped arriving.
+const COMMAND_REASONS = new Set(['offline', 'not_loaded', 'errors', 'feature', 'service', 'database', 'stale']);
+const REASON_PATTERN = /^[a-z_]{1,32}$/;
+const MAX_COMMANDS = 120;
+const MAX_SUBCOMMANDS = 60;
 const BOT_STATUSES = new Set(['operational', 'degraded', 'outage']);
 const KEY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -84,8 +91,54 @@ function normalizeFeature(feature, { allowStored = false } = {}) {
   return { key: feature.key, name: feature.name, category: feature.category, status: feature.status };
 }
 
+// null when a reason is malformed; otherwise the reason to keep (null for a normal status or a word this worker does not know).
+function normalizeReason(status, reason) {
+  if (reason === null || reason === undefined) return { reason: null };
+  if (typeof reason !== 'string' || !REASON_PATTERN.test(reason)) return null;
+  return { reason: status !== 'normal' && COMMAND_REASONS.has(reason) ? reason : null };
+}
+
+function normalizeCommandEntry(entry, allowedKeys) {
+  if (!hasOnlyKeys(entry, allowedKeys) || typeof entry.key !== 'string' || entry.key.length > 64) return null;
+  if (!FEATURE_STATUSES.has(entry.status)) return null;
+  const reason = normalizeReason(entry.status, entry.reason);
+  if (!reason) return null;
+  return { key: entry.key, status: entry.status, reason: reason.reason };
+}
+
+// The slash commands of a snapshot (optional: a bot of the release before this one sends none). Only the public
+// commands and subcommands of PUBLIC_COMMANDS are kept, so a name the worker does not know, or a private one, is never
+// stored or shown; a newer bot with a new command still gets its snapshot accepted. A malformed entry rejects it all.
+function normalizeCommands(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_COMMANDS) return null;
+  const commands = [];
+  const seen = new Set();
+  for (const entry of value) {
+    const command = normalizeCommandEntry(entry, ['key', 'status', 'reason', 'subcommands']);
+    if (!command || !Array.isArray(entry.subcommands) || entry.subcommands.length > MAX_SUBCOMMANDS) return null;
+    const subcommands = [];
+    for (const subEntry of entry.subcommands) {
+      const subcommand = normalizeCommandEntry(subEntry, ['key', 'status', 'reason']);
+      if (!subcommand) return null;
+      subcommands.push(subcommand);
+    }
+    if (!Object.hasOwn(PUBLIC_COMMANDS, command.key) || seen.has(command.key)) continue;
+    seen.add(command.key);
+    const knownSubcommands = PUBLIC_COMMANDS[command.key];
+    const keptSubcommands = new Set();
+    command.subcommands = subcommands.filter((subcommand) => {
+      if (!knownSubcommands.includes(subcommand.key) || keptSubcommands.has(subcommand.key)) return false;
+      keptSubcommands.add(subcommand.key);
+      return true;
+    });
+    commands.push(command);
+  }
+  return commands;
+}
+
 export function validatePublicSnapshot(value, { allowStored = false } = {}) {
-  if (!hasOnlyKeys(value, ['schemaVersion', 'updatedAt', 'timezone', 'bot', 'guilds', 'usage', 'summary', 'features'])) return null;
+  if (!hasOnlyKeys(value, ['schemaVersion', 'updatedAt', 'timezone', 'bot', 'guilds', 'usage', 'summary', 'features', 'commands'])) return null;
   if (value.schemaVersion !== 1 || value.timezone !== 'Asia/Taipei' || parseIsoTimestamp(value.updatedAt) === null) return null;
   if (!hasOnlyKeys(value.bot, ['status', 'version', 'latencyMs']) || !BOT_STATUSES.has(value.bot.status)
     || typeof value.bot.version !== 'string' || value.bot.version.length > 40
@@ -110,6 +163,8 @@ export function validatePublicSnapshot(value, { allowStored = false } = {}) {
     return result;
   }, { normal: 0, maintenance: 0, broken: 0 });
   if (!Object.entries(summary).every(([key, count]) => value.summary[key] === count)) return null;
+  const commands = normalizeCommands(value.commands);
+  if (!commands) return null;
 
   return {
     schemaVersion: 1,
@@ -120,6 +175,7 @@ export function validatePublicSnapshot(value, { allowStored = false } = {}) {
     usage: { date: value.usage.date, todayInteractions: value.usage.todayInteractions, available: value.usage.available },
     summary,
     features,
+    commands,
   };
 }
 
@@ -212,6 +268,7 @@ function unknownSnapshot() {
     usage: { date: null, todayInteractions: null, available: false },
     summary: { normal: 0, maintenance: 0, broken: 0 },
     features: [],
+    commands: [],
   };
 }
 
@@ -224,6 +281,12 @@ function staleSnapshot(snapshot) {
     result[feature.status] += 1;
     return result;
   }, { normal: 0, maintenance: 0, broken: 0 });
+  // A command that was normal is no longer known to be: maintenance, because the snapshot stopped arriving.
+  const staleEntry = (entry) => (entry.status === 'broken' ? entry : { ...entry, status: 'maintenance', reason: 'stale' });
+  const commands = (snapshot.commands || []).map((command) => ({
+    ...staleEntry(command),
+    subcommands: command.subcommands.map(staleEntry),
+  }));
   return {
     ...snapshot,
     bot: { ...snapshot.bot, status: snapshot.bot.status === 'outage' ? 'outage' : 'degraded' },
@@ -231,6 +294,7 @@ function staleSnapshot(snapshot) {
     usage: { date: snapshot.usage.date, todayInteractions: null, available: false },
     summary,
     features,
+    commands,
   };
 }
 
@@ -252,7 +316,7 @@ async function loadSnapshot(env) {
 }
 
 function publicOverview(snapshot) {
-  const { features, ...overview } = snapshot;
+  const { features, commands, ...overview } = snapshot;
   return overview;
 }
 
@@ -263,6 +327,9 @@ function publicStatusView(snapshot) {
     guilds: { adoptedCount: null },
     usage: { date: snapshot.usage.date, todayInteractions: null, available: false },
     features: snapshot.features.map(({ key, status }) => ({ key, status })),
+    commands: (snapshot.commands || []).map(({ key, status, reason, subcommands }) => ({
+      key, status, reason, subcommands: subcommands.map((sub) => ({ key: sub.key, status: sub.status, reason: sub.reason })),
+    })),
   };
 }
 

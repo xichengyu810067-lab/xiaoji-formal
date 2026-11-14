@@ -6,6 +6,7 @@ const { CUSTOM_ID_PREFIX: MEMORY_CONSENT_PREFIX, handleMemoryConsentButton } = r
 const { CUSTOM_ID_PREFIX: SPARK_RELAY_PREFIX, handleSparkRelayInteraction } = require('../systems/community/sparkRelay/discord');
 const { replyEphemeral } = require('../utils/moderation');
 const { recordPublicInteraction } = require('../services/publicStatusService');
+const { interactionSubcommand, recordCommandOutcome } = require('../platform/commandHealth');
 const logger = require('../utils/logger');
 const { getClientExtensionHost } = require('../extensions/extensionHost');
 const { getBoardRuntime } = require('../systems/games/board/core/boardRuntimeRegistry');
@@ -168,11 +169,15 @@ module.exports = {
       return;
     }
 
+    // Whether the run finished or threw, per command and subcommand, for the public status page.
+    const subcommand = interactionSubcommand(interaction);
     try {
       logger.info(`[COMMAND_REPLY] executing /${interaction.commandName}`);
       await extensionHost.runCommand(command, 'execute', interaction);
+      recordCommandOutcome(interaction.commandName, subcommand, true);
       await recordPublicInteraction();
     } catch (error) {
+      recordCommandOutcome(interaction.commandName, subcommand, false);
       logger.error(`/${interaction.commandName} failed`, error);
       await replyEphemeral(interaction, '指令執行失敗，請稍後再試。');
     }

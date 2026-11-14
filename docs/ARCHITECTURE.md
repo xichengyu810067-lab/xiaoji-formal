@@ -539,8 +539,9 @@ node scripts/check-boundaries.js --rule R6    # 只跑一條規則（可重複�
 6. 邏輯放進對應的系統，指令檔只做「讀參數、檢查權限、呼叫、回覆」（R1）。
 7. 回覆如果會把多筆儲存的資料串成一則，用 `fitListText`（第 2.5 節），並在 `test/support/longListFixtures.js` 的 `SITES` 補一筆、在 `test/fixtures/longListReplies.golden.json` 補它排得下時的標準回覆，`test/longListReplies.test.js` 才會檢查它。
 8. 全指令掃描測試 `test/allSlashCommandsSweep.test.js` 會自動涵蓋新指令（見第 9.1 節）：它列出的路徑必須剛好等於指令目錄，並用擁有者、一般成員與私訊各跑一遍。新指令離線時跑不起來，要在那個檔案的 `EXCLUDED_PATHS` 登記並寫理由；會連網的指令列在 `NETWORK_COMMANDS`；結果和指令目錄的權限不同的執行，列在 `RUN_EXCEPTIONS` 並寫理由；要特定選項值才走得到的路徑，補 `PATH_OPTION_OVERRIDES`。
-9. 新增測試檔並登記匯出清單。
-10. 驗證：`npm run check`，以及 `node --test test/commandCatalog.test.js test/commandDocs.test.js test/allSlashCommandsSweep.test.js` 和你自己的測試。要讓 Discord 看到新指令，還需要用 `npm run deploy` 部署（步驟見 docs/OPERATIONS.md 的「部署與驗證」）。
+9. 官網狀態頁會列出新指令：在 `src/platform/publicCommandStatus.js` 的 `COMMAND_DEPENDENCIES` 補一筆（它依賴的功能、外部服務或資料庫，沒有就寫 `{}`），再執行 `node scripts/build-status-worker-commands.js` 更新狀態 Worker 的指令清單（`npm run site:render` 也要跑，見步驟 3）；`test/publicCommandStatus.test.js` 會檢查兩者。Worker 要重新部署才會收下新指令的狀態，在那之前它只丟掉那一筆。
+10. 新增測試檔並登記匯出清單。
+11. 驗證：`npm run check`，以及 `node --test test/commandCatalog.test.js test/commandDocs.test.js test/allSlashCommandsSweep.test.js` 和你自己的測試。要讓 Discord 看到新指令，還需要用 `npm run deploy` 部署（步驟見 docs/OPERATIONS.md 的「部署與驗證」）。
 
 文件與目錄的同步：`docs/USER_GUIDE.md`、官網文字與 AI 對話的公開指令清單，都只能提到目錄裡存在的指令；`test/commandDocs.test.js` 與 `test/aiPublicCommandList.test.js` 會檢查。
 

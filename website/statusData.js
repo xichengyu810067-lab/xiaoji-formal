@@ -44,6 +44,76 @@
     { key: 'status_website', name: '即時狀態網站', category: '網站服務' },
   ].map((feature) => Object.freeze(feature)));
 
+  const STATUS_LABELS = Object.freeze({ normal: '正常', maintenance: '維護中', broken: '異常', unknown: '未知' });
+  const ITEM_STATUSES = new Set(['normal', 'maintenance', 'broken']);
+
+  // Why a command is not normal, in words. The worker only passes these words on; any other is shown as no reason.
+  const REASON_LABELS = Object.freeze({
+    offline: { maintenance: '小吉離線中' },
+    not_loaded: { broken: '指令沒有載入' },
+    errors: { broken: '最近連續執行失敗' },
+    feature: { broken: '所屬功能異常', maintenance: '所屬功能維護中' },
+    service: { broken: '依賴的外部服務異常', maintenance: '外部服務尚未設定' },
+    database: { maintenance: '資料庫暫時無法讀取' },
+    stale: { maintenance: '狀態資料過期，等待更新' },
+  });
+
+  function describeReason(status, reason) {
+    if (status === 'normal' || typeof reason !== 'string' || !Object.hasOwn(REASON_LABELS, reason)) return '';
+    return REASON_LABELS[reason][status] || '';
+  }
+
+  function readEntry(entry) {
+    const status = ITEM_STATUSES.has(entry?.status) ? entry.status : 'unknown';
+    return { status, reason: describeReason(status, entry?.reason) };
+  }
+
+  // The live statuses of a public status payload by key: features, and commands with their subcommands. A command the
+  // payload does not list (a bot of the release before command statuses) is simply missing, and so unknown.
+  function indexStatusPayload(payload) {
+    const features = new Map();
+    const commands = new Map();
+    for (const feature of Array.isArray(payload?.features) ? payload.features : []) {
+      if (typeof feature?.key === 'string') features.set(feature.key, readEntry(feature));
+    }
+    for (const command of Array.isArray(payload?.commands) ? payload.commands : []) {
+      if (typeof command?.key !== 'string') continue;
+      const subcommands = new Map();
+      for (const sub of Array.isArray(command.subcommands) ? command.subcommands : []) {
+        if (typeof sub?.key === 'string') subcommands.set(sub.key, readEntry(sub));
+      }
+      commands.set(command.key, { ...readEntry(command), subcommands });
+    }
+    return { features, commands, reportsCommands: Array.isArray(payload?.commands) && payload.commands.length > 0 };
+  }
+
+  // Whether one row stays visible: its search text has the query, and with issuesOnly it is under maintenance or broken.
+  function matchesStatusFilter({ search = '', status = 'unknown' }, { query = '', issuesOnly = false } = {}) {
+    const needle = String(query).trim().toLowerCase();
+    if (needle && !String(search).toLowerCase().includes(needle)) return false;
+    return !issuesOnly || status === 'maintenance' || status === 'broken';
+  }
+
+  // The last release's offline health check of one command or subcommand (website/statusHealthCheck.js), in words,
+  // for the status page to show only when it has no live command statuses at all. '' when it was not checked.
+  // The check ran the release's code in a fake Discord: it tells whether the code worked, not whether the bot is up.
+  function describeHealthCheck(healthCheck, command, subcommand = null) {
+    const entry = healthCheck?.commands && Object.hasOwn(healthCheck.commands, command) ? healthCheck.commands[command] : null;
+    if (!entry) return '';
+    const subStatuses = Object.values(entry.subcommands || {});
+    let status;
+    if (subcommand) status = Object.hasOwn(entry.subcommands || {}, subcommand) ? entry.subcommands[subcommand] : null;
+    else if (subStatuses.includes('fail') || entry.status === 'fail') status = 'fail';
+    else if (subStatuses.length || entry.status === 'pass') status = 'pass';
+    if (status !== 'pass' && status !== 'fail') return '';
+    const time = Date.parse(healthCheck.checkedAt);
+    const date = Number.isFinite(time)
+      ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit' }).format(time)
+      : '日期不明';
+    const version = typeof healthCheck.version === 'string' ? `v${healthCheck.version}，` : '';
+    return `上次版本健檢（${version}${date}）：${status === 'pass' ? '通過' : '未通過'}`;
+  }
+
   function createStatusLoader({
     fetchImpl,
     urlProvider,
@@ -90,5 +160,13 @@
     return { refresh };
   }
 
-  return { PUBLIC_FEATURE_CATALOG, createStatusLoader };
+  return {
+    PUBLIC_FEATURE_CATALOG,
+    STATUS_LABELS,
+    createStatusLoader,
+    describeHealthCheck,
+    describeReason,
+    indexStatusPayload,
+    matchesStatusFilter,
+  };
 });
