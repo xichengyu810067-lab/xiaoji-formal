@@ -35,6 +35,8 @@
     ['fortune', '抽一則小吉籤', 'general', 'public'],
     ['roll', '擲骰子', 'general', 'public'],
     ['weather', '查詢天氣', 'general', 'public'],
+    ['stock', '查詢台股、美股、ETF 與加密貨幣報價', 'general', 'public', ['quote', 'chart', 'watchlist', 'watch-add', 'watch-remove']],
+    ['food', '食譜查詢、附近美食推薦；伺服器美食地圖測試中，限授權伺服器', 'general', 'public', ['recipe', 'nearby', 'add', 'list', 'remove']],
     ['poll', '建立按鈕投票', 'general', 'public'],
     ['remind', '管理提醒', 'general', 'public', ['add', 'list', 'delete']],
     ['calendar', '管理自己的跨伺服器個人行事曆', 'general', 'public', ['add', 'list', 'delete']],
@@ -44,7 +46,7 @@
     ['status', '顯示小吉目前狀態', 'general', 'public'],
     ['chat-style', '查看或變更小吉與你的對話風格', 'general', 'public', ['current', 'set']],
     ['romance', '管理小吉與你的跨伺服器文字戀愛模式', 'general', 'public', ['start', 'stop', 'status']],
-    ['memory', '查看或管理小吉記住的你的喜好', 'general', 'public', ['view', 'export', 'add', 'forget', 'off', 'on', 'delete', 'share']],
+    ['memory', '查看或管理小吉記住的你的喜好與聊天紀錄', 'general', 'public', ['view', 'export', 'add', 'forget', 'off', 'on', 'delete', 'share']],
     ['student', '小吉化身好奇寶寶向你提問', 'general', 'public'],
     ['about', '顯示小吉的公開資訊', 'general', 'public'],
     ['help', '列出小吉可用指令', 'general', 'public'],
@@ -76,6 +78,12 @@
     ['luxury', '奢侈品商店街', 'economy', 'public', ['list', 'buy', 'inventory', 'history']],
     ['pawn', '奢侈品當鋪', 'economy', 'public', ['quote', 'sell', 'active', 'redeem', 'history']],
     ['board', '小吉的統一遊戲入口', 'economy', 'public', ['start', 'join', 'leave', 'status', 'stop']],
+    ['farm', '小吉農場：播種、澆水、收成與出售作物', 'economy', 'public', [
+      'view', 'shop', 'plant', 'water', 'harvest', 'sell', 'fertilize', 'expand', 'reclaim',
+    ]],
+    ['kitchen', '小吉廚房：用農場作物做料理、出售、品嚐或送人', 'economy', 'public', [
+      'recipes', 'cook', 'pantry', 'eat', 'gift', 'sell', 'collection',
+    ]],
     ['economy', '吉幣經濟總覽與紀錄查詢', 'economy', 'admin', ['overview', 'user', 'audit']],
     ['coin-admin', '管理吉幣系統（全域錢包變更限小吉擁有者）', 'economy', 'admin', [
       'add', 'remove', 'set', 'history', 'reset-user', 'enable', 'disable',
@@ -86,6 +94,7 @@
     ['number-chain', '管理小吉安全數字接龍', 'community', 'admin', ['stop', 'status']],
     ['daily-riddle', '管理小吉每日猜謎', 'community', 'admin', ['enable', 'disable', 'status']],
     ['daily-discussion', '管理小吉每日議題討論', 'community', 'admin', ['enable', 'disable', 'status', 'run-now']],
+    ['spark-relay', '星火接續：隨機分組，每天輪一人完成小任務', 'community', 'public', ['start', 'tasks', 'submit', 'status']],
   ];
 
   // Subcommands that need more than their command does, written as command -> audience -> names.

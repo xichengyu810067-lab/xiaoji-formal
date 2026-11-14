@@ -31,6 +31,7 @@ const GAME_LABELS = Object.freeze({
   go: '圍棋',
   checkers: '六角星跳棋',
   xiangqi: '象棋',
+  werewolf: '狼人殺',
 });
 
 function escapeXml(value) {

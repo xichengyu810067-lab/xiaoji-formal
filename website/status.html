@@ -4,9 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="小吉 Discord 機器人即時功能狀態：正常、維護中與損壞狀況一目了然。" />
-    <meta name="theme-color" content="#100d1b" />
+    <meta name="theme-color" content="#241923" />
     <meta name="xiaoji-api-base" content="https://xiaoji-public-status.xichengyu810067.workers.dev" />
     <title>即時狀態｜小吉 Discord Bot</title>
+    <script src="./theme.js"></script>
     <link rel="icon" href="./assets/xiaoji-hero.png" type="image/png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,27 +24,39 @@
     <script src="./status.js" defer></script>
     <script src="./policyPublication.js" defer></script>
     <script src="./siteSupport.js" defer></script>
+    <script src="./siteChrome.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">跳到主要內容</a>
 
-    <header class="site-header">
+    <header class="site-header" data-header>
       <a class="brand" href="./index.html" aria-label="返回小吉首頁">
         <span class="brand-mark" aria-hidden="true">吉</span>
         <span><strong>小吉</strong><small>即時狀態</small></span>
       </a>
-      <nav class="site-nav status-nav" aria-label="狀態頁導覽">
+
+      <nav id="site-nav" class="site-nav" aria-label="主要導覽" data-nav>
         <a href="./index.html">回到官網</a>
-        <a class="nav-status" href="#main" aria-current="page"><span class="status-dot" data-nav-status-dot></span>狀態頁</a>
+        <a href="./guide.html">功能與指令</a>
+        <a class="nav-status" href="./status.html" aria-current="page"><span class="status-dot" data-nav-status-dot></span>狀態頁</a>
+        <a href="https://github.com/xichengyu810067-lab/xiaoji-formal/releases" target="_blank" rel="noopener noreferrer">公開版本資訊</a>
       </nav>
+
+      <div class="header-actions">
+        <button class="theme-toggle" type="button" data-theme-toggle hidden><span aria-hidden="true" data-theme-icon>◐</span></button>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-nav-toggle>
+          <span class="sr-only">開啟選單</span>
+          <span></span><span></span><span></span>
+        </button>
+      </div>
     </header>
 
     <main id="main" class="status-main section-shell">
-      <section class="status-hero">
+      <section id="status-top" class="status-hero" data-scene="mint" data-companion="小吉會如實回報狀態，不會亂猜喔">
         <div class="status-hero-copy">
           <p class="kicker">REAL-TIME STATUS</p>
           <h1>小吉現在的<br /><span>每一項狀態</span></h1>
-          <p>這裡只顯示去識別化的整體服務資訊。下方公開功能清冊不依賴即時資料；展開系統即可查看用途、使用方式與限制。</p>
+          <p>這裡只顯示去識別化的整體服務資訊。每項功能的用途、使用方式與限制，請到「功能與指令」頁搜尋。</p>
         </div>
 
         <div class="overall-card" data-overall-card aria-live="polite">
@@ -57,7 +70,7 @@
         </div>
       </section>
 
-      <section class="status-summary" aria-labelledby="summary-heading">
+      <section id="status-summary" class="status-summary" aria-labelledby="summary-heading" data-scene="lavender">
         <div class="summary-heading-row">
           <div>
             <p class="kicker">AT A GLANCE</p>
@@ -74,7 +87,7 @@
         </div>
       </section>
 
-      <section class="status-unavailable" data-status-unavailable hidden aria-live="assertive">
+      <section id="status-unavailable" class="status-unavailable" data-status-unavailable hidden aria-live="assertive">
         <span aria-hidden="true">☁</span>
         <div>
           <h2>狀態資料暫時無法取得</h2>
@@ -82,15 +95,13 @@
         </div>
       </section>
 
-      <section class="feature-status-section" aria-labelledby="features-heading">
-        <div class="section-heading status-section-heading">
-          <div>
-            <p class="kicker">ALL SERVICES</p>
-            <h2 id="features-heading">公開功能清冊</h2>
-          </div>
-          <p data-refresh-note>每列代表一個系統，預設收合。展開後可查看子功能的用途、實際使用方式與權限限制；即時更新不會改變已展開的項目。</p>
+      <section id="status-guide" class="status-guide-link" aria-labelledby="features-heading" data-scene="peach" data-companion="想知道功能怎麼用？到功能與指令頁找找～">
+        <div>
+          <p class="kicker">ALL SERVICES</p>
+          <h2 id="features-heading">公開功能清冊</h2>
+          <p>所有公開功能與指令都整理在「功能與指令」頁，可以依關鍵字、分類與可用對象搜尋；這份清冊不依賴即時資料。</p>
         </div>
-        <div class="status-groups" data-status-groups aria-live="polite" aria-busy="true"></div>
+        <a class="button button-primary" href="./guide.html">查看功能與指令 <span aria-hidden="true">→</span></a>
       </section>
 
       <aside class="status-principle">

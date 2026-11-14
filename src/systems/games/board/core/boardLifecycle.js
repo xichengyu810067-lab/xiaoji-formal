@@ -43,6 +43,15 @@ function createBoardLifecycle({
     try {
       const result = await service.status({ guildId: entry.guildId, channelId: entry.channelId, actorId: entry.hostId });
       track(result.session);
+      // Timed phases (werewolf) normally end on their own timer; this tick is the fallback after a restart or a
+      // timer that did not fire.
+      if (result.session.status === 'active' && typeof service.advanceDue === 'function') {
+        const advanced = await service.advanceDue({ sessionId: result.session.id });
+        if (advanced) {
+          track(advanced.session);
+          return advanced;
+        }
+      }
       return result;
     } catch (error) {
       if (error?.code !== 'SESSION_NOT_FOUND') throw error;

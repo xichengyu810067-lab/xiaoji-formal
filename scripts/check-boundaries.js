@@ -162,6 +162,10 @@ const SYSTEMS = Object.freeze({
     directories: ['src/systems/safety'],
     files: [],
   },
+  farm: {
+    directories: ['src/systems/farm'],
+    files: [],
+  },
   rewardLedger: {
     directories: [],
     files: ['src/services/featurePlatformService.js'],
@@ -169,7 +173,7 @@ const SYSTEMS = Object.freeze({
 });
 
 // R4: what the economy must not load.
-const ECONOMY_FORBIDDEN_SYSTEMS = new Set(['casino', 'work', 'games', 'community', 'conversation']);
+const ECONOMY_FORBIDDEN_SYSTEMS = new Set(['casino', 'work', 'games', 'community', 'conversation', 'farm']);
 
 function isUnder(file, directory) {
   return file.startsWith(`${directory}/`);
@@ -258,8 +262,20 @@ const TABLE_FAMILIES = Object.freeze([
     name: 'conversation',
     tables: new RegExp('^(?:user_chat_preferences|user_romance_preferences|access_audit|ai_events|'
       + 'archive_identity|deletion_receipts|import_quarantine|import_receipts|private_summaries|'
-      + 'public_messages|xiaoji_memory_consent|xiaoji_memory_preferences)$', 'u'),
+      + 'public_messages|xiaoji_memory_consent|xiaoji_memory_preferences|xiaoji_memory_messages|'
+      + 'xiaoji_memory_usage|xiaoji_memory_prompts|xiaoji_stock_watchlist|'
+      + 'xiaoji_food_spots)$', 'u'),
     owners: systemPaths('conversation'),
+  },
+  {
+    name: 'farm',
+    tables: /^farm_.+$/u,
+    owners: systemPaths('farm'),
+  },
+  {
+    name: 'spark relay',
+    tables: /^xiaoji_spark_relay_.+$/u,
+    owners: ['src/systems/community/sparkRelay/store.js'],
   },
   {
     name: 'safety ledger',

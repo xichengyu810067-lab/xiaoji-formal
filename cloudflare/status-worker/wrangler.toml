@@ -20,4 +20,6 @@ STATUS_HMAC_CURRENT_KEY_ID = "status_20260904_cf"
 # Wrangler validates this deployment-time secret binding. The previous key is
 # optional during a rotation and is intentionally not listed as required.
 [secrets]
-required = ["STATUS_HMAC_CURRENT_SECRET"]
+# ANTHROPIC_API_KEY is the Claude key of the website's AI support (src/support.mjs); without it the support
+# answers 503 and the website keeps its own self-help answers.
+required = ["STATUS_HMAC_CURRENT_SECRET", "ANTHROPIC_API_KEY"]

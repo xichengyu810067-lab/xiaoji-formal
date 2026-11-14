@@ -1944,6 +1944,7 @@ const FRIENDLY_REFUSALS = Object.freeze([
 // only on a run whose command may use the network and did; like FRIENDLY_REFUSALS, only the ones the sweep meets.
 const OFFLINE_ANSWERS = Object.freeze([
   '臺灣天氣資料暫時無法查詢，請稍後再試。',
+  '報價資料暫時無法取得，請稍後再試。',
 ]);
 // Answers that say the stored data or the system is in a broken state, whatever words they use.
 const INTEGRITY_ANSWERS = Object.freeze([
@@ -1957,7 +1958,7 @@ const REFUSALS = Object.freeze([
   ['permission', /權限才能使用|需要 (?:Administrator|Manage Server|管理)|管理員才能/u],
   ['owner', /你沒有權限使用這個指令|只有小吉擁有者|只有機器人擁有者|擁有者專用/u],
   ['guild-only', /只能在伺服器(?:文字頻道)?內(?:使用|設定|管理)/u],
-  ['not-yours', /只有(?:房主|目前棋局的參與者|這局的建立者|開局的玩家)可以/u],
+  ['not-yours', /只有(?:房主|目前棋局的參與者|這局的建立者|開局的玩家|這個農場的主人)可以/u],
 ]);
 
 // What a refused run (denied) may still change, with the reason. Nothing else: no other table, no file, no message,

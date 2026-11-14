@@ -2,6 +2,7 @@ const packageJson = require('../../package.json');
 const { PUBLIC_FEATURE_CATALOG } = require('../../website/statusData');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
 const logger = require('../utils/logger');
+const { serviceStatus } = require('../platform/serviceHealth');
 const {
   listFeatureHealth,
   listFeatureUsageForDate,
@@ -21,12 +22,14 @@ function publicFeature(key, attributes = {}) {
 }
 
 const PUBLIC_FEATURES = Object.freeze([
-  publicFeature('core_chat', { type: 'ready', critical: true }),
+  // services: the outside services a feature needs (serviceHealth.js). serviceBrokenOnly: the feature still works in some
+  // way without the service (chat falls back to another provider), so only a failing service lowers it, not a missing one.
+  publicFeature('core_chat', { type: 'ready', critical: true, services: ['claude'], serviceBrokenOnly: true }),
   publicFeature('welcome', { commands: ['set-welcome'] }),
   publicFeature('reminder', { commands: ['remind'] }),
   publicFeature('calendar', { commands: ['calendar'] }),
   publicFeature('poll', { commands: ['poll'] }),
-  publicFeature('weather', { commands: ['weather'] }),
+  publicFeature('weather', { commands: ['weather'], services: ['weather'] }),
   publicFeature('economy', { commands: ['coins', 'daily', 'economy'], critical: true, requiresDatabase: true }),
   publicFeature('word_chain', { commands: ['board', 'word-chain'], healthKey: 'word_chain' }),
   publicFeature('number_chain', { commands: ['board', 'number-chain'], healthKey: 'number_chain' }),
@@ -34,6 +37,10 @@ const PUBLIC_FEATURES = Object.freeze([
   publicFeature('daily_discussion', { commands: ['daily-discussion'], healthKey: 'daily_discussion' }),
   publicFeature('chat_style', { commands: ['chat-style'], healthKey: 'conversation_style' }),
   publicFeature('romance', { commands: ['romance'], healthKey: 'romance' }),
+  publicFeature('student', { commands: ['student'], services: ['claude'] }),
+  publicFeature('memory', { commands: ['memory'], services: ['memory_store'] }),
+  publicFeature('image_reading', { type: 'ready', services: ['claude'] }),
+  publicFeature('web_search', { type: 'ready', services: ['claude'] }),
   publicFeature('tetris', { commands: ['board'], healthKey: 'tetris', requiresHealth: true }),
   publicFeature('number_match', { commands: ['board'], healthKey: 'number_match', requiresHealth: true }),
   publicFeature('sudoku', { commands: ['board'], healthKey: 'sudoku', requiresHealth: true }),
@@ -95,6 +102,15 @@ function protectedEffectStatus(client, key) {
   }
 }
 
+// broken when a service the feature needs keeps failing; maintenance when one is not configured (unless the feature
+// works without it); null otherwise.
+function serviceFeatureStatus(feature, nowMs) {
+  const statuses = (feature.services || []).map((service) => serviceStatus(service, nowMs));
+  if (statuses.includes('broken')) return 'broken';
+  if (!feature.serviceBrokenOnly && statuses.includes('maintenance')) return 'maintenance';
+  return null;
+}
+
 function buildFeatureStatuses(
   client,
   healthRows,
@@ -115,6 +131,8 @@ function buildFeatureStatuses(
     }
 
     if (status === 'normal') status = protectedEffectStatus(client, feature.key) || status;
+    // What really happened when the outside services were called (serviceHealth.js).
+    if (status === 'normal') status = serviceFeatureStatus(feature, now.getTime()) || status;
 
     if (!healthAvailable && feature.healthKey && status === 'normal') {
       status = 'maintenance';
@@ -206,6 +224,46 @@ async function buildPublicStatusSnapshot(client, { now = new Date(), healthReade
   };
 }
 
+// Watches the public feature statuses and reports a change (a feature that became broken or under maintenance, or
+// recovered) to onChange([{ key, name, from, to }]). The first check only records the starting point, so a restart
+// does not report every feature. A new status must be seen on two checks in a row before it is reported, so a single
+// slow call does not send a notice and its recovery a minute later.
+function createFeatureStatusWatcher({ client, onChange, build = buildPublicStatusSnapshot } = {}) {
+  let reported = null;
+  const pending = new Map();
+  return async function check(now = new Date()) {
+    const snapshot = await build(client, { now });
+    const current = new Map(snapshot.features.map((feature) => [feature.key, feature]));
+    if (!reported) {
+      reported = new Map([...current].map(([key, feature]) => [key, feature.status]));
+      return [];
+    }
+    const changes = [];
+    for (const [key, feature] of current) {
+      const before = reported.get(key);
+      if (feature.status === before) {
+        pending.delete(key);
+        continue;
+      }
+      if (pending.get(key) !== feature.status) {
+        pending.set(key, feature.status);
+        continue;
+      }
+      pending.delete(key);
+      reported.set(key, feature.status);
+      changes.push({ key, name: feature.name, from: before ?? null, to: feature.status });
+    }
+    if (changes.length && typeof onChange === 'function') {
+      try {
+        await onChange(changes);
+      } catch (_error) {
+        logger.warn('[STATUS_WATCH] A feature status change could not be reported.');
+      }
+    }
+    return changes;
+  };
+}
+
 async function buildPublicOverviewSnapshot(client, options = {}) {
   const snapshot = await buildPublicStatusSnapshot(client, options);
   return {
@@ -230,6 +288,7 @@ async function recordPublicInteraction(now = new Date(), { recorder = recordFeat
 }
 
 module.exports = {
+  createFeatureStatusWatcher,
   PUBLIC_FEATURES,
   PUBLIC_STATUS_SCHEMA_VERSION,
   PUBLIC_USAGE_FEATURE_KEY,

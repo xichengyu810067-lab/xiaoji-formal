@@ -3,6 +3,7 @@ const {
   generateChatReply,
   getDeployedModelIds,
   getProtectedPromptTexts,
+  isDeveloperUser,
   isGuildQuotaExhaustedError,
   isVisionAvailable,
   isLocalProviderGuardError,
@@ -13,6 +14,7 @@ const { providerCallGuard } = require('./providerGuard');
 const { resolveProviderOutput } = require('./jevOutputGate');
 const { AI_SPAM_BLOCK_REASONS, aiSpamGuard, isBareCall } = require('./aiSpamGuard');
 const { refusalNoticeCap } = require('./refusalNoticeCap');
+const { startReplyWaitIndicator } = require('./replyWaitIndicator');
 const {
   DEFAULT_CHAT_STYLE,
   renderChatStyleFallback,
@@ -39,6 +41,8 @@ const { resolveMemberFacts } = require('./memberFacts');
 const { loadMemoryContext, rememberPreferences } = require('./preferenceMemory');
 const { offerChatPoll, preparePollProposal } = require('./chatPoll');
 const { maybeOfferMemoryConsent } = require('./memoryConsent');
+const { loadChannelMemory, recordXiaojiReply } = require('./channelMemory');
+const { reportBlockedReply } = require('./blockedReplyReports');
 const {
   EXTRA_IMAGES_NOTE,
   NO_VISION_NOTE,
@@ -53,6 +57,7 @@ const {
 const {
   INTERNAL_REPLY,
   decideAssistantOutput,
+  describeOutputRefusal,
   decideLocalBusyOutput,
   decideRateLimitOutput,
   decideRequestIngress,
@@ -261,7 +266,7 @@ function finalizeGeneratedConversationalReply(
   userId = '',
   chatStyle = DEFAULT_CHAT_STYLE,
   romanceEnabled = false,
-  { waiveSoft = null } = {}
+  { waiveSoft = null, developerAddressee = false } = {}
 ) {
   if (content === INTERNAL_REPLY) return INTERNAL_REPLY;
   const romanticReply = renderRomanceFallback(content, {
@@ -273,6 +278,7 @@ function finalizeGeneratedConversationalReply(
     displayNames: [displayName],
     templatePrefix: getRomanceReplyPrefix(chatStyle, romanceEnabled, displayName),
     waiveSoft,
+    developerAddressee,
   });
 }
 
@@ -282,7 +288,10 @@ function evaluateProviderReply({
   ingressDecision, reply, displayName, userId, chatStyle, romanceEnabled, waiveSoft = null,
   protectedModelIds = getDeployedModelIds(),
 }) {
-  const finalReply = finalizeGeneratedConversationalReply(reply, displayName, userId, chatStyle, romanceEnabled, { waiveSoft });
+  // 小吉 may call its developer (the configured owner account) its developer.
+  const developerAddressee = isDeveloperUser(userId);
+  const finalReply = finalizeGeneratedConversationalReply(reply, displayName, userId, chatStyle, romanceEnabled,
+    { waiveSoft, developerAddressee });
   const decision = decideAssistantOutput({
     ingressDecision,
     rawCandidate: reply,
@@ -297,6 +306,7 @@ function evaluateProviderReply({
     displayNames: [displayName],
     templatePrefix: getRomanceReplyPrefix(chatStyle, romanceEnabled, displayName),
     waiveSoft,
+    developerAddressee,
   });
   return { finalReply, decision };
 }
@@ -334,10 +344,32 @@ function splitReply(content, maxLength = 1800) {
   return chunks;
 }
 
-async function replyInChunks(message, content, { onChunkDelivered } = {}) {
+// placeholder: an optional function resolving to the "小吉思考中…" message (replyWaitIndicator.js) or null. When
+// there is one, the first part of the reply edits it instead of sending a new message; a failed edit (other than
+// the output rate limit) falls back to a new reply.
+async function editPlaceholderWithFirstChunk(placeholder, firstChunk) {
+  if (typeof placeholder !== 'function') return 'none';
+  const target = await placeholder();
+  if (!target) return 'none';
+  try {
+    await target.edit({
+      content: firstChunk,
+      allowedMentions: { parse: [], users: [], roles: [], repliedUser: false },
+    });
+    return 'edited';
+  } catch (error) {
+    if (isEgressRateLimitError(error)) return 'rate_limited';
+    logger.warn(`[CHAT_REPLY_FALLBACK] Placeholder edit failed (${String(error?.code || 'unknown').slice(0, 40)}); sending a new reply.`);
+    return 'none';
+  }
+}
+
+async function replyInChunks(message, content, { onChunkDelivered, placeholder } = {}) {
   const [firstChunk, ...restChunks] = splitReply(content);
 
-  try {
+  const placeholderResult = await editPlaceholderWithFirstChunk(placeholder, firstChunk);
+  if (placeholderResult === 'rate_limited') return false;
+  if (placeholderResult !== 'edited') try {
     await message.reply({
       content: firstChunk,
       allowedMentions: { parse: [], users: [], roles: [], repliedUser: false },
@@ -442,7 +474,11 @@ function hasStickerOrFile(message) {
 // archive, history, statistics or public memory, and no safety event. The member gets the gate's fixed
 // notice when it allows one, sent through the same egress guard and output rate limit as every reply; a
 // notice that cannot be sent is only logged, and the request stays out of persistence either way.
-async function replyToBlockedRequest(message, verdict) {
+async function replyToBlockedRequest(message, verdict, userText = '') {
+  // The developer's report of a request the gate held back (a bare call answered with "我在" is not one).
+  if (verdict.reason && verdict.reason !== 'presence') {
+    reportBlockedReply(message, { stage: 'spam', rule: verdict.reason, userText });
+  }
   // Only a flood of a channel, or a member who has just been put on cooldown, is an attack worth telling the Owner
   // of; a meaningless message, one repeat or a bare call is routine and is not.
   if (verdict.reason === AI_SPAM_BLOCK_REASONS.CHANNEL_FLOOD || verdict.cooldownStarted === true) {
@@ -478,8 +514,10 @@ function checkedModelText(text, { userId, displayName, ingressDecision, chatStyl
 
 // What follows an allowed model reply: the poll preview it proposed, the preferences it asked to keep, and the
 // member's one-time preference-memory notice. None of them may fail the reply that was already sent.
-async function finishAllowedReply(message, { toolResult, memory, displayName, ingressDecision, chatStyle, romanceEnabled }) {
+async function finishAllowedReply(message, { toolResult, memory, displayName, ingressDecision, chatStyle, romanceEnabled, replyText }) {
   const userId = message.author.id;
+  // 小吉's reply joins the channel memory, so later replies in this channel know what it said.
+  if (memory?.enabled && replyText) await recordXiaojiReply({ message, text: replyText });
   if (toolResult?.pollProposal) {
     const poll = preparePollProposal(toolResult.pollProposal, {
       checkText: (text) => checkedModelText(text, { userId, displayName, ingressDecision, chatStyle, romanceEnabled }),
@@ -498,13 +536,13 @@ async function finishAllowedReply(message, { toolResult, memory, displayName, in
   }
 }
 
-async function sendUnpersistedDecision(message, decision) {
+async function sendUnpersistedDecision(message, decision, replyOptions = {}) {
   const payload = getConversationDecisionPayload(decision);
   if (payload.archiveAllowed || payload.historyAllowed || payload.privateMemoryAllowed) {
     throw new TypeError('Unpersisted output must not carry persistence authority.');
   }
   verifyConversationDecisionContext(decision, getMessageDecisionContext(message), 'send');
-  await replyInChunks(message, payload.text);
+  await replyInChunks(message, payload.text, replyOptions);
   return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
 }
 
@@ -517,6 +555,9 @@ async function handleMentionMessage(message, {
   // Whether the configured provider can read images, and the fetch used to download them (imageInput.js).
   visionAvailable = isVisionAvailable,
   imageFetch = undefined,
+  // "小吉正在輸入…" and the slow-answer notice while the model is asked (replyWaitIndicator.js).
+  startReplyWaitIndicatorImpl = startReplyWaitIndicator,
+  loadChannelMemoryImpl = loadChannelMemory,
 } = {}) {
   const activeWeatherPort = requireWeatherPort(weatherPort);
   const activeStatusPort = requireStatusPort(statusPort);
@@ -569,7 +610,7 @@ async function handleMentionMessage(message, {
       userId: message.author.id,
     });
     if (presence.notice && presence.reason === 'presence') startConversation(message);
-    return replyToBlockedRequest(message, presence);
+    return replyToBlockedRequest(message, presence, userText);
   }
 
   // A reply to 小吉 with only punctuation or emoji (no sticker or file) is a reaction, not a request: it is
@@ -598,7 +639,7 @@ async function handleMentionMessage(message, {
     hasAttachment: attachments.images.length > 0 || (attachments.hasAttachments && isBareCall(userText)),
     topic: attachmentTopic(attachments),
   });
-  if (!spamVerdict.allowed) return replyToBlockedRequest(message, spamVerdict);
+  if (!spamVerdict.allowed) return replyToBlockedRequest(message, spamVerdict, userText);
   // A request that ends without an answer is taken back out of the repeat history, so sending it again is
   // not "said before" (it still counted toward the rate limits).
   const unanswered = () => aiSpamGuard.forgetRepeat(spamVerdict.ticket);
@@ -613,6 +654,7 @@ async function handleMentionMessage(message, {
   }
 
   if (!inputValidation.ok) {
+    reportBlockedReply(message, { stage: 'input', rule: inputValidation.reason || 'input_validation', userText });
     if (inputValidation.message && admitPreflightReply(message, userText)) {
       await replyInChunks(message, inputValidation.message);
     } else {
@@ -646,6 +688,7 @@ async function handleMentionMessage(message, {
       actorId: message.author?.id, guildId: message.guildId, channelId: message.channelId, messageId: message.id,
     });
     reportMessageSecurityAlert(looksLikeInjectionAttempt(userText) ? 'prompt-injection' : 'dev-info', message);
+    reportBlockedReply(message, { stage: 'ingress', rule: ingressDecision.reason || 'refusal', userText });
     // A suppressed refusal still keeps the request out of public persistence.
     if (!admitPreflightReply(message, userText)) {
       unanswered();
@@ -657,6 +700,7 @@ async function handleMentionMessage(message, {
 
   if (!await preflightArchive(message.client)) {
     unanswered();
+    reportBlockedReply(message, { stage: 'archive', rule: 'archive_unavailable', userText });
     if (admitPreflightReply(message, userText)) {
       await replyInChunks(message, ARCHIVE_UNAVAILABLE_REPLY);
     }
@@ -667,6 +711,7 @@ async function handleMentionMessage(message, {
 
   if (!cooldown.ok) {
     unanswered();
+    reportBlockedReply(message, { stage: 'cooldown', rule: 'chat_cooldown', userText });
     logger.info(
       `[CHAT_COOLDOWN] guild=${message.guildId || 'dm'} channel=${message.channelId} user=${message.author.id}`
     );
@@ -693,22 +738,30 @@ async function handleMentionMessage(message, {
 
   // Set once a reply reached the channel whole; what follows a reply (finishAllowedReply) waits for it.
   let replyDelivered = false;
+  // The "小吉思考中…" placeholder, started when the model is about to be asked (replyWaitIndicator.js). Every reply
+  // sent after that edits the placeholder into its first part instead of sending a new message.
+  let waitIndicator = null;
+  const replyOptions = (extra = {}) => (waitIndicator
+    ? { ...extra, placeholder: () => waitIndicator.takePlaceholder() }
+    : extra);
   const sendDecision = async (decision) => {
     const payload = getConversationDecisionPayload(decision);
     verifyConversationDecisionContext(decision, getMessageDecisionContext(message), 'send');
     // The reply the model wrote was turned into the fixed refusal because it leaked what it must not say.
     if (payload.kind === 'refusal') reportMessageSecurityAlert('output-guard', message);
-    if (!payload.archiveAllowed) return sendUnpersistedDecision(message, decision);
+    if (!payload.archiveAllowed) return sendUnpersistedDecision(message, decision, replyOptions());
     const saved = await archiveInteraction(message, decision);
     if (!saved) {
       unanswered();
-      await replyInChunks(message, ARCHIVE_UNAVAILABLE_REPLY);
+      await replyInChunks(message, ARCHIVE_UNAVAILABLE_REPLY, replyOptions());
       return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
     }
     let deliveredChunks = 0;
     let delivered;
     try {
-      delivered = await replyInChunks(message, payload.text, { onChunkDelivered: () => { deliveredChunks += 1; } });
+      delivered = await replyInChunks(message, payload.text, replyOptions({
+        onChunkDelivered: () => { deliveredChunks += 1; },
+      }));
     } catch (error) {
       if (deliveredChunks > 0) await markArchivePartialDelivery(message);
       throw error;
@@ -808,131 +861,176 @@ async function handleMentionMessage(message, {
   // The images, read only now that the model is about to be asked; notes say what was left out.
   let images = [];
   const notes = [];
-  if (attachments.images.length) {
-    if (!visionAvailable()) {
-      if (!hasText) {
-        unanswered();
-        await replyInChunks(message, NO_VISION_REPLY);
-        return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
-      }
-      notes.push(NO_VISION_NOTE);
-    } else {
-      images = (await readMessageImages(message, imageFetch ? { fetchImpl: imageFetch } : {})).images;
-      if (!images.length && !hasText) {
-        unanswered();
-        await replyInChunks(message, UNREADABLE_IMAGE_REPLY);
-        return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
-      }
-      if (attachments.extraImages) notes.push(EXTRA_IMAGES_NOTE);
-    }
-  }
-
-  // The member's remembered preferences (off when preference memory is not configured or was stopped).
-  const memory = await loadMemoryContext({ userId: message.author.id, guildId: message.guildId ?? null });
+  let memory;
+  // From here 小吉 has replied "小吉思考中…"; the answer edits that message, a wait over a minute edits it to say
+  // 小吉 is still working, and a request that ends with no reply edits it to say so (replyWaitIndicator.js).
+  waitIndicator = startReplyWaitIndicatorImpl(message);
   try {
-    reply = await generateChatReplyImpl({
-      userText: requestText,
-      images,
-      displayName,
-      userId: message.author.id,
-      channelId: message.channelId,
-      guildId: message.guildId,
-      chatStyle: chatPreference.style,
-      romanceEnabled: romancePreference.enabled,
-      memberFacts: memberResult.facts,
-      ingressDecision,
-      message,
-      rememberedPreferences: memory.preferences,
-      memoryEnabled: memory.enabled,
-    });
-  } catch (error) {
-    if (isProviderRateLimitError(error)) {
-      providerRateLimitError = error;
-    } else if (isLocalProviderGuardError(error)) {
-      localProviderGuardError = error;
-    } else if (isGuildQuotaExhaustedError(error)) {
-      guildQuotaExhausted = true;
-    } else {
-      logger.warn(`[AI_CHAT_FAILED] code=${String(error?.code || 'unknown').slice(0, 80)}`);
-    }
-  }
+    try {
+      if (attachments.images.length) {
+        if (!visionAvailable()) {
+          if (!hasText) {
+            unanswered();
+            waitIndicator.stop();
+            await replyInChunks(message, NO_VISION_REPLY, replyOptions());
+            return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+          }
+          notes.push(NO_VISION_NOTE);
+        } else {
+          images = (await readMessageImages(message, imageFetch ? { fetchImpl: imageFetch } : {})).images;
+          if (!images.length && !hasText) {
+            unanswered();
+            waitIndicator.stop();
+            await replyInChunks(message, UNREADABLE_IMAGE_REPLY, replyOptions());
+            return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+          }
+          if (attachments.extraImages) notes.push(EXTRA_IMAGES_NOTE);
+        }
+      }
 
-  // No answer from the model: the provider's own limit, the guild quota, the provider guard, or a failed call
-  // (a fixed fallback reply follows).
-  if (!reply) unanswered();
-  if (providerRateLimitError) {
-    return sendUnpersistedDecision(message, decideRateLimitOutput(ingressDecision));
-  }
-  // The guild's AI quota is used up and the model was not called: a fixed line, nothing persisted.
-  if (guildQuotaExhausted) {
-    await replyInChunks(message, QUOTA_EXHAUSTED_MESSAGE);
-    return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
-  }
-  if (localProviderGuardError) {
-    if (!localProviderGuardError.shouldNotify) {
-      return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+      // The member's remembered preferences (off when preference memory is not configured or was stopped).
+      memory = await loadMemoryContext({ userId: message.author.id, guildId: message.guildId ?? null });
+      // What was said in this channel, and what this member said before (channelMemory.js); only with memory on.
+      const channelMemory = memory.enabled ? await loadChannelMemoryImpl({ message }) : null;
+      try {
+        reply = await generateChatReplyImpl({
+          userText: requestText,
+          images,
+          displayName,
+          userId: message.author.id,
+          channelId: message.channelId,
+          guildId: message.guildId,
+          chatStyle: chatPreference.style,
+          romanceEnabled: romancePreference.enabled,
+          memberFacts: memberResult.facts,
+          ingressDecision,
+          message,
+          rememberedPreferences: memory.preferences,
+          memoryEnabled: memory.enabled,
+          channelMemory,
+        });
+      } catch (error) {
+        if (isProviderRateLimitError(error)) {
+          providerRateLimitError = error;
+        } else if (isLocalProviderGuardError(error)) {
+          localProviderGuardError = error;
+        } else if (isGuildQuotaExhaustedError(error)) {
+          guildQuotaExhausted = true;
+        } else {
+          logger.warn(`[AI_CHAT_FAILED] code=${String(error?.code || 'unknown').slice(0, 80)}`);
+        }
+      }
+    } finally {
+      waitIndicator.stop();
     }
-    return sendUnpersistedDecision(message, decideLocalBusyOutput(ingressDecision));
-  }
 
-  if (reply) {
-    // A provider with tools answers with { text, pollProposal, preferences }; the others with the text alone.
-    const toolResult = typeof reply === 'object' ? reply : null;
-    const modelText = toolResult ? String(toolResult.text || '') || (toolResult.pollProposal ? '好的！' : '') : reply;
-    // Program notes (images left out, images not read) follow the model's words and are checked with them.
-    const replyText = notes.length ? `${modelText}\n${notes.join('\n')}` : modelText;
-    // The one place the optional second opinion can matter (see jevOutputGate.js). With it off, or for a server
-    // that is not listed, this is the single check it always was.
-    const output = await resolveProviderOutput({
-      evaluate: (waiveSoft) => evaluateProviderReply({
-        ingressDecision,
-        reply: replyText,
-        displayName,
-        userId: message.author.id,
-        chatStyle: chatPreference.style,
-        romanceEnabled: romancePreference.enabled,
-        waiveSoft,
-      }),
-      userText,
-      replyText,
-      displayNames: [displayName],
-      guildId: message.guildId ?? null,
-      runtime: jevRuntime,
-    });
-    const sent = await sendDecision(output.decision);
-    // A poll preview, new preferences and the one-time memory notice follow only a reply that passed the checks and
-    // reached the channel.
-    if (replyDelivered && getConversationDecisionPayload(output.decision).kind === 'allowed') {
-      await finishAllowedReply(message, {
-        toolResult, memory, displayName, ingressDecision,
-        chatStyle: chatPreference.style, romanceEnabled: romancePreference.enabled,
+    // No answer from the model: the provider's own limit, the guild quota, the provider guard, or a failed call
+    // (a fixed fallback reply follows).
+    if (!reply) {
+      unanswered();
+      reportBlockedReply(message, {
+        stage: 'no_answer',
+        rule: providerRateLimitError ? 'provider_rate_limit'
+          : guildQuotaExhausted ? 'guild_quota_exhausted'
+            : localProviderGuardError ? `provider_guard:${String(localProviderGuardError.code || 'busy').slice(0, 40)}`
+              : 'model_call_failed',
+        userText,
       });
     }
-    return sent;
-  }
+    if (providerRateLimitError) {
+      return await sendUnpersistedDecision(message, decideRateLimitOutput(ingressDecision), replyOptions());
+    }
+    // The guild's AI quota is used up and the model was not called: a fixed line, nothing persisted.
+    if (guildQuotaExhausted) {
+      await replyInChunks(message, QUOTA_EXHAUSTED_MESSAGE, replyOptions());
+      return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+    }
+    if (localProviderGuardError) {
+      if (!localProviderGuardError.shouldNotify) {
+        return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+      }
+      return await sendUnpersistedDecision(message, decideLocalBusyOutput(ingressDecision), replyOptions());
+    }
 
-  const finalReply = getMentionFallbackReply(
-    userText,
-    displayName,
-    message.author.id,
-    chatPreference.style,
-    romancePreference.enabled,
-    activeWeatherPort
-  );
-  return sendDecision(decideAssistantOutput({
-    ingressDecision,
-    rawCandidate: finalReply,
-    styledCandidate: finalReply,
-    source: 'fallback',
-    historyAllowed: false,
-    // The exact prompt texts the provider ran under; a reply that copies them is refused.
-    protectedInstructions: getProtectedPromptTexts(chatPreference.style, romancePreference.enabled),
-    // Deployed model identifiers, compared in memory only.
-    protectedModelIds: getDeployedModelIds(),
-    // The user's display name is only a name; the romance-mode opener is program text.
-    displayNames: [displayName],
-    templatePrefix: '',
-  }));
+    if (reply) {
+      // A provider with tools answers with { text, pollProposal, preferences }; the others with the text alone.
+      const toolResult = typeof reply === 'object' ? reply : null;
+      const modelText = toolResult ? String(toolResult.text || '') || (toolResult.pollProposal ? '好的！' : '') : reply;
+      // Program notes (images left out, images not read) follow the model's words and are checked with them.
+      const replyText = notes.length ? `${modelText}\n${notes.join('\n')}` : modelText;
+      // The one place the optional second opinion can matter (see jevOutputGate.js). With it off, or for a server
+      // that is not listed, this is the single check it always was.
+      const output = await resolveProviderOutput({
+        evaluate: (waiveSoft) => evaluateProviderReply({
+          ingressDecision,
+          reply: replyText,
+          displayName,
+          userId: message.author.id,
+          chatStyle: chatPreference.style,
+          romanceEnabled: romancePreference.enabled,
+          waiveSoft,
+        }),
+        userText,
+        replyText,
+        displayNames: [displayName],
+        guildId: message.guildId ?? null,
+        runtime: jevRuntime,
+      });
+      if (getConversationDecisionPayload(output.decision).kind === 'refusal') {
+        reportBlockedReply(message, {
+          stage: 'output',
+          rule: describeOutputRefusal({
+            ingressDecision,
+            rawCandidate: replyText,
+            protectedInstructions: getProtectedPromptTexts(chatPreference.style, romancePreference.enabled),
+            protectedModelIds: getDeployedModelIds(),
+            displayNames: [displayName],
+            developerAddressee: isDeveloperUser(message.author.id),
+          }),
+          userText,
+          draft: replyText,
+        });
+      }
+      const sent = await sendDecision(output.decision);
+      // A poll preview, new preferences and the one-time memory notice follow only a reply that passed the checks and
+      // reached the channel.
+      if (replyDelivered && getConversationDecisionPayload(output.decision).kind === 'allowed') {
+        await finishAllowedReply(message, {
+          toolResult, memory, displayName, ingressDecision,
+          chatStyle: chatPreference.style, romanceEnabled: romancePreference.enabled,
+          replyText: getConversationDecisionPayload(output.decision).text,
+        });
+      }
+      return sent;
+    }
+
+    const finalReply = getMentionFallbackReply(
+      userText,
+      displayName,
+      message.author.id,
+      chatPreference.style,
+      romancePreference.enabled,
+      activeWeatherPort
+    );
+    return await sendDecision(decideAssistantOutput({
+      ingressDecision,
+      rawCandidate: finalReply,
+      styledCandidate: finalReply,
+      source: 'fallback',
+      historyAllowed: false,
+      // The exact prompt texts the provider ran under; a reply that copies them is refused.
+      protectedInstructions: getProtectedPromptTexts(chatPreference.style, romancePreference.enabled),
+      // Deployed model identifiers, compared in memory only.
+      protectedModelIds: getDeployedModelIds(),
+      // The user's display name is only a name; the romance-mode opener is program text.
+      displayNames: [displayName],
+      templatePrefix: '',
+    }));
+  } finally {
+    // Every return above awaits its reply (return await): finishing first would mark the placeholder unanswered
+    // and send the answer as a new message.
+    await waitIndicator.finish();
+  }
 }
 
 module.exports = {

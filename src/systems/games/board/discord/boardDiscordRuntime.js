@@ -8,6 +8,7 @@ const checkers = require('../engines/checkers');
 const go = require('../engines/go');
 const gomoku = require('../engines/gomoku');
 const turtleSoup = require('../engines/turtleSoup');
+const werewolf = require('../engines/werewolf');
 const xiangqi = require('../engines/xiangqi');
 const { renderBoardPng } = require('../renderer/svgBoardRenderer');
 const { createSqliteBoardStore } = require('../storage/sqliteBoardStore');
@@ -34,6 +35,9 @@ const {
   getModalDefinition,
 } = require('./boardControls');
 const { buildBoardModal, createDiscordBoardTransport } = require('./discordBoardBridge');
+const { createWerewolfInteractionAdapter } = require('../werewolf/werewolfInteractions');
+const { createWerewolfNarrator } = require('../werewolf/werewolfNarrator');
+const { createPhaseTimers } = require('../werewolf/werewolfTimers');
 
 const JUDGE_READY = 'JUDGE_READY';
 const STATUS_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/u;
@@ -50,6 +54,7 @@ const FRIENDLY_ERRORS = Object.freeze({
   INVALID_ACTION: '輸入內容不符合這個遊戲的規則。',
   INVALID_COORDINATE: '座標格式或範圍不正確，請依輸入視窗的範例重試。',
   INVALID_PLAYER_COUNT: '目前玩家人數不符合這個遊戲的開局規則。',
+  INVALID_SETUP: '目前人數與角色設定不相符：狼人至少 1 隻且必須少於好人，角色也不能比玩家多。請房主按「角色設定」調整。',
   LOBBY_CLOSED: '這個等候室已經關閉。',
   LOBBY_FULL: '這個等候室已滿。',
   MESSAGE_MISMATCH: '這個控制不是目前棋盤的最新版，請使用最新訊息。',
@@ -164,7 +169,7 @@ function createBoardDiscordRuntime({
   runtimeLogger = logger,
 } = {}) {
   const boardStore = store || createSqliteBoardStore();
-  const engineRegistry = registry || new BoardEngineRegistry([turtleSoup, chess, gomoku, go, checkers, xiangqi]);
+  const engineRegistry = registry || new BoardEngineRegistry([turtleSoup, chess, gomoku, go, checkers, xiangqi, werewolf]);
   const discordTransport = transport || createDiscordBoardTransport({ client });
 
   const corpusSetup = resolveCorpusSetup({ scenarioProvider, scenarioProviderReadiness, privateCorpusRoot });
@@ -203,16 +208,45 @@ function createBoardDiscordRuntime({
     renderPng: (view, options) => renderPngImpl(view, options),
     transport: discordTransport,
   });
+  // Late-bound: the timers call the service, which is built with this presenter.
+  let service = null;
+  const phaseTimers = createPhaseTimers({
+    advance: (sessionId) => service.advanceDue({ sessionId }),
+    clock,
+    logger: runtimeLogger,
+    runScheduled: (work) => runWithBackgroundContext('board.werewolf-phase', work),
+  });
+  const werewolfNarrator = createWerewolfNarrator({ transport: discordTransport, clock, logger: runtimeLogger });
+
+  // After the werewolf panel is redrawn: post the judge's new announcements in the discussion thread and set the
+  // timer for the current phase. Failures are logged; they never undo the stored game.
+  async function afterWerewolfRefresh(result) {
+    try {
+      const session = await boardStore.getSessionById(result.session.id);
+      if (!session) return;
+      const deadline = session.status === 'active' && session.state ? werewolf.getDeadline(session.state) : null;
+      if (deadline) phaseTimers.schedule(session.id, deadline);
+      else phaseTimers.clear(session.id);
+      await werewolfNarrator.sync(session);
+    } catch (error) {
+      runtimeLogger?.error?.(`werewolf narration failed code=${safeStatusCode(error?.code, 'UNKNOWN')}`, error);
+    }
+  }
+
   const presenter = Object.freeze({
     async refresh(result) {
-      const decorated = await decorateBoardResult(result, {
-        store: boardStore,
-        scenarioProvider: corpus,
-      });
-      return rawPresenter.refresh(decorated);
+      try {
+        const decorated = await decorateBoardResult(result, {
+          store: boardStore,
+          scenarioProvider: corpus,
+        });
+        return await rawPresenter.refresh(decorated);
+      } finally {
+        if (result?.session?.gameKey === 'werewolf') await afterWerewolfRefresh(result);
+      }
     },
   });
-  const service = new BoardSessionService({
+  service = new BoardSessionService({
     store: boardStore,
     registry: engineRegistry,
     clock,
@@ -225,6 +259,7 @@ function createBoardDiscordRuntime({
     store: boardStore,
     actionParsers: createActionParsers(),
   });
+  const werewolfAdapter = createWerewolfInteractionAdapter({ service, store: boardStore });
   const loadSession = loadSessionInScope(boardStore);
   const commitPrepared = createBoardStoreJudgeCommitter({ store: boardStore, clock });
   const turtleWorkflow = createTurtleSoupJudgeWorkflow({
@@ -425,6 +460,12 @@ function createBoardDiscordRuntime({
       const decoded = parseBoardCustomId(interaction.customId);
       const session = await boardStore.getSessionById(decoded.sessionId);
 
+      if (session?.gameKey === 'werewolf' && werewolfAdapter.handles(decoded.verb)) {
+        const result = await werewolfAdapter.handle(interaction, decoded);
+        lifecycle.track(result?.session);
+        return true;
+      }
+
       if (interaction.isButton?.()) {
         const modal = getModalDefinition(session?.gameKey, decoded.verb.startsWith('act.') ? decoded.verb.slice(4) : '');
         if (modal) {
@@ -467,7 +508,11 @@ function createBoardDiscordRuntime({
     startGame,
     handleInteraction,
     startLifecycle: () => lifecycle.start(),
-    stopLifecycle: () => lifecycle.stop(),
+    stopLifecycle: async () => {
+      phaseTimers.stopAll();
+      await lifecycle.stop();
+    },
+    phaseTimers,
     lifecycle,
     service,
     store: boardStore,

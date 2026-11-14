@@ -8,6 +8,10 @@ const {
   TAIWAN_DISTRICTS,
 } = require('../utils/weatherNLP');
 const logger = require('../utils/logger');
+const { recordServiceOutcome, registerServiceConfiguration } = require('../platform/serviceHealth');
+
+// The weather service is configured when either provider has its key (the status page reads it).
+registerServiceConfiguration('weather', () => Boolean(process.env.CWA_API_KEY || process.env.OPENWEATHER_API_KEY));
 
 // Fixed reply when city is not found, shared by slash command and AI chat path
 const CITY_NOT_FOUND_MESSAGE = '我找不到這個地名的天氣資料。請試著補上縣市與行政區，例如：臺北市大同區天氣。';
@@ -257,9 +261,11 @@ async function fetchCwaDataset(datasetId) {
     });
   } catch (error) {
     // The public class stays generic; the log keeps a safe root-cause code.
+    recordServiceOutcome('weather', false);
     logger.warn(`CWA request failed: ${safeErrorCode(error)}`);
     throw new WeatherError('臺灣天氣資料暫時無法查詢，請稍後再試。', 'provider_error');
   }
+  if (!response.ok && response.status !== 429) recordServiceOutcome('weather', false);
   if (response.status === 401 || response.status === 403) {
     throw new WeatherError('臺灣天氣資料暫時無法查詢，請稍後再試。', 'unauthorized');
   }
@@ -285,6 +291,7 @@ async function fetchCwaDataset(datasetId) {
   if (!groups.length) {
     throw new WeatherError('目前查不到這個地點的天氣資料，請稍後再試。', 'empty_response');
   }
+  recordServiceOutcome('weather', true);
   cwaCache.set(datasetId, { data, expires: Date.now() + 15 * 60 * 1000 });
   return data;
 }
@@ -403,7 +410,15 @@ async function fetchWeatherApi(url, city) {
   url.searchParams.set('units', 'metric');
   url.searchParams.set('lang', 'zh_tw');
 
-  const response = await fetch(url);
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    recordServiceOutcome('weather', false);
+    throw error;
+  }
+  // A city that does not exist is the member's mistake, not a failure of the service.
+  recordServiceOutcome('weather', response.ok || response.status === 404 || response.status === 429);
 
   if (response.status === 401) {
     throw new WeatherError(

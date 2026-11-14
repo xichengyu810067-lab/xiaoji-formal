@@ -28,6 +28,17 @@ function buildBoardComponents(result) {
     controls.push(button(session, 'leave'));
     controls.push(button(session, 'begin', 'success'));
     controls.push(button(session, 'stop', 'danger'));
+    for (const control of result.lobbyControls || []) {
+      const verb = String(control?.verb || '');
+      if (!/^ww\.[a-z][a-z0-9-]{0,20}$/u.test(verb)) throw new BoardCoreError('INVALID_PUBLIC_VIEW', 'Lobby control is invalid.');
+      controls.push({
+        type: 'button',
+        customId: buildBoardCustomId({ sessionId: session.id, revision: session.revision, verb }),
+        label: String(control.label || verb).slice(0, 80),
+        style: control.style || 'secondary',
+        disabled: false,
+      });
+    }
   } else if (session.status === 'active') {
     controls.push(button(session, 'leave', 'danger'));
     controls.push(button(session, 'status'));
@@ -73,7 +84,10 @@ async function buildBoardMessagePayload(result, { renderPng }) {
   return {
     embeds: [{
       title: gameLabel,
-      description: `狀態：${publicResult.session.status}｜版本：${publicResult.session.revision}`,
+      description: [
+        `狀態：${publicResult.session.status}｜版本：${publicResult.session.revision}`,
+        typeof publicResult.game?.embedText === 'string' ? publicResult.game.embedText : '',
+      ].filter(Boolean).join('\n').slice(0, 4000),
       image: { url: `attachment://${fileName}` },
     }],
     files: [{ attachment: png, name: fileName }],
