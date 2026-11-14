@@ -4,6 +4,7 @@ const { assertPublicCommandCatalog, loadCommandData, loadCommands } = require('.
 const { findCommandDocsIssues, findOperationsIssues, findWebsiteIssues } = require('./command-doc-checks');
 const { buildPublicExportPlan } = require('./create-public-export');
 const { findPublicTextIssues } = require('./check-public-text');
+const { findWebsiteGuideIssues } = require('./render-website-guide');
 
 const projectRoot = path.join(__dirname, '..');
 const requiredFiles = [
@@ -55,13 +56,14 @@ function findMissingPublicDependencies(exportFiles) {
   return missing;
 }
 
-// operationsPath, commandDocsPath and websiteRoot let tests point the document checks at copies; they
-// default to the real docs/OPERATIONS.md, docs/COMMANDS.md and website/.
+// operationsPath, commandDocsPath, websiteRoot and guideWebsiteRoot let tests point the document checks at
+// copies; they default to the real docs/OPERATIONS.md, docs/COMMANDS.md and website/.
 function checkProject({
   commandCatalog,
   operationsPath = path.join(projectRoot, 'docs', 'OPERATIONS.md'),
   commandDocsPath,
   websiteRoot = path.join(projectRoot, 'website'),
+  guideWebsiteRoot = path.join(projectRoot, 'website'),
 } = {}) {
   const failures = [];
   for (const relativePath of requiredFiles) {
@@ -100,6 +102,10 @@ function checkProject({
   } catch (error) {
     failures.push(`Website text could not be checked against the command catalog: ${error.message}`);
   }
+
+  // The feature and command lists on the website are written into the pages from the public catalogs;
+  // regenerate stale pages with `npm run site:render`.
+  failures.push(...findWebsiteGuideIssues({ websiteRoot: guideWebsiteRoot, catalog: commandCatalog }));
 
   const coinDatabase = fs.readFileSync(path.join(projectRoot, 'src/services/coinDatabase.js'), 'utf8');
   if (!coinDatabase.includes('const schemaVersion = 24;')) {

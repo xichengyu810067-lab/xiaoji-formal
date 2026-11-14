@@ -17,6 +17,8 @@ const {
 } = require('./contracts');
 const { assertUserAction, createTrustedSystemAction } = require('./trustedSystemActions');
 
+const PHASE_TIMEOUT_ACTION = 'system:phase-timeout';
+
 function assertStore(store) {
   for (const method of ['createSession', 'getActiveSession', 'getSessionById', 'mutate', 'expireActive']) {
     if (typeof store?.[method] !== 'function') {
@@ -40,6 +42,7 @@ function findPlayer(session, userId) {
 function engineContext(session, actorId, now) {
   return Object.freeze({
     actorId,
+    hostId: session.hostId,
     players: Object.freeze(session.players.map((player) => player.userId)),
     activePlayers: Object.freeze(activePlayerIds(session)),
     retiredPlayers: Object.freeze(retiredPlayerIds(session)),
@@ -289,6 +292,7 @@ class BoardSessionService {
         players: Object.freeze([...players]),
         rules: cloneJson(session.rules),
         seed: session.seed,
+        now: now.toISOString(),
       })), { gameKey: session.gameKey, rulesVersion: session.rulesVersion });
       const next = cloneJson(session);
       next.status = 'active';
@@ -439,6 +443,10 @@ class BoardSessionService {
         next.turn = cloneJson(transition.state.turn ?? null);
         next.outcome = transition.outcome;
         events = [...events, ...transition.events];
+        const remaining = activePlayerIds(next);
+        if (engine.transferHostOnLeave === true && next.hostId === actorId && remaining.length) {
+          next.hostId = remaining[0];
+        }
         if (transition.outcome?.terminal === true) {
           next.status = 'completed';
           next.endedAt = now.toISOString();
@@ -474,6 +482,19 @@ class BoardSessionService {
       } else if (session.status === 'active' && session.gameKey === 'turtle-soup') {
         next.status = 'completed';
         next.outcome = { terminal: true, type: 'draw', winnerIds: [], loserIds: [], reason: 'host-ended' };
+        next.endReason = 'host-ended';
+      } else if (session.status === 'active' && this._engine(session).hostCanEnd === true) {
+        const transition = applyEngineAction(
+          this._engine(session),
+          session,
+          createTrustedSystemAction('host-stop'),
+          engineContext(session, actorId, now)
+        );
+        next.state = transition.state;
+        next.turn = cloneJson(transition.state.turn ?? null);
+        next.status = 'completed';
+        next.outcome = transition.outcome?.terminal === true ? transition.outcome
+          : { terminal: true, type: 'draw', winnerIds: [], loserIds: [], reason: 'host-ended' };
         next.endReason = 'host-ended';
       } else if (session.status === 'active') {
         throw new BoardCoreError('RESIGN_REQUIRED', 'Active board games cannot be stopped; leave to resign.');
@@ -530,6 +551,88 @@ class BoardSessionService {
     return this._present(this._publicResult(stored.session, actorId, stored.events, stored.replayed), actorId);
   }
 
+  // Lobby settings the host may change before the game starts. Only engines that list lobbyOptions accept them, and
+  // only those keys; the engine normalizes the merged result exactly as it did when the lobby was created.
+  async configure(input) {
+    const actorId = requireIdentifier(input.actorId, 'actorId');
+    const requested = cloneJson(input.rules || {}, 'rules');
+    if (!requested || typeof requested !== 'object' || Array.isArray(requested)) {
+      throw new BoardCoreError('INVALID_REQUEST', 'Lobby rules must be an object.');
+    }
+    const now = this._now();
+    const request = this._normalizeMutation(input, 'configure', { actorId, rules: requested });
+    const stored = await this.store.mutate(request, (session) => {
+      if (session.status !== 'lobby') throw new BoardCoreError('LOBBY_CLOSED', 'The lobby is closed.');
+      if (session.hostId !== actorId) throw new BoardCoreError('HOST_ONLY', 'Only the lobby host can change the settings.');
+      const engine = this._engine(session);
+      const allowed = Array.isArray(engine.lobbyOptions) ? engine.lobbyOptions : [];
+      if (typeof engine.normalizeOptions !== 'function' || !Object.keys(requested).length ||
+          Object.keys(requested).some((name) => !allowed.includes(name))) {
+        throw new BoardCoreError('ACTION_NOT_AVAILABLE', 'These lobby settings cannot be changed.');
+      }
+      const rules = cloneJson(
+        safeEngineCall(() => engine.normalizeOptions({ ...cloneJson(session.rules), ...cloneJson(requested) })),
+        'rules'
+      );
+      if (stableJson(rules) === stableJson(session.rules)) return { session, events: [], action: null };
+      const next = { ...cloneJson(session), rules, revision: session.revision + 1, updatedAt: now.toISOString() };
+      return { session: next, events: [{ type: 'rules-updated' }], action: { type: 'configure', actorId } };
+    });
+    return this._present(this._publicResult(stored.session, actorId, stored.events, stored.replayed), actorId);
+  }
+
+  // Ends a timed phase whose deadline has passed, for engines that expose getDeadline(). Returns null when nothing was
+  // due. The interaction id comes from the session revision, so two timers firing together replay one step instead of
+  // advancing twice; a player action that lands first simply makes this attempt re-read the session.
+  async advanceDue(input) {
+    const sessionId = requireIdentifier(input.sessionId, 'sessionId');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const session = await this.store.getSessionById(sessionId);
+      if (!session || session.status !== 'active' || session.state == null) return null;
+      const engine = this._engine(session);
+      if (typeof engine.getDeadline !== 'function') return null;
+      const now = this._now();
+      const deadline = safeEngineCall(() => engine.getDeadline(cloneJson(session.state)));
+      if (!deadline || !(Date.parse(deadline) <= now.getTime())) return null;
+      const actorId = session.hostId;
+      const request = this._normalizeMutation({
+        guildId: session.guildId,
+        channelId: session.channelId,
+        interactionId: `phase-timeout:${session.id}:${session.revision}`,
+        expectedRevision: session.revision,
+      }, 'phase-timeout', { sessionId: session.id, revision: session.revision });
+      try {
+        const stored = await this.store.mutate(request, (current) => {
+          if (current.id !== session.id) throw new BoardCoreError('SESSION_MISMATCH', 'Another board session is active here.');
+          const transition = applyEngineAction(
+            engine,
+            current,
+            createTrustedSystemAction(PHASE_TIMEOUT_ACTION),
+            engineContext(current, actorId, now)
+          );
+          const next = cloneJson(current);
+          next.state = transition.state;
+          next.turn = cloneJson(transition.state.turn ?? null);
+          next.outcome = transition.outcome;
+          if (transition.outcome?.terminal === true) {
+            next.status = 'completed';
+            next.endedAt = now.toISOString();
+            next.endReason = transition.outcome.reason;
+          }
+          next.revision += 1;
+          next.updatedAt = now.toISOString();
+          return { session: next, events: transition.events, action: { type: 'phase-timeout' } };
+        });
+        return this._present(this._publicResult(stored.session, actorId, stored.events, stored.replayed), actorId);
+      } catch (error) {
+        if (error?.code === 'STALE_REVISION') continue;
+        if (error instanceof BoardRuleError) return null;
+        throw error;
+      }
+    }
+    return null;
+  }
+
   async status(input) {
     const scope = this._normalizeScope(input);
     const actorId = requireIdentifier(input.actorId, 'actorId');
@@ -582,6 +685,7 @@ class BoardSessionService {
 
 module.exports = {
   BoardSessionService,
+  PHASE_TIMEOUT_ACTION,
   activePlayerIds,
   applyEngineAction,
   engineContext,

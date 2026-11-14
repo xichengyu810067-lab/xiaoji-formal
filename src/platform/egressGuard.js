@@ -13,6 +13,13 @@ const { getHostOperationContext } = require('./hostOperationContext');
 const { createLinkApproval, rewriteLinks } = require('./linkPolicy');
 const { currentProtectedAttempt, runOutsideProtectedAttempt } = require('./protectedRest');
 const { observe } = require('./testControlObservation');
+const {
+  MEMORY_REPORT_CONTENT_TYPE,
+  MEMORY_REPORT_FILE_NAME,
+  MEMORY_REPORT_HOOK_NAME,
+  MEMORY_REPORT_MAX_BYTES,
+  isInertReportHtml,
+} = require('./memoryReportFile');
 const { emitSafetyEvent: emitCatalogSafetyEvent, reportSecurityAlert } = require('./safetyEventCatalog');
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -29,6 +36,7 @@ const FILE_CONTENT_TYPES = Object.freeze({
   txt: new Set(['text/plain', 'text/plain; charset=utf-8']),
   json: new Set(['application/json', 'application/json; charset=utf-8']),
   csv: new Set(['text/csv', 'text/csv; charset=utf-8']),
+  html: new Set(['text/html', MEMORY_REPORT_CONTENT_TYPE]),
 });
 // The type each admitted copy is sent with. Without one REST guesses it from the first bytes, so a
 // text file starting with "GIF89a" or "%PDF" would go out as an image or a PDF.
@@ -37,6 +45,7 @@ const SENT_CONTENT_TYPE = Object.freeze({
   txt: 'text/plain; charset=utf-8',
   json: 'application/json; charset=utf-8',
   csv: 'text/csv; charset=utf-8',
+  html: MEMORY_REPORT_CONTENT_TYPE,
 });
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
@@ -58,6 +67,17 @@ const EXTENSION_FILE_RULES = Object.freeze({
   name: EXTENSION_FILE_NAME, maxFiles: EXTENSION_MAX_FILES,
   maxFileBytes: EXTENSION_MAX_FILE_BYTES, maxTotalBytes: EXTENSION_MAX_FILE_BYTES,
 });
+// The weekly memory report (memoryReportFile.js): while a verified extension runs the hook the host calls for it,
+// one inert HTML file of at most 8 MiB, named xiaoji-memory-report-YYYYMMDD.html, to the direct-message channel
+// that same hook opened with the bot owner a moment before (see reportChannelFor). Nothing else may use it.
+const MEMORY_REPORT_FILE_RULES = Object.freeze({
+  name: MEMORY_REPORT_FILE_NAME, maxFiles: 1,
+  maxFileBytes: MEMORY_REPORT_MAX_BYTES, maxTotalBytes: MEMORY_REPORT_MAX_BYTES,
+});
+// How long the direct-message channel the report hook opened with the owner may receive its one report.
+const MEMORY_REPORT_CHANNEL_TTL_MS = 10 * 60 * 1000;
+// A body of the report upload holds text and the file, and nothing that shows other content.
+const MEMORY_REPORT_BODY_FIELDS = new Set(['content', 'allowed_mentions', 'attachments', 'flags', 'nonce', 'enforce_nonce', 'tts']);
 // The bytes a typed array really holds: a subclass can answer anything to .byteLength.
 const typedArrayByteLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength').get;
 // Holds the pass of a request the guard is sending, so the REST queue can tell it from any other.
@@ -367,6 +387,8 @@ function inspectFile(file, approval, budget, rules) {
   // Links with a scheme and invites only: a name such as announcement.channel.id in an exported file is a
   // key, not a link, and rewriting it would corrupt the file (and its structure).
   const rewritten = rewriteText(text, approval, { bareDomains: false });
+  // An HTML report is admitted only as inert markup, as it will be sent (after the links were replaced).
+  if (extension === 'html' && !isInertReportHtml(rewritten.value)) return null;
   const bytes = Buffer.from(rewritten.value, 'utf8');
   if (bytes.length > limit) return null;
   return {
@@ -722,6 +744,8 @@ function installEgressGuard(rest, {
   const approval = createLinkApproval({ approvedReleaseTag, releaseTags: 'stable' });
   const channels = new Map();
   const messages = new Map();
+  // Direct-message channels the weekly memory report hook opened with the owner: id -> expiry. Each takes one report.
+  const reportChannels = new Map();
   const original = rest.request.bind(rest);
   // The passes of the requests this guard is sending right now.
   const passes = new WeakSet();
@@ -731,6 +755,27 @@ function installEgressGuard(rest, {
   function pruneRecords(now) {
     for (const [id, expiresAt] of channels) if (expiresAt <= now) channels.delete(id);
     for (const [id, expiresAt] of messages) if (expiresAt <= now) messages.delete(id);
+    for (const [id, expiresAt] of reportChannels) if (expiresAt <= now) reportChannels.delete(id);
+  }
+
+  // The context of the weekly memory report hook, which only the host runs, of a verified extension, with an owner.
+  function inReportHook(extension) {
+    return extension?.entry === 'hook' && extension.name === MEMORY_REPORT_HOOK_NAME && isSnowflake(ownerId);
+  }
+
+  // The channel a report upload goes to, or null when the request may not carry the report: a message created in a
+  // direct-message channel the report hook opened with the owner less than MEMORY_REPORT_CHANNEL_TTL_MS ago and has
+  // not yet sent a report to, whose body holds no embed, component, sticker, poll, reference or other field.
+  function reportChannelFor(method, segments, body, now) {
+    if (!matches(segments, method, 'POST', 'channels', '*', 'messages')) return null;
+    const expiresAt = reportChannels.get(segments[1]);
+    if (!(expiresAt > now) || !isPlainObject(body)) return null;
+    for (const [key, value] of Object.entries(body)) {
+      if (MEMORY_REPORT_BODY_FIELDS.has(key) || value === undefined || value === null) continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      return null;
+    }
+    return segments[1];
   }
 
   function refusal(reason) {
@@ -758,14 +803,17 @@ function installEgressGuard(rest, {
     const extension = currentExtensionContext();
     const protectedAttempt = currentProtectedAttempt();
     // Files are admitted for the public features, and for a verified extension only in the answer
-    // to its own command's interaction in a protected guild, under its narrower rules. A protected
+    // to its own command's interaction in a protected guild, under its narrower rules, or as the one
+    // report of the weekly memory report hook to the owner (MEMORY_REPORT_FILE_RULES). A protected
     // delivery is a fixed text notice and never carries a file.
-    const fileRules = extension ? EXTENSION_FILE_RULES : PUBLIC_FILE_RULES;
+    const reportHook = inReportHook(extension);
+    const fileRules = reportHook ? MEMORY_REPORT_FILE_RULES : extension ? EXTENSION_FILE_RULES : PUBLIC_FILE_RULES;
     const files = inspectFiles(givenFiles, approval, fileRules);
     const uploading = Boolean(files?.files?.length);
+    const reportChannel = uploading && reportHook ? reportChannelFor(method, segments, checked, monotonicNow()) : null;
     if (!files || hasUnsafeAttachmentRename(checked, uploading ? fileRules.name : FILE_NAME) ||
         (uploading && (protectedAttempt || appendToFormData ||
-          (extension && !answersOwnCommand(extension, method, segments, privateIds))))) {
+          (extension && !(reportHook ? reportChannel : answersOwnCommand(extension, method, segments, privateIds)))))) {
       return { error: refusal('UNINSPECTABLE_FILE') };
     }
     const classification = classifyRoute(method, segments, resolveChannelGuild);
@@ -812,6 +860,8 @@ function installEgressGuard(rest, {
     if (protectedAttempt && (transformed.changes.link || transformed.changes.mention)) {
       return { error: refusal('PROTECTED_REWRITE_BLOCKED'), classification, changes: transformed.changes };
     }
+    // The channel takes one report: a second upload needs a direct-message channel opened again.
+    if (mutate && reportChannel) reportChannels.delete(reportChannel);
     return {
       method, fullRoute, versioned, segments, classification, body: transformed.body, files: files.files,
       others, changes: transformed.changes, extension, protectedAttempt,
@@ -825,6 +875,12 @@ function installEgressGuard(rest, {
     const { segments, method } = evaluated;
     if (method === 'POST' && segments[0] === 'channels' && (segments[2] === 'threads' || segments[4] === 'threads')) channels.set(id, expiresAt);
     if (method === 'POST' && segments[0] === 'channels' && segments[2] === 'messages') messages.set(id, expiresAt);
+    // The direct-message channel the weekly memory report hook opened with the owner, as Discord answered it.
+    if (matches(segments, method, 'POST', 'users', '@me', 'channels') && inReportHook(evaluated.extension) &&
+        evaluated.body?.recipient_id === ownerId && result.type === 1 && Array.isArray(result.recipients) &&
+        result.recipients.some((recipient) => recipient?.id === ownerId)) {
+      reportChannels.set(id, monotonicNow() + MEMORY_REPORT_CHANNEL_TTL_MS);
+    }
   }
 
   async function guardedRequest(options) {

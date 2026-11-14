@@ -69,7 +69,7 @@ test('a Claude request pins the model, asks for the server-side fallback and low
   assert.equal(request.fallbacks, 'default');
   assert.deepEqual(request.output_config, { effort: 'low' });
   for (const name of ['temperature', 'top_p', 'top_k', 'thinking']) assert.equal(name in request, false, name);
-  assert.deepEqual(request.tools.map((tool) => tool.name), ['web_search', 'propose_poll']);
+  assert.deepEqual(request.tools.map((tool) => tool.name), ['web_search', 'propose_poll', 'stock_quote']);
   assert.equal(request.tools[0].type, 'web_search_20260209');
   assert.equal(request.tools[0].max_uses, 3);
   assert.equal(request.tools[1].strict, true);
@@ -85,7 +85,7 @@ test('the memory tool and its instruction are added only when memory is enabled,
   const fake = fakeClaude([text('好呀')]);
   await ask(fake.client, { memoryEnabled: true, rememberedPreferences: [{ category: 'food', value: '喜歡拉麵' }] });
   const [request] = fake.requests;
-  assert.deepEqual(request.tools.map((tool) => tool.name), ['web_search', 'propose_poll', 'remember_preference']);
+  assert.deepEqual(request.tools.map((tool) => tool.name), ['web_search', 'propose_poll', 'stock_quote', 'remember_preference']);
   assert.match(request.system, /remember_preference/u);
   const input = JSON.parse(request.messages[0].content);
   assert.deepEqual(input.untrustedData.rememberedPreferences, [{ category: 'food', value: '喜歡拉麵' }]);
@@ -202,4 +202,34 @@ test('preferences asked for in a reply that searched the web are dropped', async
     usage: { server_tool_use: { web_search_requests: 1 } },
   }]);
   assert.equal(await ask(fake.client, { memoryEnabled: true }), '查到了！');
+});
+
+test('a stock question runs the stock_quote tool and answers from its data, replacing the text written before it', async (t) => {
+  const { configureMarketDataForTests } = require('../src/systems/stocks/marketData');
+  const asked = [];
+  configureMarketDataForTests({
+    async quote(symbol) {
+      asked.push(symbol);
+      return {
+        market: 'TW', symbol: '2330', exchange: '上市', name: '台積電', currency: 'TWD', price: 2340, previousClose: 2395,
+        change: -55, changePercent: -2.3, open: 2385, high: 2395, low: 2330, volume: 28991, volumeUnit: '張', time: 1794465000000,
+      };
+    },
+  });
+  t.after(() => configureMarketDataForTests(null));
+  const toolCall = {
+    stop_reason: 'tool_use',
+    content: [
+      { type: 'text', text: '我查一下喔～' },
+      { type: 'tool_use', id: 'toolu_1', name: 'stock_quote', input: { symbol: '台積電' } },
+    ],
+  };
+  const fake = fakeClaude([toolCall, text('台積電現在 2,340 元，跌 55 元。僅供參考，不構成投資建議。')]);
+  const reply = await ask(fake.client, { userText: '台積電現在多少？' });
+  assert.equal(typeof reply === 'object' ? reply.text : reply, '台積電現在 2,340 元，跌 55 元。僅供參考，不構成投資建議。');
+  assert.deepEqual(asked, ['台積電']);
+  const [toolResult] = fake.requests[1].messages.at(-1).content;
+  assert.equal(toolResult.type, 'tool_result');
+  assert.match(toolResult.content, /台積電（2330）/u);
+  assert.match(toolResult.content, /不構成投資建議/u);
 });

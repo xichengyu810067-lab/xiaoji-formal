@@ -63,12 +63,12 @@ test('without Turso configuration the memory is off: nothing is read, written or
 test('a private (or undecided) member has one memory per server: what was said in one server is never used in another', async () => {
   freshStore();
   await memory.rememberPreferences({ userId: ALICE, guildId: GUILD_A, entries: [{ category: 'food', preference: '喜歡拉麵' }] });
-  await memory.rememberPreferences({ userId: ALICE, guildId: null, entries: [{ category: 'music', preference: '喜歡爵士樂' }] });
+  // Nothing said in direct messages is remembered.
+  assert.equal(await memory.rememberPreferences({ userId: ALICE, guildId: null, entries: [{ category: 'music', preference: '喜歡爵士樂' }] }), 0);
   assert.deepEqual((await memory.loadMemoryContext({ userId: ALICE, guildId: GUILD_A })).preferences,
     [{ category: 'food', value: '喜歡拉麵' }]);
   assert.deepEqual((await memory.loadMemoryContext({ userId: ALICE, guildId: GUILD_B })).preferences, []);
-  assert.deepEqual((await memory.loadMemoryContext({ userId: ALICE, guildId: null })).preferences,
-    [{ category: 'music', value: '喜歡爵士樂' }]);
+  assert.deepEqual((await memory.loadMemoryContext({ userId: ALICE, guildId: null })).preferences, []);
   // Another member never sees Alice's memory.
   assert.deepEqual((await memory.loadMemoryContext({ userId: BOB, guildId: GUILD_A })).preferences, []);
 });
@@ -269,4 +269,20 @@ test('the numbers /memory view shows do not move when a chat uses a preference',
   const before = (await memory.listOwnPreferences(ALICE)).map((entry) => entry.value);
   await store.touchPreferences(ALICE, [(await memory.listOwnPreferences(ALICE))[0].id], 99);
   assert.deepEqual((await memory.listOwnPreferences(ALICE)).map((entry) => entry.value), before);
+});
+
+test('everyone who saw the earlier notice is asked once more about the new memory, keeping their choice until they answer', async () => {
+  freshStore();
+  // Alice saw revision 1 and chose public.
+  await memory.updateConsent(ALICE, { choice: 'public', promptedAt: 1 });
+  const sent = [];
+  assert.equal(await maybeOfferMemoryConsent(ALICE, async (payload) => sent.push(payload)), true);
+  assert.equal(await maybeOfferMemoryConsent(ALICE, async (payload) => sent.push(payload)), false);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].content, /每人每天最多 30 則/u);
+  assert.match(sent[0].content, /每月 1 號中午 12:00/u);
+  assert.match(sent[0].content, /私訊的內容不會被記住/u);
+  const consent = await memory.getConsent(ALICE);
+  assert.equal(consent.choice, 'public', 'the earlier choice stays until the member answers');
+  assert.equal(consent.promptedAt, 1, 'the first time they were asked is kept');
 });

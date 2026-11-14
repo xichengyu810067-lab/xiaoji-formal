@@ -151,8 +151,10 @@ function validateImmutableSession(current, next) {
   if (next.id !== current.id || next.guildId !== current.guildId || next.channelId !== current.channelId) {
     throw new BoardCoreError('STORE_CONTRACT_VIOLATION', 'Mutation changed immutable session identity.');
   }
+  // Rules may only change while the session is still a lobby (the host's lobby settings); never once it started.
+  const rulesLocked = !(current.status === 'lobby' && next.status === 'lobby');
   if (next.gameKey !== current.gameKey || next.rulesVersion !== current.rulesVersion || next.seed !== current.seed ||
-      next.createdAt !== current.createdAt || stableJson(next.rules) !== stableJson(current.rules)) {
+      next.createdAt !== current.createdAt || (rulesLocked && stableJson(next.rules) !== stableJson(current.rules))) {
     throw new BoardCoreError('STORE_CONTRACT_VIOLATION', 'Mutation changed immutable session rules.');
   }
 }

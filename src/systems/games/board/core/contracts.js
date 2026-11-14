@@ -7,6 +7,7 @@ const GAME_KEYS = Object.freeze([
   'go',
   'checkers',
   'xiangqi',
+  'werewolf',
 ]);
 
 const SESSION_STATUSES = Object.freeze([
@@ -24,6 +25,7 @@ const BOARD_RULE_ERROR_CODES = Object.freeze([
   'NOT_YOUR_TURN',
   'ACTION_NOT_LEGAL',
   'CLAIM_NOT_AVAILABLE',
+  'INVALID_SETUP',
 ]);
 
 class BoardCoreError extends Error {
@@ -111,8 +113,10 @@ function assertEngineContract(engine) {
   if (engine.getLegalActions != null && typeof engine.getLegalActions !== 'function') {
     throw new BoardCoreError('INVALID_ENGINE', 'Engine getLegalActions must be a function when provided.');
   }
-  if (engine.normalizeOptions != null && typeof engine.normalizeOptions !== 'function') {
-    throw new BoardCoreError('INVALID_ENGINE', 'Engine normalizeOptions must be a function when provided.');
+  for (const method of ['normalizeOptions', 'getDeadline', 'getPrivateView']) {
+    if (engine[method] != null && typeof engine[method] !== 'function') {
+      throw new BoardCoreError('INVALID_ENGINE', `Engine ${method} must be a function when provided.`);
+    }
   }
   if (engine.allowedPlayerCounts != null) {
     if (!Array.isArray(engine.allowedPlayerCounts) || !engine.allowedPlayerCounts.length ||

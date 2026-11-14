@@ -43,6 +43,7 @@ const featureRewardReasons = Object.freeze({
   participation: '參與獎勵',
   correct_answer: '答對獎勵',
   completion: '遊戲完成獎勵',
+  team_completion: '星火接續團隊獎勵',
 });
 
 function featureRewardReason(rewardKind) {

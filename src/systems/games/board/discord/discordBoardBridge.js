@@ -84,6 +84,36 @@ function createDiscordBoardTransport({ client }) {
       }
     },
 
+    // The public discussion thread under a board message: the existing one, or a new one when there is none yet.
+    async ensureThread({ guildId, channelId, messageId, name }) {
+      const channel = await fetchGuildTextChannel(client, guildId, channelId);
+      const message = await channel.messages.fetch(messageId);
+      if (message.thread?.id) return { id: message.thread.id };
+      if (typeof message.startThread !== 'function') {
+        throw new BoardCoreError('DISCORD_UNAVAILABLE', '目前頻道無法建立討論串。');
+      }
+      const thread = await message.startThread({ name: String(name || '討論區').slice(0, 100), autoArchiveDuration: 1440 });
+      return { id: thread.id };
+    },
+
+    // Posts one message in the board channel or in a thread under it. Only the listed users are pinged.
+    async post({ guildId, channelId, threadId = null, content, mentionUserIds = [] }) {
+      let target;
+      if (threadId) {
+        target = await client.channels.fetch(threadId);
+        if (!target || target.guildId !== guildId || target.parentId !== channelId || typeof target.send !== 'function') {
+          throw new BoardCoreError('SESSION_SCOPE_MISMATCH', '討論串不屬於這個棋局頻道。');
+        }
+      } else {
+        target = await fetchGuildTextChannel(client, guildId, channelId);
+      }
+      const message = await target.send({
+        content: String(content || '').slice(0, 2000),
+        allowedMentions: { parse: [], users: [...new Set(mentionUserIds)].slice(0, 100) },
+      });
+      return { id: message.id };
+    },
+
     async createReplacement({ guildId, channelId }) {
       const channel = await fetchGuildTextChannel(client, guildId, channelId);
       if (typeof channel.send !== 'function') {

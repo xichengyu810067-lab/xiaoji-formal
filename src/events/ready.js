@@ -7,10 +7,12 @@ const { processCasinoLoanInterest, processExpiredBlackjackSessions } = require('
 const { processExpiredVenueOrderItems } = require('../services/venueService');
 const { processWordChainReactionOutbox } = require('../services/wordChainService');
 const { processNumberChainReactionOutbox } = require('../services/numberChainService');
+const { processSparkRelayClock } = require('../systems/community/sparkRelay/discord');
 const { startDailyRiddleScheduler } = require('../services/dailyRiddleService');
 const { startDailyDiscussionScheduler } = require('../services/dailyDiscussionService');
 const { startPublicStatusServer } = require('../services/publicStatusServer');
 const { startStatusSnapshotPublisher } = require('../services/statusSnapshotPublisher');
+const { createFeatureStatusWatcher } = require('../services/publicStatusService');
 const { startGameServer } = require('../services/gameServer');
 const { startReleaseAnnouncementScheduler } = require('../services/releaseAnnouncementService');
 const { resumePendingGameRewards } = require('../services/gameService');
@@ -20,6 +22,8 @@ const {
 } = require('../services/conversationHistoryService');
 const logger = require('../utils/logger');
 const { getClientExtensionHost } = require('../extensions/extensionHost');
+const { setBlockedReplyHandler } = require('../systems/conversation/blockedReplyReports');
+const { startMemoryReportSchedule } = require('../systems/conversation/memoryReportSchedule');
 const { getBoardRuntime } = require('../systems/games/board/core/boardRuntimeRegistry');
 const { getTestControlPolicy } = require('../platform/testControlPolicy');
 const { enterTestReady } = require('../platform/testControlReady');
@@ -109,6 +113,24 @@ module.exports = {
     await runStartupTask('私有擴充啟動', withoutHostContext(() =>
       getClientExtensionHost(client).runHook('ready', { client, runStartupTask, scheduleStartupTask })
     ));
+    // Reports of chat replies that were blocked go to an extension that handles them (the conversationBlocked hook);
+    // with none, nothing happens.
+    setBlockedReplyHandler((report) => getClientExtensionHost(client).runHook('conversationBlocked', { report, client }));
+    // Every minute: a public feature that became broken or recovered is reported to an extension that handles it (the
+    // featureStatusChanged hook); with none, nothing happens.
+    const watchFeatureStatus = createFeatureStatusWatcher({
+      client,
+      onChange: (changes) => getClientExtensionHost(client).runHook('featureStatusChanged', { changes, client }),
+    });
+    scheduleStartupTask('功能狀態監看', backgroundTask('status.watch', () => watchFeatureStatus()), 60 * 1000);
+    // 168 hours after this start, and every 168 hours after that: the weekly memory report of an extension that handles
+    // it (the weeklyMemoryReport hook, with the window { since, until }); with none, nothing happens. A restart starts
+    // the count again.
+    startMemoryReportSchedule({
+      runHook: (hookName, window) => runWithHostOperationContext(null, () =>
+        getClientExtensionHost(client).runHook(hookName, { ...window, client })),
+      logger,
+    });
 
     // Job processing: Initial check and schedule every 5 minutes
     scheduleStartupTask('工作發薪排程', backgroundTask('work.payroll', () => processDueJobs(client)), 5 * 60 * 1000);
@@ -144,5 +166,9 @@ module.exports = {
       () => processWordChainReactionOutbox(client)), 30 * 1000);
     scheduleStartupTask('數字接龍確認反應重試', backgroundTask('number-chain.reaction-outbox',
       () => processNumberChainReactionOutbox(client)), 30 * 1000);
+
+    // 星火接續: closes sign-ups, announces the day's turns, ends groups that ran out of time and retries rewards.
+    scheduleStartupTask('星火接續排程', backgroundTask('spark-relay.clock', () => processSparkRelayClock(client)),
+      5 * 60 * 1000);
   },
 };

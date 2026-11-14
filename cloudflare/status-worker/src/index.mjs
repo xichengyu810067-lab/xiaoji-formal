@@ -1,12 +1,22 @@
+import { handleSupport } from './support.mjs';
+
 const ALLOWED_ORIGIN = 'https://xiaoji-zeta.vercel.app';
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_SIGNATURE_AGE_SECONDS = 5 * 60;
 const MAX_FUTURE_CLOCK_SKEW_SECONDS = 30;
 const MAX_OBSERVED_TIMESTAMP_DRIFT_SECONDS = 5 * 60;
 const FRESHNESS_MS = 120 * 1000;
+// The features a snapshot lists, in order. A bot of the release before this one still sends LEGACY_FEATURE_KEYS, so the
+// worker accepts either list: it can be deployed before the bot.
+const LEGACY_FEATURE_KEYS = Object.freeze([
+  'core_chat', 'welcome', 'reminder', 'calendar', 'poll', 'weather', 'economy',
+  'word_chain', 'number_chain', 'daily_riddle', 'daily_discussion', 'chat_style', 'romance',
+  'tetris', 'number_match', 'sudoku', 'official_website', 'status_website',
+]);
 const FEATURE_KEYS = Object.freeze([
   'core_chat', 'welcome', 'reminder', 'calendar', 'poll', 'weather', 'economy',
   'word_chain', 'number_chain', 'daily_riddle', 'daily_discussion', 'chat_style', 'romance',
+  'student', 'memory', 'image_reading', 'web_search',
   'tetris', 'number_match', 'sudoku', 'official_website', 'status_website',
 ]);
 const FEATURE_STATUSES = new Set(['normal', 'maintenance', 'broken']);
@@ -87,12 +97,14 @@ export function validatePublicSnapshot(value, { allowStored = false } = {}) {
     || !(value.usage.todayInteractions === null || (Number.isSafeInteger(value.usage.todayInteractions) && value.usage.todayInteractions >= 0))
     || (value.usage.available !== (value.usage.todayInteractions !== null))) return null;
   if (!hasOnlyKeys(value.summary, ['normal', 'maintenance', 'broken'])) return null;
-  if (!Array.isArray(value.features) || value.features.length !== FEATURE_KEYS.length) return null;
+  if (!Array.isArray(value.features)) return null;
+  const expectedKeys = value.features.length === LEGACY_FEATURE_KEYS.length ? LEGACY_FEATURE_KEYS : FEATURE_KEYS;
+  if (value.features.length !== expectedKeys.length) return null;
 
   const features = value.features.map((feature) => normalizeFeature(feature, { allowStored }));
   if (features.some((feature) => feature === null)) return null;
   const keys = new Set(features.map((feature) => feature.key));
-  if (keys.size !== FEATURE_KEYS.length || FEATURE_KEYS.some((key) => !keys.has(key))) return null;
+  if (keys.size !== expectedKeys.length || expectedKeys.some((key) => !keys.has(key))) return null;
   const summary = features.reduce((result, feature) => {
     result[feature.status] += 1;
     return result;
@@ -254,6 +266,20 @@ function publicStatusView(snapshot) {
   };
 }
 
+// The README's live status badge: shields.io reads this in its endpoint format (https://shields.io/badges/endpoint-badge)
+// and draws the label and message. Only the overall state is told, never a feature name or any count but the totals.
+export function publicBadge(snapshot) {
+  const badge = (message, color) => ({ schemaVersion: 1, label: '小吉狀態', message, color, cacheSeconds: 300 });
+  const { status } = snapshot.bot;
+  const { broken = 0, maintenance = 0 } = snapshot.summary || {};
+  if (status === 'unknown' || !snapshot.updatedAt) return badge('暫時無法確認', 'lightgrey');
+  if (status === 'outage') return badge('暫停服務', 'e05d44');
+  if (broken > 0) return badge(`${broken} 項功能異常`, 'e05d44');
+  if (status === 'degraded') return badge('部分功能異常', 'f0a020');
+  if (maintenance > 0) return badge(`${maintenance} 項維護中`, 'f0a020');
+  return badge('正常運作', '3f9c80');
+}
+
 async function handlePublish(request, env) {
   if (request.method !== 'POST') return jsonResponse({ error: 'not_found' }, 404);
   if (!request.headers.get('Content-Type')?.toLowerCase().startsWith('application/json')) {
@@ -297,10 +323,13 @@ async function handlePublicRead(request, env, pathname) {
   if (!['GET', 'HEAD'].includes(request.method)) return jsonResponse({ error: 'not_found' }, 404, { headOnly: request.method === 'HEAD', cors });
   try {
     const snapshot = publicStatusView(await loadSnapshot(env));
-    return jsonResponse(pathname.endsWith('/overview') ? publicOverview(snapshot) : snapshot, 200, {
+    const view = pathname.endsWith('/overview') ? publicOverview(snapshot)
+      : pathname.endsWith('/badge') ? publicBadge(snapshot) : snapshot;
+    return jsonResponse(view, 200, {
       headOnly: request.method === 'HEAD', cors,
     });
   } catch (_error) {
+    if (pathname.endsWith('/badge')) return jsonResponse(publicBadge(unknownSnapshot()), 200, { headOnly: request.method === 'HEAD', cors });
     return jsonResponse(unknownSnapshot(), 503, { headOnly: request.method === 'HEAD', cors });
   }
 }
@@ -310,7 +339,8 @@ export default {
     const url = new URL(request.url);
     if (url.search || url.hash) return jsonResponse({ error: 'not_found' }, 404);
     if (url.pathname === '/internal/status-snapshot') return handlePublish(request, env);
-    if (url.pathname === '/api/public/overview' || url.pathname === '/api/public/status') {
+    if (url.pathname === '/api/public/support') return handleSupport(request, env, { allowedOrigin: ALLOWED_ORIGIN });
+    if (['/api/public/overview', '/api/public/status', '/api/public/badge'].includes(url.pathname)) {
       return handlePublicRead(request, env, url.pathname);
     }
     return jsonResponse({ error: 'not_found' }, 404, { headOnly: request.method === 'HEAD' });

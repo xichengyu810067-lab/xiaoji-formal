@@ -84,46 +84,89 @@
     }
   }
 
-  function setupNavigation() {
-    const toggle = document.querySelector('[data-nav-toggle]');
-    const nav = document.querySelector('[data-nav]');
-    if (!toggle || !nav) return;
+  // The hero portrait looks toward the pointer while it is inside the frame and smiles when clicked or
+  // activated with the keyboard. Both are layers over the unchanged base art (docs/WEBSITE_ARCHITECTURE.md):
+  // the eye layer is shown only once all of its images have loaded, so a half-loaded layer never leaves
+  // blank white eyes, and the smile layer fades in through the is-happy class.
+  const HAPPY_LINES = Object.freeze([
+    { title: '嘿嘿～被你發現了', detail: '今天也謝謝你來看小吉！' },
+    { title: '摸摸頭，收到了♡', detail: '小吉會更努力陪大家聊天' },
+    { title: '要一起玩遊戲嗎？', detail: '在 Discord 用 /board start 開一局' },
+    { title: '小吉在這裡喔～', detail: '有問題可以找右下角的小吉' },
+  ]);
 
-    toggle.addEventListener('click', () => {
-      const isOpen = toggle.getAttribute('aria-expanded') === 'true';
-      toggle.setAttribute('aria-expanded', String(!isOpen));
-      nav.classList.toggle('is-open', !isOpen);
-    });
+  function setupPortrait() {
+    const button = document.querySelector('[data-portrait]');
+    const frame = button?.querySelector('.portrait-frame');
+    const eyes = frame?.querySelector('[data-eye-layer]');
+    const speechTitle = document.querySelector('[data-speech-title]');
+    const speechDetail = document.querySelector('[data-speech-detail]');
+    if (!button || !frame) return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    let happyTimer = null;
+    let lineIndex = 0;
 
-    nav.addEventListener('click', (event) => {
-      if (!event.target.closest('a')) return;
-      toggle.setAttribute('aria-expanded', 'false');
-      nav.classList.remove('is-open');
-    });
-  }
-
-  function setupReveal() {
-    const items = [...document.querySelectorAll('.reveal')];
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) {
-      items.forEach((item) => item.classList.add('is-visible'));
-      return;
+    if (finePointer && !reduceMotion) {
+      const layers = eyes ? [...eyes.querySelectorAll('img')] : [];
+      const loaded = (layer) => new Promise((resolve, reject) => {
+        if (layer.complete) {
+          if (layer.naturalWidth > 0) resolve();
+          else reject(new Error('eye_layer_missing'));
+          return;
+        }
+        layer.addEventListener('load', resolve, { once: true });
+        layer.addEventListener('error', reject, { once: true });
+      });
+      Promise.all(layers.map(loaded))
+        .then(() => { if (layers.length) eyes.hidden = false; })
+        .catch(() => { if (eyes) eyes.hidden = true; });
+      button.addEventListener('pointermove', (event) => {
+        const rect = button.getBoundingClientRect();
+        const x = Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width) * 2 - 1));
+        const y = Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height) * 2 - 1));
+        button.style.setProperty('--look-x', x.toFixed(3));
+        button.style.setProperty('--look-y', y.toFixed(3));
+        button.classList.add('is-looking');
+      });
+      button.addEventListener('pointerleave', () => {
+        button.classList.remove('is-looking');
+        button.style.setProperty('--look-x', '0');
+        button.style.setProperty('--look-y', '0');
+      });
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          entry.target.classList.add('is-visible');
-          observer.unobserve(entry.target);
-        });
-      },
-      { threshold: 0.12 }
-    );
-    items.forEach((item) => observer.observe(item));
+    function spawnHearts() {
+      if (reduceMotion) return;
+      for (let index = 0; index < 5; index += 1) {
+        const heart = document.createElement('span');
+        heart.className = 'portrait-heart';
+        heart.setAttribute('aria-hidden', 'true');
+        heart.textContent = index % 2 ? '♡' : '✦';
+        heart.style.setProperty('--heart-x', `${Math.round((Math.random() - 0.5) * 220)}px`);
+        heart.style.setProperty('--heart-delay', `${index * 90}ms`);
+        button.append(heart);
+        window.setTimeout(() => heart.remove(), 1600 + index * 90);
+      }
+    }
+
+    button.addEventListener('click', () => {
+      const line = HAPPY_LINES[lineIndex % HAPPY_LINES.length];
+      lineIndex += 1;
+      if (speechTitle) speechTitle.textContent = line.title;
+      if (speechDetail) speechDetail.textContent = line.detail;
+      button.classList.remove('is-happy');
+      void button.offsetWidth;
+      button.classList.add('is-happy');
+      spawnHearts();
+      window.clearTimeout(happyTimer);
+      happyTimer = window.setTimeout(() => {
+        button.classList.remove('is-happy');
+      }, 1800);
+    });
   }
 
   document.querySelector('[data-current-year]').textContent = String(new Date().getFullYear());
-  setupNavigation();
-  setupReveal();
+  setupPortrait();
   loadOverview();
 })();

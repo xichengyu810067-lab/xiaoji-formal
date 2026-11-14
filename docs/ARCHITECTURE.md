@@ -61,7 +61,7 @@
 
 | 目錄 | 用途 |
 | --- | --- |
-| `website/` | 官網、狀態頁與遊戲網頁。其中 `commandCatalog.js`、`gameCatalog.js`、`statusData.js` 同時給瀏覽器與 Node 載入，所以不能用 Node 專屬的全域物件。 |
+| `website/` | 官網、功能與指令頁、狀態頁與遊戲網頁。其中 `commandCatalog.js`、`gameCatalog.js`、`statusData.js` 同時給瀏覽器與 Node 載入，所以不能用 Node 專屬的全域物件。頁面結構、配色與動畫的維護方式見 [WEBSITE_ARCHITECTURE.md](WEBSITE_ARCHITECTURE.md)。 |
 | `cloudflare/status-worker/` | 公開狀態資料的 Worker。 |
 | `assets/word-chain/` | 文字接龍的詞庫資料與授權說明。 |
 | `scripts/` | 檢查、匯出、維運與本機測試用的腳本；`scripts/architecture-facts.js` 負責重算本文引用的數字（第 11 節）。 |
@@ -114,7 +114,7 @@
 
 ### 2.3 系統
 
-每個系統是 `src/systems/<名稱>/` 的一個目錄。系統目錄（目前 9 個，重算：counts）有 `economy`、`casino`、`work`、`games`、`community`、`conversation`、`safety`、`schedule`，以及只剩一個轉接檔的 `reminders`。檔案屬於哪個系統，以 `scripts/check-boundaries.js` 的 `SYSTEMS` 為準；它列出每個系統的目錄，以及還留在 `src/services/` 的檔案。還在 `src/services/` 的檔案屬於哪個系統、建議搬去哪裡，見第 3.1 表。
+每個系統是 `src/systems/<名稱>/` 的一個目錄。系統目錄（目前 12 個，重算：counts）有 `economy`、`casino`、`work`、`games`、`community`、`conversation`、`safety`、`schedule`、`farm`、`food`、`stocks`，以及只剩一個轉接檔的 `reminders`。檔案屬於哪個系統，以 `scripts/check-boundaries.js` 的 `SYSTEMS` 為準；它列出每個系統的目錄，以及還留在 `src/services/` 的檔案。還在 `src/services/` 的檔案屬於哪個系統、建議搬去哪裡，見第 3.1 表。
 
 三個寫法約定：
 
@@ -152,7 +152,7 @@
 
 - **位置**：`src/systems/games/`。網頁遊戲 token 局的舊流程與獎勵政策還在 `src/services/`，見第 3.1 表。
 - **內容**：
-  - `board/`：多人棋盤與推理遊戲。`core/`（契約、會話、生命週期、引擎註冊、執行階段註冊表）、`engines/`（`chess`、`gomoku`、`go`、`checkers`、`xiangqi`、`turtleSoup`）、`discord/`（控制項、面板、與 Discord 的橋接）、`renderer/`（棋盤轉成 PNG）、`storage/`（`boardSchema.js`、`sqliteBoardStore.js`）、`turtleSoup/`（題庫、判題、揭曉）。
+  - `board/`：多人棋盤與推理遊戲。`core/`（契約、會話、生命週期、引擎註冊、執行階段註冊表）、`engines/`（`chess`、`gomoku`、`go`、`checkers`、`xiangqi`、`turtleSoup`、`werewolf`）、`discord/`（控制項、面板、與 Discord 的橋接）、`renderer/`（棋盤轉成 PNG）、`storage/`（`boardSchema.js`、`sqliteBoardStore.js`）、`turtleSoup/`（題庫、判題、揭曉）、`werewolf/`（狼人殺的規則表、面板、只給本人看的選單、討論串主持與階段計時器）。
   - 單人遊戲：`soloGameRules.js`、`soloSessionService.js`、`soloDiscordRuntime.js`、`soloPresenter.js`、`soloCustomId.js`、`soloGameError.js`、`soloRuntimeRegistry.js`。
   - `gameLaunchReceipt.js`：遊戲開局的一次性收據。`unifiedGameRuntime.js`：轉接檔，轉到 `gameLaunchCoordinator.js`。
 - **資料表**：`board_*`、`discord_game_*`、`game_*`。其中 `board_*` 由 `src/systems/games/board/storage/boardSchema.js` 建立，安裝在吉幣資料庫裡。
@@ -211,6 +211,13 @@
 - **位置**：`src/systems/schedule/`（`calendar/calendarSystem.js`、`reminders/reminderSystem.js`、`delivery/reminderDelivery.js`）。舊路徑 `src/systems/community/calendarSystem.js` 與 `src/systems/reminders/reminderSystem.js` 是一行轉接檔；`src/services/calendarService.js` 與 `src/services/reminderService.js` 是把個人資料路徑綁上去的包裝。
 - **資料**：不使用資料表，存成 JSON 檔；位置由 `src/platform/personalDataPaths.js` 與 `src/platform/retainedDataSource.js` 決定（第 10 節）。
 - **備註**：`schedule` 目前沒有列在 `SYSTEMS` 裡（它沒有資料表，也不受 R4 約束）。
+
+#### farm（農場與廚房）
+
+- **位置**：`src/systems/farm/`。`farmCatalog.js`（作物、食譜、價格與上限）、`farmRules.js`（純規則：成長、澆水、枯死與休耕、化肥與荒地、出售上限、下廚、加成與送禮，不讀時鐘也不碰資料庫）、`farmService.js`（讀寫狀態並在同一筆吉幣交易裡扣款或入帳）、`discord/farmPresenter.js` 與 `discord/farmDiscord.js`（面板、按鈕與回覆）。
+- **資料表**：`farm_states`（每個帳號一列，存整份檢查過的 JSON 狀態）、`farm_gift_log`（送禮紀錄），由 `farmService.js` 在第一次使用時以 `CREATE TABLE IF NOT EXISTS` 建立在吉幣資料庫裡，不改吉幣的 `schemaVersion`。
+- **對外介面**：`farmService.js` 的動作函式（`viewFarm`、`plant`、`water`、`harvest`、`sell`、`fertilize`、`expand`、`reclaim`、`cook`、`eat`、`gift`）；錢包只經由經濟系統的 `mutateWalletWithApi`，吉幣開關只經由 `ensureGuildEconomyRowWithApi` 與 `readGuildEconomyEnabledWithApi`。
+- **誰可以載入**：`src/commands/farm.js`、`src/commands/kitchen.js`、`src/events/interactionCreate.js`（`farm|1|` 按鈕）與 `gameLaunchCoordinator.js`（`/board start` 的 `farm` launcher）。經濟系統不得載入它（R4）。
 
 #### 功能平台與獎勵帳本（還不是系統）
 
@@ -385,7 +392,7 @@ R1 也把 `src/games/storage/` 底下兩個舊路徑轉接檔列入，所以經�
 
 規則（R6）：一張資料表只能由擁有它的檔案在 SQL 裡寫出表名。擁有者在 `scripts/check-boundaries.js` 的 `TABLE_FAMILIES` 裡宣告：每個家族有表名的樣式與擁有檔案；第一個樣式符合的家族擁有那張表。吉幣資料庫 `src/services/coinDatabase.js` 負責建立與遷移所有系統的資料表，所以它自己的 SQL 不受限制。
 
-檢查只認得「在 `src/` 內用 `CREATE TABLE` 宣告過」的資料表，資料表（目前 119 張，重算：tables）分散在吉幣資料庫、對話封存、棋盤與安全帳本四處。每張表都有擁有者；新增的表沒有符合任何家族時，檢查會直接報錯（見第 5 節）。要列出每張表的家族、擁有檔案與建立它的檔案：`node scripts/architecture-facts.js tables`。
+檢查只認得「在 `src/` 內用 `CREATE TABLE` 宣告過」的資料表，資料表（目前 128 張，重算：tables）分散在吉幣資料庫、對話封存、棋盤、農場與安全帳本五處。每張表都有擁有者；新增的表沒有符合任何家族時，檢查會直接報錯（見第 5 節）。要列出每張表的家族、擁有檔案與建立它的檔案：`node scripts/architecture-facts.js tables`。
 
 ### 4.1 每個家族的表名與擁有檔案
 
@@ -404,6 +411,7 @@ R1 也把 `src/games/storage/` 底下兩個舊路徑轉接檔列入，所以經�
 | 公告 | `github_releases`、`release_announcement_*` | `src/services/releaseAnnouncementService.js` |
 | 遊戲 | `board_*`、`discord_game_*`、`game_*` | `src/systems/games/`、`src/games/`、`src/services/gameService.js`、`src/services/gameRewardPolicy.js`、`src/services/gameServer.js` |
 | 對話 | `user_chat_preferences`、`user_romance_preferences`、`access_audit`、`ai_events`、`archive_identity`、`deletion_receipts`、`import_quarantine`、`import_receipts`、`private_summaries`、`public_messages` | `src/systems/conversation/`、`src/services/aiService.js`、`src/services/aiArchiveService.js`、`src/services/chatStyleService.js`、`src/services/conversationHistoryService.js`、`src/services/conversationModeService.js`、`src/services/memoryService.js`、`src/services/mentionService.js`、`src/services/romanceModeService.js` |
+| 農場 | `farm_*` | `src/systems/farm/` |
 | 安全帳本 | `identity`、`operations`、`reaction_fences`、`watermarks` | `src/systems/safety/` |
 
 名字結尾是 `_rebuild`（含 `_v15_rebuild`、`_v18_rebuild`、`_v21_rebuild`）的表，是資料庫升級時用來重建資料表的暫存表：先建新表、複製資料、再改名。
@@ -525,7 +533,7 @@ node scripts/check-boundaries.js --rule R6    # 只跑一條規則（可重複�
 
 1. 建立 `src/commands/<指令名>.js`，匯出 `data`（`SlashCommandBuilder`）與 `execute`；需要自動完成再加 `autocomplete`。`src/loadCommands.js` 會自動載入這個目錄下所有 `.js`；指令名不可重複，也不可和私有擴充的指令同名。
 2. 在 `website/commandCatalog.js` 的指令表加一列：名稱、說明（必須和 builder 的 description 一字不差）、群組（`general`、`economy`、`community`）、對象（`public`、`admin`、`owner`）、子指令清單、是否列在 `/help`。已經移除的指令名稱放在同一個檔案的 `REMOVED_COMMANDS`，不能再被使用。
-3. 重新產生 `docs/COMMANDS.md`：`node scripts/render-command-docs.js`。這個檔案由程式產生，不要手動編輯。
+3. 重新產生 `docs/COMMANDS.md`：`node scripts/render-command-docs.js`；官網的功能與指令頁也要重新產生：`npm run site:render`。這兩份都由程式產生，不要手動編輯。
 4. 若指令列在 `/help`，`docs/OPERATIONS.md` 的「公開指令」一節也要提到它；`npm run check` 會檢查每個 `/help` 列出的指令都在那一節出現。
 5. 需要權限的指令（`admin`、`owner`）要設預設權限，並在 `execute` 內再檢查一次。公開核心不含擁有者專用的整個指令；這類管理指令由可選擴充提供，只部署到擁有者伺服器（`XIAOJI_OWNER_GUILD_ID`），見 [MANAGEMENT_ISOLATION.md](MANAGEMENT_ISOLATION.md)。對應的測試是 `test/commandDefaultPermissions.test.js` 與 `test/subcommandAccess.test.js`。
 6. 邏輯放進對應的系統，指令檔只做「讀參數、檢查權限、呼叫、回覆」（R1）。
@@ -565,16 +573,16 @@ node scripts/check-boundaries.js --rule R6    # 只跑一條規則（可重複�
 
 ### 6.5 新增一個遊戲
 
-先在 `website/gameCatalog.js` 的 `games` 清單加一列（`key`、名稱、`launcher`、參數、`publicFeatureKey`）；`launcher` 決定開局時交給誰（`board`、`solo`、`word-chain`、`number-chain`、`daily-riddle`、`duel`、`casino`），`gameLaunchCoordinator.js` 的 `SUPPORTED_START_LAUNCHERS` 就是支援的清單。目錄裡的每個遊戲都會被全指令掃描測試開局一次（擁有者與成員各一次），要有對應的 `launcher` 判定；有必選選項的賭場遊戲要在那個測試的 `CASINO_CHOICES` 補合法的選擇。再依遊戲種類：
+先在 `website/gameCatalog.js` 的 `games` 清單加一列（`key`、名稱、`launcher`、參數、`publicFeatureKey`）；`launcher` 決定開局時交給誰（`board`、`solo`、`word-chain`、`number-chain`、`daily-riddle`、`duel`、`casino`、`farm`），`gameLaunchCoordinator.js` 的 `SUPPORTED_START_LAUNCHERS` 就是支援的清單。目錄裡的每個遊戲都會被全指令掃描測試開局一次（擁有者與成員各一次），要有對應的 `launcher` 判定；有必選選項的賭場遊戲要在那個測試的 `CASINO_CHOICES` 補合法的選擇。再依遊戲種類：
 
 **多人棋盤或推理遊戲（`board`）**
 
 1. `src/systems/games/board/core/contracts.js` 的 `GAME_KEYS` 加上遊戲 key。
-2. 在 `src/systems/games/board/engines/<key>.js` 寫引擎。引擎要符合 `assertEngineContract`：`key`、`rulesVersion`、`minPlayers`、`maxPlayers`、`createInitialState`、`applyAction`、`getPublicView`（`getLegalActions`、`normalizeOptions`、`allowedPlayerCounts` 為選填）。可用 `board/core/trustedSystemActions.js` 判斷系統動作。
+2. 在 `src/systems/games/board/engines/<key>.js` 寫引擎。引擎要符合 `assertEngineContract`：`key`、`rulesVersion`、`minPlayers`、`maxPlayers`、`createInitialState`、`applyAction`、`getPublicView`（`getLegalActions`、`normalizeOptions`、`allowedPlayerCounts` 為選填；有時限的階段可提供 `getDeadline`，由 `BoardSessionService.advanceDue` 以系統動作 `system:phase-timeout` 推進；`lobbyOptions` 列出房主能在等候室用 `configure` 改的設定；`hostCanEnd` 讓房主以 `/board stop` 結束進行中的局，`transferHostOnLeave` 讓房主離開時交棒）。可用 `board/core/trustedSystemActions.js` 判斷系統動作。
 3. `src/systems/games/board/discord/boardDiscordRuntime.js` 把引擎加進 `new BoardEngineRegistry([...])` 的清單。
 4. `src/systems/games/board/discord/boardControls.js` 加 `GAME_CHOICES` 與這個遊戲的控制項；全指令掃描測試的元件輪會按遍這些控制項：它用 `CONTROL_INVENTORY` 列出全部控制項，按不到的要在 `CONTROLS_NOT_DRIVEN` 寫理由。
 5. `src/systems/games/board/renderer/svgBoardRenderer.js` 加 `GAME_LABELS` 與棋盤的畫法。
-6. `src/systems/games/board/storage/boardSchema.js` 的 `board_sessions.game_key` 有 `CHECK` 條件。既有資料庫的表不會因為改了這一行而改變，所以要寫遷移（見 6.3 的第 4 點）。
+6. `src/systems/games/board/storage/boardSchema.js` 的 `board_sessions.game_key` `CHECK` 條件由 `GAME_KEYS` 產生；既有資料庫的表少了某個 key 時，`installBoardSchema` 會在同一筆交易裡重建三張 `board_*` 表（筆數不變才提交），不必另寫遷移。
 7. 測試：參考 `test/board-go-engine.test.js`、`test/boardControlLookup.test.js`；新增的測試檔要登記匯出清單。
 
 **單人遊戲（`solo`）**

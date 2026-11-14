@@ -10,6 +10,7 @@ const {
   rememberPreferences,
   updateConsent,
 } = require('../systems/conversation/preferenceMemory');
+const { describeOwnUsage, forgetCachedConsent, forgetOwnMessages } = require('../systems/conversation/channelMemory');
 
 // Every reply is only for the member who ran it: their own memory, checked by their Discord ID.
 const NO_MENTIONS = Object.freeze({ parse: [], users: [], roles: [], repliedUser: false });
@@ -55,8 +56,8 @@ async function sendLines(interaction, lines) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('memory')
-    .setDescription('查看或管理小吉記住的你的喜好')
-    .addSubcommand((subcommand) => subcommand.setName('view').setDescription('查看小吉記住的你的喜好'))
+    .setDescription('查看或管理小吉記住的你的喜好與聊天紀錄')
+    .addSubcommand((subcommand) => subcommand.setName('view').setDescription('查看小吉記住的你的喜好與聊天紀錄'))
     .addSubcommand((subcommand) => subcommand.setName('export').setDescription('取得你的記憶完整複本'))
     .addSubcommand((subcommand) =>
       subcommand.setName('add').setDescription('補充一條你的喜好')
@@ -68,9 +69,9 @@ module.exports = {
         .addIntegerOption((option) => option.setName('item').setDescription('/memory view 裡的編號').setRequired(true)
           .setMinValue(1))
     )
-    .addSubcommand((subcommand) => subcommand.setName('off').setDescription('停止小吉蒐集與使用你的喜好'))
-    .addSubcommand((subcommand) => subcommand.setName('on').setDescription('恢復小吉蒐集與使用你的喜好'))
-    .addSubcommand((subcommand) => subcommand.setName('delete').setDescription('刪除小吉記住的全部喜好'))
+    .addSubcommand((subcommand) => subcommand.setName('off').setDescription('停止小吉蒐集與使用你的喜好與聊天紀錄'))
+    .addSubcommand((subcommand) => subcommand.setName('on').setDescription('恢復小吉蒐集與使用你的喜好與聊天紀錄'))
+    .addSubcommand((subcommand) => subcommand.setName('delete').setDescription('刪除小吉記住的全部喜好與聊天紀錄'))
     .addSubcommand((subcommand) =>
       subcommand.setName('share').setDescription('設定是否公開聊天記憶')
         .addStringOption((option) => option.setName('choice').setDescription('公開或不公開').setRequired(true)
@@ -87,8 +88,13 @@ module.exports = {
     const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === 'view' || subcommand === 'export') {
-      const [consent, preferences] = await Promise.all([getConsent(userId), listOwnPreferences(userId)]);
+      const [consent, preferences, usage] = await Promise.all([
+        getConsent(userId), listOwnPreferences(userId), describeOwnUsage(userId).catch(() => null)]);
       const lines = [consentLine(consent)];
+      if (usage) {
+        lines.push(`聊天紀錄：本月已記住 ${usage.kept} 則｜今天還可以記 ${usage.remainingToday} 則｜本月還可以記 ${usage.remainingInMonth} 則`);
+        lines.push('-# 每人每天 30 則，用完會先借用隔天的額度；每月 1 號中午 12:00 重新計算並刪除上個月的內容。私訊不會被記住。');
+      }
       if (!preferences.length) lines.push('小吉目前沒有記住你的任何喜好。');
       preferences.forEach((entry, index) => {
         const where = describeScope(entry.scope, guildId);
@@ -104,6 +110,10 @@ module.exports = {
     }
 
     if (subcommand === 'add') {
+      if (!guildId) {
+        await interaction.reply(privateReply('私訊裡的內容小吉不會記住，請在伺服器裡使用 /memory add。'));
+        return;
+      }
       const consent = await getConsent(userId);
       if (!consent.collecting) {
         await interaction.reply(privateReply('你已經停止記憶，請先用 /memory on 恢復。'));
@@ -126,14 +136,15 @@ module.exports = {
 
     if (subcommand === 'off' || subcommand === 'on') {
       await updateConsent(userId, { collecting: subcommand === 'on' });
+      forgetCachedConsent(userId);
       await interaction.reply(privateReply(subcommand === 'on'
-        ? '已恢復：小吉會繼續記住並使用你的喜好。'
-        : '已停止：小吉不再蒐集、也不再使用你的喜好；已記住的內容仍保留，要刪除請用 /memory delete。'));
+        ? '已恢復：小吉會繼續記住並使用你的喜好與聊天紀錄。'
+        : '已停止：小吉不再蒐集、也不再使用你的喜好與聊天紀錄；已記住的內容仍保留，要刪除請用 /memory delete。'));
       return;
     }
 
     if (subcommand === 'delete') {
-      await interaction.reply(privateReply('確定要刪除小吉記住的全部喜好嗎？刪除後無法復原。', {
+      await interaction.reply(privateReply('確定要刪除小吉記住的全部喜好與聊天紀錄嗎？刪除後無法復原。', {
         components: [new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`${DELETE_PREFIX}confirm|${userId}`).setLabel('確定刪除').setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId(`${DELETE_PREFIX}cancel|${userId}`).setLabel('取消').setStyle(ButtonStyle.Secondary),
@@ -145,6 +156,7 @@ module.exports = {
     if (subcommand === 'share') {
       const choice = interaction.options.getString('choice', true) === 'public' ? 'public' : 'private';
       await updateConsent(userId, { choice });
+      forgetCachedConsent(userId);
       await interaction.reply(privateReply(choice === 'public'
         ? '已設定：公開聊天記憶，小吉所在的所有伺服器共用同一份記憶。'
         : '已設定：不公開聊天記憶，每個伺服器的記憶各自分開。'));
@@ -162,8 +174,9 @@ module.exports = {
       return;
     }
     const removed = isMemoryConfigured() ? await forgetAllOwnPreferences(userId) : 0;
+    const removedMessages = isMemoryConfigured() ? await forgetOwnMessages(userId) : 0;
     await interaction.update({
-      content: `已刪除全部記憶（共 ${removed} 條）。你的公開設定與「已詢問過」的紀錄會保留，用來記住你的選擇。`,
+      content: `已刪除全部記憶（喜好 ${removed} 條、聊天紀錄 ${removedMessages} 則）。你的公開設定與「已詢問過」的紀錄會保留，用來記住你的選擇。`,
       components: [],
     });
   },

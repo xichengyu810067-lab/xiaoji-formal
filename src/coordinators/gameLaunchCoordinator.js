@@ -14,11 +14,12 @@ const { describeWordChainStatus, getWordChainStatus } = require('../services/wor
 const { replyCoinError } = require('../utils/coinPresentation');
 const { replyEphemeral } = require('../utils/moderation');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
+const { openFarmPanel } = require('../systems/farm/discord/farmDiscord');
 
 const BOARD_LAUNCHERS = new Set(['board']);
 const SOLO_LAUNCHERS = new Set(['solo']);
 const SUPPORTED_START_LAUNCHERS = Object.freeze(new Set([
-  'board', 'solo', 'word-chain', 'number-chain', 'casino', 'duel', 'daily-riddle',
+  'board', 'solo', 'word-chain', 'number-chain', 'casino', 'duel', 'daily-riddle', 'farm',
 ]));
 // Casino and duel-tower take every catalog parameter as mandatory (their executors read amount, wager and
 // weapon-item-id as required options and the services reject a missing choice). Every other launcher lists
@@ -104,6 +105,8 @@ async function startUnifiedGame(interaction) {
     if (game.launcher === 'number-chain') return launchNumberChain(interaction);
     if (game.launcher === 'casino') return await executeCasinoGame(interaction, game.key);
     if (game.launcher === 'duel') return await executeDuelTowerGame(interaction);
+    // The farm is not a round: starting it opens the player's own farm panel, the same as /farm view.
+    if (game.launcher === 'farm') return await openFarmPanel(interaction);
     if (game.launcher === 'daily-riddle') {
       if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true });
       const result = await openOrGetDailyRiddle(interaction.client, { guildId: interaction.guildId });
@@ -210,6 +213,7 @@ async function showUnifiedGameStatus(interaction) {
       return await getBoardRuntime().executeCommand(interaction);
     }
     if (game.launcher === 'solo') return getSoloRuntime().resume(interaction, game.key);
+    if (game.launcher === 'farm') return await openFarmPanel(interaction);
     if (game.launcher === 'word-chain') {
       const session = await getWordChainStatus(interaction.guildId, interaction.channelId);
       return replyPrivate(interaction, session

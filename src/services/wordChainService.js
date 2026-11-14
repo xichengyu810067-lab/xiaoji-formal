@@ -29,6 +29,7 @@ const {
 } = require('../systems/safety/chainReactionFence');
 const { snowflakeTimestamp } = require('../platform/publicEffectGrant');
 const { corpusVersion, getSuccessors, hasWord, legacyCorpusVersion, wordKey } = require('./wordChainLexicon');
+const { judgeWord } = require('../systems/community/wordChainJudge');
 const logger = require('../utils/logger');
 
 const FEATURE_KEY = 'word_chain';
@@ -55,7 +56,8 @@ function graphemes(value) {
   return Array.from(new Intl.Segmenter('zh-Hant', { granularity: 'grapheme' }).segment(value), ({ segment }) => segment);
 }
 
-function validateWord(input, version = corpusVersion) {
+// judged: the answer of the word chain judge (wordChainJudge.js) for a word that is not in the dictionary index, or null.
+function validateWord(input, version = corpusVersion, { judged = null } = {}) {
   const normalized = String(input ?? '').normalize('NFC').trim();
   const segments = graphemes(normalized);
 
@@ -67,6 +69,12 @@ function validateWord(input, version = corpusVersion) {
   }
   // The word is stored as it was typed; only the comparison treats written variants of a character (台 and 臺) alike.
   if (!hasWord(normalized, version)) {
+    if (judged?.word === normalized && judged.valid === true) {
+      return { ok: true, word: normalized, graphemes: segments, judgedBy: 'claude' };
+    }
+    if (judged?.word === normalized && judged.valid === false) {
+      return { ok: false, code: 'UNKNOWN_WORD', message: `小吉查過了，「${normalized}」不是常用的詞語，請換一個 2 到 6 字的詞。` };
+    }
     return { ok: false, code: 'UNKNOWN_WORD', message: '這不是小吉詞庫中的完整常用詞，請換一個 2 到 6 字的詞。' };
   }
 
@@ -339,6 +347,35 @@ function describeWordChainStatus(session) {
     : `文字接龍進行中：${progress}。`;
 }
 
+// A move whose word is not in the dictionary index, and which is otherwise valid now (an active round in this channel,
+// another player's turn, the right first character, not used before), is asked of the judge before the transaction.
+// Anything else returns null at once, so a wrong move never costs a question. The transaction checks it all again.
+async function judgeUnknownMove({ guildId, channelId, userId, expectedChannelId, messageId, content, judge }) {
+  if (typeof judge !== 'function' || channelId !== expectedChannelId) return null;
+  const normalized = String(content ?? '').normalize('NFC').trim();
+  const segments = graphemes(normalized);
+  if (segments.length < 2 || segments.length > 6 || !/^\p{Script=Han}+$/u.test(normalized)) return null;
+  const move = await withCoinDatabase((api) => {
+    if (api.get('SELECT session_id FROM text_chain_entries WHERE message_id = ?', [messageId])) return null;
+    const session = selectActiveSession(api, guildId, channelId);
+    if (!session || session.last_user_id === userId) return null;
+    let version;
+    try {
+      version = getActiveCorpusVersion(session.corpus_version);
+    } catch {
+      return null;
+    }
+    if (hasWord(normalized, version)) return null;
+    if (wordKey(segments[0]) !== wordKey(graphemes(session.current_word).at(-1))) return null;
+    const used = api.all('SELECT word FROM text_chain_entries WHERE session_id = ?', [session.id])
+      .some((entry) => wordKey(entry.word) === wordKey(normalized));
+    return used ? null : { word: normalized };
+  });
+  if (!move) return null;
+  const verdict = await judge(move.word, { guildId, userId });
+  return { word: move.word, valid: verdict?.valid ?? null };
+}
+
 async function acceptWordChainMessage({
   guildId,
   channelId,
@@ -348,6 +385,8 @@ async function acceptWordChainMessage({
   expectedChannelId = channelId,
   now = new Date(),
   beforeCommit = null,
+  // Asked for a word that is not in the dictionary index (wordChainJudge.js); tests pass their own.
+  judge = judgeWord,
 }) {
   const normalizedGuildId = requireId(guildId, 'guildId');
   const normalizedChannelId = requireId(channelId, 'channelId');
@@ -355,6 +394,10 @@ async function acceptWordChainMessage({
   const normalizedUserId = requireId(userId, 'userId');
   const normalizedExpectedChannelId = requireId(expectedChannelId, 'expectedChannelId');
   const timestamp = new Date(now).toISOString();
+  const judged = await judgeUnknownMove({
+    guildId: normalizedGuildId, channelId: normalizedChannelId, userId: normalizedUserId,
+    expectedChannelId: normalizedExpectedChannelId, messageId: normalizedMessageId, content, judge,
+  });
 
   return withCoinTransaction((api) => {
     const duplicate = api.get('SELECT session_id FROM text_chain_entries WHERE message_id = ?', [normalizedMessageId]);
@@ -375,7 +418,7 @@ async function acceptWordChainMessage({
       };
     }
     const sessionVersion = getActiveCorpusVersion(session.corpus_version);
-    const checkedWord = validateWord(content, sessionVersion);
+    const checkedWord = validateWord(content, sessionVersion, { judged });
     if (!checkedWord.ok) return checkedWord;
     if (session.last_user_id === normalizedUserId) {
       return { ok: false, code: 'SAME_USER', message: '要輪到其他人接詞才行喔。' };

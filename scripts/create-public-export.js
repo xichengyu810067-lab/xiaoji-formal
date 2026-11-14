@@ -347,6 +347,7 @@ const PUBLIC_PACKAGE_SCRIPTS = Object.freeze([
   'audit',
   'site:preview',
   'site:check',
+  'site:render',
   'games:preview',
 ]);
 

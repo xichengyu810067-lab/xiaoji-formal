@@ -1,6 +1,7 @@
 const { BoardCoreError, cloneJson } = require('../core/contracts');
 const { createGridMoveParser, getModalValue, parseGridCoordinate } = require('./boardInteractionAdapter');
 const { MAX_INPUT_LENGTH: MAX_JUDGE_INPUT_LENGTH } = require('../turtleSoup/retriever');
+const { buildActiveControls, buildActiveEmbedText, buildLobbyView } = require('../werewolf/werewolfPresentation');
 
 const GAME_CHOICES = Object.freeze([
   Object.freeze({ name: '海龜湯（1–20 人）', value: 'turtle-soup' }),
@@ -9,6 +10,7 @@ const GAME_CHOICES = Object.freeze([
   Object.freeze({ name: '圍棋（2 人）', value: 'go' }),
   Object.freeze({ name: '六角星跳棋（2、3、4、6 人）', value: 'checkers' }),
   Object.freeze({ name: '象棋（2 人）', value: 'xiangqi' }),
+  Object.freeze({ name: '狼人殺（6–12 人）', value: 'werewolf' }),
 ]);
 
 const CONTROL_DEFINITIONS = Object.freeze({
@@ -48,6 +50,8 @@ const CONTROL_DEFINITIONS = Object.freeze({
     Object.freeze({ id: 'decline-draw', label: '拒絕和棋', kind: 'button', style: 'secondary' }),
     Object.freeze({ id: 'resign', label: '認輸', kind: 'button', style: 'danger' }),
   ]),
+  // The werewolf buttons open replies only the presser sees; decorateBoardResult enables them by phase.
+  werewolf: Object.freeze(buildActiveControls(null).map((control) => Object.freeze(control))),
 });
 
 const MODAL_DEFINITIONS = Object.freeze({
@@ -185,6 +189,7 @@ function getControls(gameKey) {
 async function decorateBoardResult(result, { store, scenarioProvider = null } = {}) {
   const decorated = cloneJson(result, 'board result');
   if (decorated.game) decorated.game.controls = getControls(decorated.session.gameKey);
+  if (decorated.session.gameKey === 'werewolf') return decorateWerewolf(decorated, store);
   if (decorated.session.gameKey !== 'turtle-soup' || !decorated.game || !scenarioProvider) return decorated;
 
   try {
@@ -200,6 +205,27 @@ async function decorateBoardResult(result, { store, scenarioProvider = null } = 
     ];
   } catch (_error) {
     // Corpus failures must never disclose private content or damage the stored session.
+  }
+  return decorated;
+}
+
+// The lobby shows the host's settings (read from the stored rules); a running game shows the public view only.
+async function decorateWerewolf(decorated, store) {
+  if (decorated.session.status === 'lobby') {
+    let rules = null;
+    try {
+      rules = (await store.getSessionById(decorated.session.id))?.rules || null;
+    } catch (_error) {
+      // The panel still renders with the default settings.
+    }
+    const lobby = buildLobbyView(decorated.session, rules);
+    decorated.game = lobby.game;
+    decorated.lobbyControls = lobby.lobbyControls;
+    return decorated;
+  }
+  if (decorated.game) {
+    decorated.game.controls = buildActiveControls(decorated.game);
+    decorated.game.embedText = buildActiveEmbedText(decorated.game);
   }
   return decorated;
 }
