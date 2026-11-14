@@ -14,7 +14,7 @@
 |---|---|
 | `website/index.html` | 首頁：角色介紹、即時概況、關於小吉、功能亮點（由清冊產生）。 |
 | `website/guide.html` | 功能與指令頁：所有公開功能與指令，可搜尋、依分類與可用對象篩選。清單由程式寫入。 |
-| `website/status.html` | 即時狀態頁：整體服務狀態與公開功能數量，功能說明連到功能與指令頁。 |
+| `website/status.html` | 即時狀態頁：整體服務狀態，以及每項公開功能、每個公開斜線指令與子指令的即時狀態；功能說明連到功能與指令頁。 |
 | `website/policies.html` | 使用者政策、隱私權政策與公開資料聲明。內容與 `website/siteSupport.js` 的政策文字必須一致（`test/policyPublication.test.js`）。 |
 | `website/styles.css` | 所有頁面共用的設計變數、頁首、按鈕、首頁區塊、動畫。 |
 | `website/guide.css` | 功能與指令頁專用樣式。 |
@@ -26,6 +26,7 @@
 | `website/app.js` | 首頁專用：即時概況資料、頭像互動。 |
 | `website/guideSearch.js` | 功能與指令頁的搜尋與篩選；只負責隱藏不符合的項目。 |
 | `website/status.js`、`website/statusData.js` | 狀態頁的即時資料讀取與顯示。 |
+| `website/statusHealthCheck.js` | 上次版本的離線健檢結果（由 `scripts/build-status-health-check.js` 產生，不要手動編輯）；狀態頁完全拿不到即時指令狀態時才在指令旁顯示。 |
 | `website/publicFeatureCatalog.js` | 公開功能清冊（系統 → 功能的用途、使用方式、使用限制）。功能說明的唯一來源。 |
 | `website/commandCatalog.js` | 公開指令目錄。指令清單的唯一來源，`/help` 與 `docs/COMMANDS.md` 也用它。 |
 | `scripts/render-website-guide.js` | 把清冊與指令目錄寫進 `website/guide.html` 與 `website/index.html` 的產生區塊。 |
@@ -58,8 +59,9 @@
 | 區塊 id | 底色 | 內容 | 陪伴台詞 |
 |---|---|---|---|
 | `status-top` | mint | 標題與整體服務卡（`status.js` 讀 `/api/public/status`） | 小吉會如實回報狀態，不會亂猜喔 |
-| `status-summary` | lavender | 公開系統數、公開子功能數、逐項即時狀態 | — |
+| `status-summary` | lavender | 正常、維護中、異常的項目數（功能＋指令，不含子指令） | — |
 | `status-unavailable` | — | 狀態資料拿不到時才顯示的說明 | — |
+| `status-items` | pink | 逐項即時狀態：搜尋、只看維護中與異常、功能（產生區塊 `status-features`）與斜線指令（產生區塊 `status-commands`），依分類收合，有狀況的分類自動展開 | 有狀況的分類會自己打開，小吉不藏起來～ |
 | `status-guide` | peach | 公開功能清冊的入口，連到功能與指令頁 | 想知道功能怎麼用？到功能與指令頁找找～ |
 
 ### `website/policies.html`
@@ -81,6 +83,8 @@ HTML 裡夾在 `<!-- generated:名稱:start -->` 與 `<!-- generated:名稱:end 
 | `guide-filters` | `website/guide.html` | 清冊的系統名稱（分類）與固定的可用對象（一般成員、需管理權限） |
 | `guide-features` | `website/guide.html` | `website/publicFeatureCatalog.js` 的每一項功能 |
 | `guide-commands` | `website/guide.html` | `src/commands/help.js` 的 `buildHelpSections()`，與 Discord 的 `/help` 相同；擁有者專用的指令與子指令不會出現 |
+| `status-features` | `website/status.html` | `website/statusData.js` 的 `PUBLIC_FEATURE_CATALOG`，依分類分組 |
+| `status-commands` | `website/status.html` | `src/platform/publicCommandStatus.js` 的 `listPublicCommands()`（`website/commandCatalog.js` 的公開指令與子指令，不含擁有者專用），依 `/help` 分組 |
 | `home-highlights` | `website/index.html` | 腳本裡的 `HOMEPAGE_HIGHLIGHTS`（挑哪些系統、圖示、一句介紹）＋該系統在清冊裡的全部功能名稱 |
 
 修改清冊、指令目錄或首頁亮點設定後，執行 `npm run site:render`。`npm run check` 會比對頁面與產生結果，沒有重新產生時會失敗。

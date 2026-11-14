@@ -8,6 +8,8 @@
 // Only the symbol is ever sent. Answers are cached (quotes 30 to 60 seconds, history an hour, names half a day), so a
 // busy channel does not repeat the same request. This is market data for reference, never investment advice.
 
+const { recordServiceOutcome } = require('../../platform/serviceHealth');
+
 const TWSE_MIS = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp';
 const TWSE_DAY = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY';
 const TPEX_DAY = 'https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock';
@@ -42,6 +44,9 @@ function createMarketData({
   fetchImpl = (...args) => globalThis.fetch(...args),
   now = () => Date.now(),
   apiKey = () => String(process.env.TWELVE_DATA_API_KEY || '').trim(),
+  // Tells the public status page whether the quote sources answer (src/platform/serviceHealth.js). A missing Twelve
+  // Data key is not a failure: Taiwan quotes still work without it.
+  recordOutcome = (ok) => recordServiceOutcome('market_data', ok),
 } = {}) {
   const cache = new Map();
   let twelveCalls = [];
@@ -55,17 +60,26 @@ function createMarketData({
     return value;
   }
 
-  async function getJson(url, headers = {}) {
+  // healthy(data): whether an answer that arrived means the source works (an error reply about one symbol still does).
+  async function getJson(url, headers = {}, { healthy = () => true } = {}) {
     let response;
     try {
       response = await fetchImpl(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), redirect: 'error' });
     } catch {
+      recordOutcome(false);
       throw new MarketDataError('provider_unavailable', '報價資料暫時無法取得，請稍後再試。');
     }
-    if (!response.ok) throw new MarketDataError('provider_unavailable', '報價資料暫時無法取得，請稍後再試。');
+    if (!response.ok) {
+      // Too many requests is our own pace, not a broken source.
+      if (response.status !== 429) recordOutcome(false);
+      throw new MarketDataError('provider_unavailable', '報價資料暫時無法取得，請稍後再試。');
+    }
     try {
-      return await response.json();
+      const data = await response.json();
+      recordOutcome(healthy(data));
+      return data;
     } catch {
+      recordOutcome(false);
       throw new MarketDataError('provider_unavailable', '報價資料暫時無法取得，請稍後再試。');
     }
   }
@@ -193,7 +207,9 @@ function createMarketData({
     takeTwelveSlot();
     const url = new URL(`${TWELVE_DATA}/${path}`);
     for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
-    const data = await getJson(url, { Authorization: `apikey ${key}` });
+    const data = await getJson(url, { Authorization: `apikey ${key}` }, {
+      healthy: (answer) => answer?.status !== 'error' || [400, 404, 429].includes(Number(answer.code)),
+    });
     if (data?.status === 'error') {
       if (Number(data.code) === 404 || Number(data.code) === 400) throw new MarketDataError('not_found', `找不到「${params.symbol}」的報價。`);
       if (Number(data.code) === 429) throw new MarketDataError('rate_limited', '美股與加密貨幣的查詢太頻繁了，請過一分鐘再試。');

@@ -135,3 +135,23 @@ test('the README status badge tells only the overall state', async () => {
   assert.deepEqual(message(view('unknown', { normal: 0, maintenance: 0, broken: 0 }, null)), ['小吉狀態', '暫時無法確認', 'lightgrey']);
   assert.equal(view('operational', { normal: 1, maintenance: 0, broken: 0 }).schemaVersion, 1);
 });
+
+test('the solo games played through /board are normal without a report from the retired web game server', async (t) => {
+  useHealth(t);
+  const now = await statuses();
+  for (const key of ['tetris', 'number_match', 'sudoku']) assert.equal(now[key], 'normal', key);
+
+  // A reward that broke its contract still lowers the card.
+  const snapshot = await buildPublicStatusSnapshot(client, {
+    now: new Date(NOW),
+    healthReader: async () => [{ featureKey: 'sudoku', status: 'broken', updatedAt: new Date(NOW).toISOString() }],
+    usageReader: async () => [],
+  });
+  assert.equal(snapshot.features.find((feature) => feature.key === 'sudoku').status, 'broken');
+});
+
+test('with every service configured and nothing failing, every card is normal', async (t) => {
+  useHealth(t);
+  const now = await statuses();
+  assert.deepEqual(Object.entries(now).filter(([, status]) => status !== 'normal'), []);
+});

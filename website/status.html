@@ -16,11 +16,13 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./guide.css" />
     <link rel="stylesheet" href="./status.css" />
     <link rel="stylesheet" href="./support.css" />
     <script src="./gameCatalog.js" defer></script>
     <script src="./statusData.js" defer></script>
     <script src="./publicFeatureCatalog.js" defer></script>
+    <script src="./statusHealthCheck.js" defer></script>
     <script src="./status.js" defer></script>
     <script src="./policyPublication.js" defer></script>
     <script src="./siteSupport.js" defer></script>
@@ -56,7 +58,7 @@
         <div class="status-hero-copy">
           <p class="kicker">REAL-TIME STATUS</p>
           <h1>小吉現在的<br /><span>每一項狀態</span></h1>
-          <p>這裡只顯示去識別化的整體服務資訊。每項功能的用途、使用方式與限制，請到「功能與指令」頁搜尋。</p>
+          <p>這裡列出每項公開功能與每個斜線指令現在的狀態，只顯示去識別化的資訊。每項功能的用途、使用方式與限制，請到「功能與指令」頁搜尋。</p>
         </div>
 
         <div class="overall-card" data-overall-card aria-live="polite">
@@ -81,10 +83,11 @@
           </button>
         </div>
         <div class="summary-grid">
-          <article><span class="summary-dot normal"></span><p>公開系統</p><strong data-summary="systems">—</strong></article>
-          <article><span class="summary-dot maintenance"></span><p>公開子功能</p><strong data-summary="features">—</strong></article>
-          <article><span class="summary-dot unknown"></span><p>逐項即時狀態</p><strong class="summary-word" data-summary="verification">未逐項驗證</strong></article>
+          <article><span class="summary-dot normal"></span><p>正常</p><strong data-summary="normal">—</strong></article>
+          <article><span class="summary-dot maintenance"></span><p>維護中</p><strong data-summary="maintenance">—</strong></article>
+          <article><span class="summary-dot broken"></span><p>異常（損壞）</p><strong data-summary="broken">—</strong></article>
         </div>
+        <p class="summary-note" data-summary-note>逐項即時狀態：功能與指令（不含子指令）合計，讀取中…</p>
       </section>
 
       <section id="status-unavailable" class="status-unavailable" data-status-unavailable hidden aria-live="assertive">
@@ -93,6 +96,625 @@
           <h2>狀態資料暫時無法取得</h2>
           <p>小吉不會把「沒有資料」當成「正常」。請稍後再更新，或等狀態服務恢復。</p>
         </div>
+      </section>
+
+      <section id="status-items" class="status-items" aria-labelledby="items-heading" data-scene="pink" data-companion="有狀況的分類會自己打開，小吉不藏起來～">
+        <div class="status-items-heading">
+          <p class="kicker">EVERY FEATURE &amp; COMMAND</p>
+          <h2 id="items-heading">逐項即時狀態</h2>
+          <p>依分類收合；有維護中或異常項目的分類會自動展開。點指令可以看每個子指令的狀態。</p>
+        </div>
+
+        <form class="status-filter" data-status-filter role="search" hidden>
+          <div class="guide-search-box">
+            <label class="sr-only" for="status-q">搜尋功能或指令</label>
+            <span class="guide-search-icon" aria-hidden="true">⌕</span>
+            <input id="status-q" name="q" type="search" maxlength="60" placeholder="輸入關鍵字，例如：天氣、bank、提醒" autocomplete="off" />
+            <button class="guide-reset" type="reset">清除</button>
+          </div>
+          <label class="status-only-issues"><input type="checkbox" name="issues" data-status-issues /> 只看維護中與異常</label>
+        </form>
+        <p class="status-empty" data-status-empty hidden>沒有符合條件的項目。</p>
+
+        <div class="status-columns">
+          <section class="status-block" aria-labelledby="status-features-heading">
+            <h3 id="status-features-heading">功能</h3>
+            <!-- generated:status-features:start -->
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">核心服務</span><span class="status-group-count" data-status-group-count>1 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="core_chat" data-search="小吉聊天 核心服務">
+                    <span class="status-row-head"><strong class="status-row-name">小吉聊天</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">社群服務</span><span class="status-group-count" data-status-group-count>1 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="welcome" data-search="新人歡迎 社群服務">
+                    <span class="status-row-head"><strong class="status-row-name">新人歡迎</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">實用工具</span><span class="status-group-count" data-status-group-count>3 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="reminder" data-search="提醒服務 實用工具">
+                    <span class="status-row-head"><strong class="status-row-name">提醒服務</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="calendar" data-search="行事曆 實用工具">
+                    <span class="status-row-head"><strong class="status-row-name">行事曆</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="weather" data-search="天氣查詢 實用工具">
+                    <span class="status-row-head"><strong class="status-row-name">天氣查詢</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">社群互動</span><span class="status-group-count" data-status-group-count>3 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="poll" data-search="投票 社群互動">
+                    <span class="status-row-head"><strong class="status-row-name">投票</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="word_chain" data-search="文字接龍 社群互動">
+                    <span class="status-row-head"><strong class="status-row-name">文字接龍</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="number_chain" data-search="數字接龍 社群互動">
+                    <span class="status-row-head"><strong class="status-row-name">數字接龍</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">吉幣與遊戲</span><span class="status-group-count" data-status-group-count>4 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="economy" data-search="吉幣系統 吉幣與遊戲">
+                    <span class="status-row-head"><strong class="status-row-name">吉幣系統</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="tetris" data-search="俄羅斯方塊 吉幣與遊戲">
+                    <span class="status-row-head"><strong class="status-row-name">俄羅斯方塊</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="number_match" data-search="數字配對 吉幣與遊戲">
+                    <span class="status-row-head"><strong class="status-row-name">數字配對</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="sudoku" data-search="數獨 吉幣與遊戲">
+                    <span class="status-row-head"><strong class="status-row-name">數獨</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">每日活動</span><span class="status-group-count" data-status-group-count>2 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="daily_riddle" data-search="每日猜謎 每日活動">
+                    <span class="status-row-head"><strong class="status-row-name">每日猜謎</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="daily_discussion" data-search="每日議題 每日活動">
+                    <span class="status-row-head"><strong class="status-row-name">每日議題</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">聊天個人化</span><span class="status-group-count" data-status-group-count>2 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="chat_style" data-search="對話風格 聊天個人化">
+                    <span class="status-row-head"><strong class="status-row-name">對話風格</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="romance" data-search="情侶模式 聊天個人化">
+                    <span class="status-row-head"><strong class="status-row-name">情侶模式</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">AI 聊天</span><span class="status-group-count" data-status-group-count>4 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="student" data-search="好奇寶寶 /student ai 聊天">
+                    <span class="status-row-head"><strong class="status-row-name">好奇寶寶 /student</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="memory" data-search="聊天記憶 ai 聊天">
+                    <span class="status-row-head"><strong class="status-row-name">聊天記憶</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="image_reading" data-search="看圖 ai 聊天">
+                    <span class="status-row-head"><strong class="status-row-name">看圖</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="web_search" data-search="上網搜尋 ai 聊天">
+                    <span class="status-row-head"><strong class="status-row-name">上網搜尋</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="feature">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">網站服務</span><span class="status-group-count" data-status-group-count>2 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row" data-status-item data-kind="feature" data-key="official_website" data-search="小吉官網 網站服務">
+                    <span class="status-row-head"><strong class="status-row-name">小吉官網</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row" data-status-item data-kind="feature" data-key="status_website" data-search="即時狀態網站 網站服務">
+                    <span class="status-row-head"><strong class="status-row-name">即時狀態網站</strong></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <!-- generated:status-features:end -->
+          </section>
+          <section class="status-block" aria-labelledby="status-commands-heading">
+            <h3 id="status-commands-heading">斜線指令</h3>
+            <!-- generated:status-commands:start -->
+            <div class="status-group" data-status-group data-kind="command">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">一般與個人化</span><span class="status-group-count" data-status-group-count>19 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="ping" data-search="/ping 確認小吉目前在線">
+                    <span class="status-row-head"><code class="status-usage">/ping</code><span class="status-row-purpose">確認小吉目前在線</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="fortune" data-search="/fortune 抽一則小吉籤">
+                    <span class="status-row-head"><code class="status-usage">/fortune</code><span class="status-row-purpose">抽一則小吉籤</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="roll" data-search="/roll 擲骰子">
+                    <span class="status-row-head"><code class="status-usage">/roll</code><span class="status-row-purpose">擲骰子</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="weather" data-search="/weather 查詢天氣">
+                    <span class="status-row-head"><code class="status-usage">/weather</code><span class="status-row-purpose">查詢天氣</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="stock" data-search="/stock 查詢台股、美股、etf 與加密貨幣報價 quote chart watchlist watch-add watch-remove">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/stock</code><span class="status-row-purpose">查詢台股、美股、ETF 與加密貨幣報價</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">5 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="quote"><code class="status-usage">/stock quote</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="chart"><code class="status-usage">/stock chart</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="watchlist"><code class="status-usage">/stock watchlist</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="watch-add"><code class="status-usage">/stock watch-add</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="watch-remove"><code class="status-usage">/stock watch-remove</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="food" data-search="/food 食譜查詢、附近美食推薦；伺服器美食地圖測試中，限授權伺服器 recipe nearby add list remove">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/food</code><span class="status-row-purpose">食譜查詢、附近美食推薦；伺服器美食地圖測試中，限授權伺服器</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">5 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="recipe"><code class="status-usage">/food recipe</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="nearby"><code class="status-usage">/food nearby</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="add"><code class="status-usage">/food add</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="list"><code class="status-usage">/food list</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="remove"><code class="status-usage">/food remove</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="poll" data-search="/poll 建立按鈕投票">
+                    <span class="status-row-head"><code class="status-usage">/poll</code><span class="status-row-purpose">建立按鈕投票</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="remind" data-search="/remind 管理提醒 add list delete">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/remind</code><span class="status-row-purpose">管理提醒</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">3 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="add"><code class="status-usage">/remind add</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="list"><code class="status-usage">/remind list</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="delete"><code class="status-usage">/remind delete</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="calendar" data-search="/calendar 管理自己的跨伺服器個人行事曆 add list delete">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/calendar</code><span class="status-row-purpose">管理自己的跨伺服器個人行事曆</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">3 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="add"><code class="status-usage">/calendar add</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="list"><code class="status-usage">/calendar list</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="delete"><code class="status-usage">/calendar delete</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="set-welcome" data-search="/set-welcome 設定新人歡迎頻道">
+                    <span class="status-row-head"><code class="status-usage">/set-welcome</code><span class="status-row-purpose">設定新人歡迎頻道</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="release-announcements" data-search="/release-announcements 設定小吉正式 github release 公告頻道 set status">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/release-announcements</code><span class="status-row-purpose">設定小吉正式 GitHub Release 公告頻道</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">2 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="set"><code class="status-usage">/release-announcements set</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/release-announcements status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="server" data-search="/server 顯示目前伺服器資訊">
+                    <span class="status-row-head"><code class="status-usage">/server</code><span class="status-row-purpose">顯示目前伺服器資訊</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="status" data-search="/status 顯示小吉目前狀態">
+                    <span class="status-row-head"><code class="status-usage">/status</code><span class="status-row-purpose">顯示小吉目前狀態</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="chat-style" data-search="/chat-style 查看或變更小吉與你的對話風格 current set">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/chat-style</code><span class="status-row-purpose">查看或變更小吉與你的對話風格</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">2 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="current"><code class="status-usage">/chat-style current</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="set"><code class="status-usage">/chat-style set</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="romance" data-search="/romance 管理小吉與你的跨伺服器文字戀愛模式 start stop status">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/romance</code><span class="status-row-purpose">管理小吉與你的跨伺服器文字戀愛模式</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">3 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="start"><code class="status-usage">/romance start</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="stop"><code class="status-usage">/romance stop</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/romance status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="memory" data-search="/memory 查看或管理小吉記住的你的喜好與聊天紀錄 view export add forget off on delete share">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/memory</code><span class="status-row-purpose">查看或管理小吉記住的你的喜好與聊天紀錄</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">8 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="view"><code class="status-usage">/memory view</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="export"><code class="status-usage">/memory export</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="add"><code class="status-usage">/memory add</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="forget"><code class="status-usage">/memory forget</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="off"><code class="status-usage">/memory off</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="on"><code class="status-usage">/memory on</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="delete"><code class="status-usage">/memory delete</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="share"><code class="status-usage">/memory share</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="student" data-search="/student 小吉化身好奇寶寶向你提問">
+                    <span class="status-row-head"><code class="status-usage">/student</code><span class="status-row-purpose">小吉化身好奇寶寶向你提問</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="about" data-search="/about 顯示小吉的公開資訊">
+                    <span class="status-row-head"><code class="status-usage">/about</code><span class="status-row-purpose">顯示小吉的公開資訊</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="help" data-search="/help 列出小吉可用指令">
+                    <span class="status-row-head"><code class="status-usage">/help</code><span class="status-row-purpose">列出小吉可用指令</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="command">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">吉幣與遊戲</span><span class="status-group-count" data-status-group-count>19 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="coins" data-search="/coins 查詢自己的吉幣餘額">
+                    <span class="status-row-head"><code class="status-usage">/coins</code><span class="status-row-purpose">查詢自己的吉幣餘額</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="daily" data-search="/daily 每日簽到領取吉幣">
+                    <span class="status-row-head"><code class="status-usage">/daily</code><span class="status-row-purpose">每日簽到領取吉幣</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="leaderboard" data-search="/leaderboard 查看吉幣餘額或總資產排行榜">
+                    <span class="status-row-head"><code class="status-usage">/leaderboard</code><span class="status-row-purpose">查看吉幣餘額或總資產排行榜</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="shop" data-search="/shop 吉幣商店與購買紀錄 list buy purchases purchases-user purchases-all">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/shop</code><span class="status-row-purpose">吉幣商店與購買紀錄</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">5 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="list"><code class="status-usage">/shop list</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="buy"><code class="status-usage">/shop buy</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="purchases"><code class="status-usage">/shop purchases</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="purchases-user"><code class="status-usage">/shop purchases-user</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="purchases-all"><code class="status-usage">/shop purchases-all</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="inventory" data-search="/inventory 查看自己的吉幣背包">
+                    <span class="status-row-head"><code class="status-usage">/inventory</code><span class="status-row-purpose">查看自己的吉幣背包</span></span>
+                    <span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="work" data-search="/work 小吉工作賺取吉幣系統 list start start-venue status status-user status-all cancel submit submissions edit delete report task-add tasks tasks-all pending review admin-remind role-sync payroll-preview payroll-history payroll penalties appeal">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/work</code><span class="status-row-purpose">小吉工作賺取吉幣系統</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">24 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="list"><code class="status-usage">/work list</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="start"><code class="status-usage">/work start</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="start-venue"><code class="status-usage">/work start-venue</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/work status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status-user"><code class="status-usage">/work status-user</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status-all"><code class="status-usage">/work status-all</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="cancel"><code class="status-usage">/work cancel</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="submit"><code class="status-usage">/work submit</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="submissions"><code class="status-usage">/work submissions</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="edit"><code class="status-usage">/work edit</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="delete"><code class="status-usage">/work delete</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="report"><code class="status-usage">/work report</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="task-add"><code class="status-usage">/work task-add</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="tasks"><code class="status-usage">/work tasks</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="tasks-all"><code class="status-usage">/work tasks-all</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="pending"><code class="status-usage">/work pending</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="review"><code class="status-usage">/work review</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="admin-remind"><code class="status-usage">/work admin-remind</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="role-sync"><code class="status-usage">/work role-sync</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="payroll-preview"><code class="status-usage">/work payroll-preview</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="payroll-history"><code class="status-usage">/work payroll-history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="payroll"><code class="status-usage">/work payroll</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="penalties"><code class="status-usage">/work penalties</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="appeal"><code class="status-usage">/work appeal</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="bank" data-search="/bank 小吉銀行：活存、定存與利率 balance balance-user balance-all deposit withdraw interest fixed-create fixed-list fixed-user fixed-all fixed-claim fixed-cancel fixed-rates rate-list rate-history">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/bank</code><span class="status-row-purpose">小吉銀行：活存、定存與利率</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">15 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="balance"><code class="status-usage">/bank balance</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="balance-user"><code class="status-usage">/bank balance-user</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="balance-all"><code class="status-usage">/bank balance-all</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="deposit"><code class="status-usage">/bank deposit</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="withdraw"><code class="status-usage">/bank withdraw</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="interest"><code class="status-usage">/bank interest</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="fixed-create"><code class="status-usage">/bank fixed-create</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="fixed-list"><code class="status-usage">/bank fixed-list</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="fixed-user"><code class="status-usage">/bank fixed-user</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="fixed-all"><code class="status-usage">/bank fixed-all</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="fixed-claim"><code class="status-usage">/bank fixed-claim</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="fixed-cancel"><code class="status-usage">/bank fixed-cancel</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="fixed-rates"><code class="status-usage">/bank fixed-rates</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="rate-list"><code class="status-usage">/bank rate-list</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="rate-history"><code class="status-usage">/bank rate-history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="exchange" data-search="/exchange 籌碼與吉幣兌換區 balance buy-chips cashout history">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/exchange</code><span class="status-row-purpose">籌碼與吉幣兌換區</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">4 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="balance"><code class="status-usage">/exchange balance</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="buy-chips"><code class="status-usage">/exchange buy-chips</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="cashout"><code class="status-usage">/exchange cashout</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="history"><code class="status-usage">/exchange history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="casino-lobby" data-search="/casino-lobby 查看小吉賭場大廳、下注區與住宿 guide betting-area stay stays">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/casino-lobby</code><span class="status-row-purpose">查看小吉賭場大廳、下注區與住宿</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">4 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="guide"><code class="status-usage">/casino-lobby guide</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="betting-area"><code class="status-usage">/casino-lobby betting-area</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="stay"><code class="status-usage">/casino-lobby stay</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="stays"><code class="status-usage">/casino-lobby stays</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="duel-tower" data-search="/duel-tower 決鬥塔台的武器、進度與紀錄；開局請用 /board start weapons profile history">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/duel-tower</code><span class="status-row-purpose">決鬥塔台的武器、進度與紀錄；開局請用 /board start</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">3 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="weapons"><code class="status-usage">/duel-tower weapons</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="profile"><code class="status-usage">/duel-tower profile</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="history"><code class="status-usage">/duel-tower history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="casino" data-search="/casino 賭場借款與紀錄；開局請用 /board start loan-borrow loan-repay loan-status history">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/casino</code><span class="status-row-purpose">賭場借款與紀錄；開局請用 /board start</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">4 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="loan-borrow"><code class="status-usage">/casino loan-borrow</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="loan-repay"><code class="status-usage">/casino loan-repay</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="loan-status"><code class="status-usage">/casino loan-status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="history"><code class="status-usage">/casino history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="casino-venue" data-search="/casino-venue 小吉賭場餐廳與吧檯服務 menu add-menu delete-menu order recipe make serve reassign reassign-waiter cancel history">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/casino-venue</code><span class="status-row-purpose">小吉賭場餐廳與吧檯服務</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">11 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="menu"><code class="status-usage">/casino-venue menu</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="add-menu"><code class="status-usage">/casino-venue add-menu</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="delete-menu"><code class="status-usage">/casino-venue delete-menu</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="order"><code class="status-usage">/casino-venue order</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="recipe"><code class="status-usage">/casino-venue recipe</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="make"><code class="status-usage">/casino-venue make</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="serve"><code class="status-usage">/casino-venue serve</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="reassign"><code class="status-usage">/casino-venue reassign</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="reassign-waiter"><code class="status-usage">/casino-venue reassign-waiter</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="cancel"><code class="status-usage">/casino-venue cancel</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="history"><code class="status-usage">/casino-venue history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="luxury" data-search="/luxury 奢侈品商店街 list buy inventory history">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/luxury</code><span class="status-row-purpose">奢侈品商店街</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">4 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="list"><code class="status-usage">/luxury list</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="buy"><code class="status-usage">/luxury buy</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="inventory"><code class="status-usage">/luxury inventory</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="history"><code class="status-usage">/luxury history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="pawn" data-search="/pawn 奢侈品當鋪 quote sell active redeem history">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/pawn</code><span class="status-row-purpose">奢侈品當鋪</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">5 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="quote"><code class="status-usage">/pawn quote</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="sell"><code class="status-usage">/pawn sell</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="active"><code class="status-usage">/pawn active</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="redeem"><code class="status-usage">/pawn redeem</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="history"><code class="status-usage">/pawn history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="board" data-search="/board 小吉的統一遊戲入口 start join leave status stop">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/board</code><span class="status-row-purpose">小吉的統一遊戲入口</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">5 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="start"><code class="status-usage">/board start</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="join"><code class="status-usage">/board join</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="leave"><code class="status-usage">/board leave</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/board status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="stop"><code class="status-usage">/board stop</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="farm" data-search="/farm 小吉農場：播種、澆水、收成與出售作物 view shop plant water harvest sell fertilize expand reclaim">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/farm</code><span class="status-row-purpose">小吉農場：播種、澆水、收成與出售作物</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">9 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="view"><code class="status-usage">/farm view</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="shop"><code class="status-usage">/farm shop</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="plant"><code class="status-usage">/farm plant</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="water"><code class="status-usage">/farm water</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="harvest"><code class="status-usage">/farm harvest</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="sell"><code class="status-usage">/farm sell</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="fertilize"><code class="status-usage">/farm fertilize</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="expand"><code class="status-usage">/farm expand</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="reclaim"><code class="status-usage">/farm reclaim</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="kitchen" data-search="/kitchen 小吉廚房：用農場作物做料理、出售、品嚐或送人 recipes cook pantry eat gift sell collection">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/kitchen</code><span class="status-row-purpose">小吉廚房：用農場作物做料理、出售、品嚐或送人</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">7 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="recipes"><code class="status-usage">/kitchen recipes</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="cook"><code class="status-usage">/kitchen cook</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="pantry"><code class="status-usage">/kitchen pantry</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="eat"><code class="status-usage">/kitchen eat</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="gift"><code class="status-usage">/kitchen gift</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="sell"><code class="status-usage">/kitchen sell</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="collection"><code class="status-usage">/kitchen collection</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="economy" data-search="/economy 吉幣經濟總覽與紀錄查詢 overview user audit">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/economy</code><span class="status-row-purpose">吉幣經濟總覽與紀錄查詢</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">3 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="overview"><code class="status-usage">/economy overview</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="user"><code class="status-usage">/economy user</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="audit"><code class="status-usage">/economy audit</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="coin-admin" data-search="/coin-admin 管理吉幣系統（全域錢包變更限小吉擁有者） history enable disable">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/coin-admin</code><span class="status-row-purpose">管理吉幣系統（全域錢包變更限小吉擁有者）</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">3 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="history"><code class="status-usage">/coin-admin history</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="enable"><code class="status-usage">/coin-admin enable</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="disable"><code class="status-usage">/coin-admin disable</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <div class="status-group" data-status-group data-kind="command">
+              <details data-status-group-details>
+                <summary><span class="status-group-title">社群活動</span><span class="status-group-count" data-status-group-count>5 項</span></summary>
+                <ul class="status-list">
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="word-chain" data-search="/word-chain 管理小吉文字接龍 stop status">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/word-chain</code><span class="status-row-purpose">管理小吉文字接龍</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">2 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="stop"><code class="status-usage">/word-chain stop</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/word-chain status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="number-chain" data-search="/number-chain 管理小吉安全數字接龍 stop status">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/number-chain</code><span class="status-row-purpose">管理小吉安全數字接龍</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">2 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="stop"><code class="status-usage">/number-chain stop</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/number-chain status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="daily-riddle" data-search="/daily-riddle 管理小吉每日猜謎 enable disable status">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/daily-riddle</code><span class="status-row-purpose">管理小吉每日猜謎</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">3 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="enable"><code class="status-usage">/daily-riddle enable</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="disable"><code class="status-usage">/daily-riddle disable</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/daily-riddle status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="daily-discussion" data-search="/daily-discussion 管理小吉每日議題討論 enable disable status run-now">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/daily-discussion</code><span class="status-row-purpose">管理小吉每日議題討論</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">4 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="enable"><code class="status-usage">/daily-discussion enable</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="disable"><code class="status-usage">/daily-discussion disable</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/daily-discussion status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="run-now"><code class="status-usage">/daily-discussion run-now</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                  <li class="status-row status-command" data-status-item data-kind="command" data-key="spark-relay" data-search="/spark-relay 星火接續：隨機分組，每天輪一人完成小任務 start tasks submit status">
+                    <details>
+                      <summary><span class="status-row-head"><code class="status-usage">/spark-relay</code><span class="status-row-purpose">星火接續：隨機分組，每天輪一人完成小任務</span></span><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span><span class="status-sub-toggle">4 個子指令</span></summary>
+                      <ul class="status-sublist">
+                        <li class="status-subrow" data-status-sub data-key="start"><code class="status-usage">/spark-relay start</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="tasks"><code class="status-usage">/spark-relay tasks</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="submit"><code class="status-usage">/spark-relay submit</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                        <li class="status-subrow" data-status-sub data-key="status"><code class="status-usage">/spark-relay status</code><span class="status-row-state"><span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span></span></li>
+                      </ul>
+                    </details>
+                  </li>
+                </ul>
+              </details>
+            </div>
+            <!-- generated:status-commands:end -->
+          </section>
+        </div>
+
+        <dl class="status-legend">
+          <div><dt><span class="status-pill is-normal">正常</span></dt><dd>可以使用；最近沒有出錯的紀錄。</dd></div>
+          <div><dt><span class="status-pill is-maintenance">維護中</span></dt><dd>暫停、尚未設定，或小吉暫時離線。</dd></div>
+          <div><dt><span class="status-pill is-broken">異常</span></dt><dd>最近連續執行失敗、沒有載入，或依賴的服務出問題。</dd></div>
+          <div><dt><span class="status-pill is-unknown">未知</span></dt><dd>還沒拿到資料，小吉不會把沒有資料當成正常；完全拿不到即時資料時，指令旁會附上上次版本健檢的結果供參考。</dd></div>
+        </dl>
       </section>
 
       <section id="status-guide" class="status-guide-link" aria-labelledby="features-heading" data-scene="peach" data-companion="想知道功能怎麼用？到功能與指令頁找找～">
@@ -108,7 +730,7 @@
         <span aria-hidden="true">◇</span>
         <div>
           <h2>透明，不代表洩漏隱私</h2>
-          <p>狀態介面只顯示公開功能與整體服務情況，不提供伺服器、成員、訊息或內部執行資料。</p>
+          <p>狀態介面只顯示公開功能、公開指令的狀態與簡短原因，不提供伺服器、成員、訊息、使用次數、執行時間或錯誤內容。</p>
         </div>
       </aside>
     </main>

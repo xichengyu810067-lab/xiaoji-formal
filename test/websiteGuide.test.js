@@ -24,11 +24,11 @@ const read = (file) => fs.readFileSync(path.join(websiteRoot, file), 'utf8');
 function copyPages(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-guide-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const file of ['guide.html', 'index.html']) fs.copyFileSync(path.join(websiteRoot, file), path.join(root, file));
+  for (const file of ['guide.html', 'index.html', 'status.html']) fs.copyFileSync(path.join(websiteRoot, file), path.join(root, file));
   return root;
 }
 
-test('the guide and homepage are the current output of npm run site:render', () => {
+test('the guide, the homepage and the status page lists are the current output of npm run site:render', () => {
   assert.deepEqual(findWebsiteGuideIssues(), []);
 });
 

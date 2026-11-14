@@ -27,7 +27,8 @@ const {
   processWorkReminders,
   resetWorkReminderRetryStateForTests,
 } = require('../src/systems/work/workService');
-const { PUBLIC_FEATURES, buildPublicStatusSnapshot } = require('../src/services/publicStatusService');
+const { buildPublicStatusSnapshot } = require('../src/services/publicStatusService');
+const { COMMAND_CATALOG } = require('../website/commandCatalog');
 const { LEGACY_LEDGER_VARIABLES } = require('../src/systems/safety/ledgerBootstrap');
 const { PURPOSE_IDS } = require('../src/systems/safety/ledgerLayout');
 const {
@@ -146,7 +147,7 @@ function outboxState() {
 // The public status page as it reads the stored feature health, with every public command.
 async function statusCards(protectedEffects) {
   const snapshot = await buildPublicStatusSnapshot({ isReady: () => true,
-    commands: new Map(PUBLIC_FEATURES.flatMap((feature) => feature.commands || []).map((name) => [name, {}])),
+    commands: new Map(COMMAND_CATALOG.map((command) => [command.name, {}])),
     protectedEffects });
   const cards = Object.fromEntries(snapshot.features.map((feature) => [feature.key, feature.status]));
   return { bot: snapshot.bot.status, welcome: cards.welcome, wordChain: cards.word_chain, numberChain: cards.number_chain };
@@ -471,7 +472,7 @@ test('the kill switch keeps all eight purposes shut, touching no ledger file and
       ['maintenance', 'maintenance', 'maintenance']);
     const snapshot = await buildPublicStatusSnapshot({
       isReady: () => true,
-      commands: new Map(PUBLIC_FEATURES.flatMap((feature) => feature.commands || []).map((name) => [name, {}])),
+      commands: new Map(COMMAND_CATALOG.map((command) => [command.name, {}])),
       protectedEffects: off.protectedEffects,
     }, { healthReader: async () => [], usageReader: async () => [] });
     const cards = Object.fromEntries(snapshot.features.map((feature) => [feature.key, feature.status]));

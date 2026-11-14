@@ -722,8 +722,20 @@ async function markFeatureOutboxDelivered(id, { workerId, now = new Date() }) {
       [timestamp, timestamp, eventId, normalizedWorkerId, timestamp]
     );
     const updated = Number(api.get('SELECT changes() AS count')?.count || 0) === 1;
-    return { updated, event: mapOutbox(api.get('SELECT * FROM feature_outbox WHERE id = ?', [eventId])) };
+    const event = api.get('SELECT * FROM feature_outbox WHERE id = ?', [eventId]);
+    if (updated && event) recoverOutboxHealth(api, event.feature_key, timestamp);
+    return { updated, event: mapOutbox(event) };
   });
+}
+
+// A dead letter marks its feature broken (deadLetterFeatureOutbox). Once an event of the same feature is delivered again
+// the feature works, so that mark is lifted; a broken mark set for any other reason stays.
+function recoverOutboxHealth(api, featureKey, timestamp) {
+  api.run(
+    `UPDATE feature_health SET status = 'normal', detail = NULL, updated_at = ?
+     WHERE feature_key = ? AND status = 'broken' AND detail LIKE 'outbox dead letter:%'`,
+    [timestamp, featureKey]
+  );
 }
 
 async function markFeatureOutboxDeliveredByDedupe({ guildId, featureKey, eventType, dedupeKey, now = new Date() }) {
@@ -741,7 +753,9 @@ async function markFeatureOutboxDeliveredByDedupe({ guildId, featureKey, eventTy
          AND status = 'pending'`,
       [timestamp, timestamp, normalizedGuildId, normalizedFeatureKey, normalizedEventType, normalizedDedupeKey]
     );
-    return { updated: Number(api.get('SELECT changes() AS count')?.count || 0) === 1 };
+    const updated = Number(api.get('SELECT changes() AS count')?.count || 0) === 1;
+    if (updated) recoverOutboxHealth(api, normalizedFeatureKey, timestamp);
+    return { updated };
   });
 }
 

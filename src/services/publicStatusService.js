@@ -3,6 +3,7 @@ const { PUBLIC_FEATURE_CATALOG } = require('../../website/statusData');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
 const logger = require('../utils/logger');
 const { serviceStatus } = require('../platform/serviceHealth');
+const { buildCommandStatuses } = require('../platform/publicCommandStatus');
 const {
   listFeatureHealth,
   listFeatureUsageForDate,
@@ -41,9 +42,11 @@ const PUBLIC_FEATURES = Object.freeze([
   publicFeature('memory', { commands: ['memory'], services: ['memory_store'] }),
   publicFeature('image_reading', { type: 'ready', services: ['claude'] }),
   publicFeature('web_search', { type: 'ready', services: ['claude'] }),
-  publicFeature('tetris', { commands: ['board'], healthKey: 'tetris', requiresHealth: true }),
-  publicFeature('number_match', { commands: ['board'], healthKey: 'number_match', requiresHealth: true }),
-  publicFeature('sudoku', { commands: ['board'], healthKey: 'sudoku', requiresHealth: true }),
+  // The solo games are played in Discord through /board (soloDiscordRuntime.js). The retired web game server no longer
+  // reports their health, so they no longer wait for it; a broken row (a reward that broke its contract) still lowers them.
+  publicFeature('tetris', { commands: ['board'], healthKey: 'tetris' }),
+  publicFeature('number_match', { commands: ['board'], healthKey: 'number_match' }),
+  publicFeature('sudoku', { commands: ['board'], healthKey: 'sudoku' }),
   publicFeature('official_website', { healthKey: 'public_website', staticReady: true }),
   publicFeature('status_website', { healthKey: 'status_website', staticReady: true }),
 ]);
@@ -166,10 +169,11 @@ function summarizeFeatures(features) {
   );
 }
 
-function getOverallBotStatus(client, features) {
+function getOverallBotStatus(client, features, commands = []) {
   if (!isClientReady(client)) return 'outage';
   if (features.some((feature) => feature.critical && feature.status === 'broken')) return 'outage';
   if (features.some((feature) => feature.status === 'broken')) return 'degraded';
+  if (commands.some((command) => command.status === 'broken')) return 'degraded';
   if (features.some((feature) => feature.critical && feature.status === 'maintenance')) return 'degraded';
   return 'operational';
 }
@@ -197,17 +201,21 @@ async function loadPublicStatusData(now, { healthReader = listFeatureHealth, usa
 async function buildPublicStatusSnapshot(client, { now = new Date(), healthReader, usageReader } = {}) {
   const safeNow = now instanceof Date && !Number.isNaN(now.getTime()) ? new Date(now.getTime()) : new Date();
   const data = await loadPublicStatusData(safeNow, { healthReader, usageReader });
+  const databaseAvailable = data.healthAvailable && data.usageAvailable;
   const features = buildFeatureStatuses(client, data.healthRows, {
     healthAvailable: data.healthAvailable,
-    databaseAvailable: data.healthAvailable && data.usageAvailable,
+    databaseAvailable,
     now: safeNow,
   });
+  // Every public slash command and subcommand (src/platform/publicCommandStatus.js). A status worker older than this list rejects
+  // a snapshot with it, so the worker is deployed first.
+  const commands = buildCommandStatuses(client, features, { databaseAvailable, now: safeNow });
   return {
     schemaVersion: PUBLIC_STATUS_SCHEMA_VERSION,
     updatedAt: safeNow.toISOString(),
     timezone: 'Asia/Taipei',
     bot: {
-      status: getOverallBotStatus(client, features),
+      status: getOverallBotStatus(client, features, commands),
       version: packageJson.version,
       latencyMs: null,
     },
@@ -221,6 +229,7 @@ async function buildPublicStatusSnapshot(client, { now = new Date(), healthReade
     },
     summary: summarizeFeatures(features),
     features,
+    commands,
   };
 }
 

@@ -59,12 +59,72 @@
 .status-principle h2 { margin: 0 0 4px; color: var(--ink); font-size: 1.05rem; }
 .status-principle p { margin: 0; color: var(--ink-soft); font-size: 0.84rem; }
 
+.summary-note { margin: 14px 2px 0; color: var(--ink-faint); font-size: 0.78rem; }
+
+/* 逐項即時狀態：功能與指令，依分類收合。 */
+.status-items { margin-top: 70px; }
+.status-items-heading .kicker { margin: 0; }
+.status-items-heading h2 { margin: 4px 0 8px; font-size: clamp(1.6rem, 3vw, 2.2rem); letter-spacing: -0.03em; }
+.status-items-heading p { max-width: 680px; margin: 0; color: var(--ink-soft); }
+.status-filter { margin-top: 24px; padding: 18px; display: grid; gap: 12px; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--shadow-soft); }
+.status-filter[hidden] { display: none; }
+.status-only-issues { display: inline-flex; gap: 8px; align-items: center; color: var(--ink-soft); font-size: 0.86rem; font-weight: 600; cursor: pointer; }
+.status-only-issues input { width: 18px; height: 18px; accent-color: var(--accent); }
+.status-empty { margin: 18px 4px 0; color: var(--ink-soft); }
+.status-empty[hidden] { display: none; }
+
+.status-columns { margin-top: 26px; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 22px; align-items: start; }
+.status-block > h3 { margin: 0 0 12px; color: var(--accent-text); font-size: 1.05rem; letter-spacing: 0.04em; }
+.status-group { margin-bottom: 12px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
+.status-group[hidden] { display: none; }
+.status-group.has-issues { border-color: var(--line-strong); box-shadow: var(--shadow-soft); }
+.status-group > details > summary { padding: 14px 18px; display: flex; gap: 10px; align-items: center; justify-content: space-between; cursor: pointer; list-style: none; }
+.status-group > details > summary::-webkit-details-marker { display: none; }
+.status-group > details > summary::after { color: var(--ink-faint); font-size: 0.75rem; content: "＋"; }
+.status-group > details[open] > summary::after { content: "－"; }
+.status-group-title { flex: 1; font-weight: 700; }
+.status-group-count { color: var(--ink-faint); font-size: 0.78rem; }
+.status-group.has-issues .status-group-count { color: var(--warn-text); font-weight: 700; }
+
+.status-list, .status-sublist { margin: 0; padding: 0; list-style: none; }
+.status-list { padding: 0 10px 10px; display: grid; gap: 6px; }
+.status-row { padding: 10px 12px; display: flex; gap: 10px; align-items: center; justify-content: space-between; border-radius: 14px; background: var(--surface-soft); }
+.status-row[hidden] { display: none; }
+.status-row.status-command:has(> details) { padding: 0; display: block; }
+.status-row > details > summary { padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; cursor: pointer; list-style: none; }
+.status-row > details > summary::-webkit-details-marker { display: none; }
+.status-row-head { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.status-row-name { font-size: 0.95rem; }
+.status-row-purpose { color: var(--ink-soft); font-size: 0.8rem; line-height: 1.5; }
+.status-usage { color: var(--accent-text); font-size: 0.88rem; font-weight: 700; overflow-wrap: anywhere; }
+.status-row-state { display: inline-flex; flex: 0 0 auto; gap: 6px; align-items: center; }
+.status-sub-toggle { flex-basis: 100%; color: var(--ink-faint); font-size: 0.74rem; }
+.status-sub-toggle::after { content: " ＋"; }
+.status-row > details[open] .status-sub-toggle::after { content: " －"; }
+.status-sublist { padding: 0 12px 10px; display: grid; gap: 4px; }
+.status-subrow { padding: 6px 10px; display: flex; gap: 10px; align-items: center; justify-content: space-between; border-top: 1px dashed var(--line); }
+.status-subrow .status-usage { color: var(--ink-soft); font-weight: 600; }
+
+.status-pill { padding: 3px 10px; display: inline-block; border-radius: 999px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+.status-pill.is-normal { color: var(--mint-text); background: var(--mint-pale); }
+.status-pill.is-maintenance { color: var(--warn-text); background: var(--peach-pale); }
+.status-pill.is-broken { color: var(--danger-text); background: var(--pink-pale); }
+.status-pill.is-unknown { color: var(--ink-faint); background: var(--surface-strong); border: 1px dashed var(--line-strong); }
+.status-reason { color: var(--ink-faint); font-size: 0.74rem; }
+.status-reason:empty { display: none; }
+
+.status-legend { margin: 22px 0 0; padding: 18px 20px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 22px; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); background: var(--surface-soft); }
+.status-legend div { display: flex; gap: 10px; align-items: baseline; }
+.status-legend dt { flex: 0 0 auto; }
+.status-legend dd { margin: 0; color: var(--ink-soft); font-size: 0.8rem; }
+
 @keyframes status-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 900px) {
   .status-hero { grid-template-columns: 1fr; }
   .overall-card { max-width: 620px; }
   .status-guide-link { align-items: flex-start; flex-direction: column; }
+  .status-columns { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 620px) {
@@ -78,4 +138,6 @@
   .status-guide-link { padding: 28px 22px; }
   .status-guide-link .button { width: 100%; }
   .status-principle { align-items: flex-start; }
+  .status-legend { grid-template-columns: 1fr; }
+  .status-row { flex-wrap: wrap; }
 }

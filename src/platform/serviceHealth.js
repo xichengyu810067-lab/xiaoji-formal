@@ -11,7 +11,8 @@
 // A failure older than 15 minutes with nothing since is forgotten, so a quiet service is not shown broken forever.
 // Only outcomes are kept, in memory: no request, answer or user data.
 
-const SERVICES = Object.freeze(['claude', 'memory_store', 'weather']);
+// market_data: the quote sources behind /stock (src/systems/stocks/marketData.js).
+const SERVICES = Object.freeze(['claude', 'memory_store', 'weather', 'market_data']);
 const FAILURES_TO_BREAK = 3;
 const FAILURE_MEMORY_MS = 15 * 60 * 1000;
 
