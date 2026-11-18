@@ -268,6 +268,18 @@ async function roleCampaignSetup(guildId, roleId, userIds) {
   return { role, guild };
 }
 
+
+// Whether a connection's file is the given one. SQLite reports the path it resolved (macOS reaches its temp
+// folder through the /var -> /private/var link, Windows may shorten names), so both sides are resolved first.
+function isSameDatabaseFile(location, target) {
+  if (!location) return false;
+  try {
+    return fs.realpathSync.native(String(location)) === fs.realpathSync.native(target);
+  } catch (_error) {
+    return path.resolve(String(location)) === path.resolve(target);
+  }
+}
+
 test('正式 Slash 只保留 add/history，add 的 user 與 role 均為選填二選一', async () => {
   const json = coinAdmin.data.toJSON();
   const names = json.options.map((option) => option.name);
@@ -767,7 +779,7 @@ function watchCoinCommits(onWrite) {
   let last = files();
   DatabaseSync.prototype.exec = function exec(sql) {
     const result = original.call(this, sql);
-    if (/^\s*COMMIT\s*$/iu.test(String(sql)) && path.resolve(String(this.location() || '')) === dbPath) {
+    if (/^\s*COMMIT\s*$/iu.test(String(sql)) && isSameDatabaseFile(this.location(), dbPath)) {
       const now = files();
       if (!same(now, last)) {
         last = now;

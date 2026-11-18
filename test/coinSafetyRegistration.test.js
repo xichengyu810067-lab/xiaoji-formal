@@ -100,6 +100,20 @@ function recordingFileSystem({ renameFailures = [] } = {}) {
   };
 }
 
+
+// A child process that kills itself, as a crash would: nothing is closed or flushed. POSIX reports the signal;
+// Windows has no signals, so process.kill ends the process through TerminateProcess with exit code 1. The
+// marker, written synchronously just before, tells that kill apart from an ordinary failure.
+const SELF_KILL_MARKER = 'XIAOJI_TEST_SELF_KILL';
+const SELF_KILL = `(require('node:fs').writeSync(1, '${SELF_KILL_MARKER}\\n'), process.kill(process.pid, 'SIGKILL'))`;
+
+function assertSelfKilled(result) {
+  const detail = result.stderr || result.stdout;
+  assert.ok(String(result.stdout).includes(SELF_KILL_MARKER), detail);
+  if (process.platform === 'win32') assert.equal(result.status, 1, detail);
+  else assert.equal(result.signal, 'SIGKILL', detail);
+}
+
 test('safety ledger registrations live in coin_metadata and are written only by compare-and-set', async (t) => {
   const { dbPath } = await freshCoinDatabase(t, 'cas');
   assert.deepEqual(await coin.readSafetyLedgerRegistrations(), {});
@@ -168,9 +182,9 @@ test('a registration write is on disk when it returns, and survives a crash righ
     const coin = require(process.argv[1]);
     coin.writeSafetyLedgerRegistrations([{ purposeId: 'welcome', expectedValue: '{"n":1}', value: '{"n":2}' }])
       .then(() => coin.writeSafetyAlertStamp('owner-emergency', { value: '{"schema":1}', expectedValue: null }))
-      .then(() => process.kill(process.pid, 'SIGKILL'));
+      .then(() => ${SELF_KILL});
   `, COIN_MODULE], { env: { ...process.env, COIN_DB_PATH: dbPath }, encoding: 'utf8', cwd: os.tmpdir() });
-  assert.equal(crashed.signal, 'SIGKILL', crashed.stderr);
+  assertSelfKilled(crashed);
   assert.equal(fs.existsSync(`${dbPath}-wal`), true);
   await coin.initializeCoinDatabase();
   assert.equal((await coin.readSafetyLedgerRegistrations()).welcome.value, '{"n":2}');

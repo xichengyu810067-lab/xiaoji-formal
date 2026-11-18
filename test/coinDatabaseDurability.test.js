@@ -207,6 +207,20 @@ function runCoinProcess(dbPath, body) {
   });
 }
 
+
+// A child process that kills itself, as a crash would: nothing is closed or flushed. POSIX reports the signal;
+// Windows has no signals, so process.kill ends the process through TerminateProcess with exit code 1. The
+// marker, written synchronously just before, tells that kill apart from an ordinary failure.
+const SELF_KILL_MARKER = 'XIAOJI_TEST_SELF_KILL';
+const SELF_KILL = `(require('node:fs').writeSync(1, '${SELF_KILL_MARKER}\\n'), process.kill(process.pid, 'SIGKILL'))`;
+
+function assertSelfKilled(result) {
+  const detail = result.stderr || result.stdout;
+  assert.ok(String(result.stdout).includes(SELF_KILL_MARKER), detail);
+  if (process.platform === 'win32') assert.equal(result.status, 1, detail);
+  else assert.equal(result.signal, 'SIGKILL', detail);
+}
+
 test('the file is held by one connection: WAL, synchronous FULL, foreign keys on, and no second process or connection gets in',
   async (t) => {
     const { root, dbPath } = await freshCoinDatabase(t, 'connection');
@@ -246,10 +260,10 @@ test('a COMMIT is on disk when it returns, and a crash in the middle of the next
       await coin.withCoinTransaction((api) => {
         api.run("INSERT INTO coin_metadata (key, value, updated_at) VALUES ('in-flight', '1', '${STAMP}')");
         api.run("UPDATE coin_metadata SET value = '2' WHERE key = 'committed'");
-        process.kill(process.pid, 'SIGKILL');
+        ${SELF_KILL};
       });
     `);
-    assert.equal(crashed.signal, 'SIGKILL', crashed.stderr || crashed.stdout);
+    assertSelfKilled(crashed);
     // The crash left the -wal; the next start replays it.
     assert.equal(fs.existsSync(`${dbPath}-wal`), true);
     await coin.initializeCoinDatabase();
@@ -506,9 +520,9 @@ test('a -wal beside a database whose schema is behind (a migration that never fi
       db.exec('PRAGMA locking_mode = EXCLUSIVE');
       db.exec('PRAGMA journal_mode = WAL');
       db.exec("INSERT INTO coin_metadata (key, value, updated_at) VALUES ('half-way', '1', '${STAMP}')");
-      process.kill(process.pid, 'SIGKILL');
+      ${SELF_KILL};
     `, dbPath], { encoding: 'utf8' });
-    assert.equal(crashed.signal, 'SIGKILL', crashed.stderr);
+    assertSelfKilled(crashed);
     const before = filesState(dbPath);
     assert.notEqual(before.wal, null);
 

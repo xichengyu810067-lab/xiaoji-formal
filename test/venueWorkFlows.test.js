@@ -241,6 +241,18 @@ async function readTaskStatuses(messageId) {
   )).map((row) => [row.user_id, row.job_id, row.status]);
 }
 
+
+// Whether a connection's file is the given one. SQLite reports the path it resolved (macOS reaches its temp
+// folder through the /var -> /private/var link, Windows may shorten names), so both sides are resolved first.
+function isSameDatabaseFile(location, target) {
+  if (!location) return false;
+  try {
+    return fs.realpathSync.native(String(location)) === fs.realpathSync.native(target);
+  } catch (_error) {
+    return path.resolve(String(location)) === path.resolve(target);
+  }
+}
+
 test('primary venue order runs from order to payroll with task, tip escrow and maker bonus', async (t) => {
   const clock = startClock(t, '2026-03-02T01:00:00.000Z');
   const snapshotter = await openSyntheticDatabase();
@@ -470,7 +482,7 @@ test('primary cycle settlement grants once across a failed persist, overlapping 
   //    back and the file is untouched, so no reward exists anywhere.
   const originalExec = DatabaseSync.prototype.exec;
   const crash = t.mock.method(DatabaseSync.prototype, 'exec', function exec(sql) {
-    if (/^\s*COMMIT\s*$/iu.test(String(sql)) && path.resolve(String(this.location() || '')) === path.resolve(databasePath)) {
+    if (/^\s*COMMIT\s*$/iu.test(String(sql)) && isSameDatabaseFile(this.location(), databasePath)) {
       throw Object.assign(new Error('synthetic crash before the settlement reached disk'), { code: 'EIO' });
     }
     return originalExec.call(this, sql);

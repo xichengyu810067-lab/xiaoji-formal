@@ -18,7 +18,12 @@ const STAMP = '2026-11-17T00:00:00.000Z';
 
 function tempRoot(t, prefix) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `xiaoji-coin-checkpoint-${prefix}-`)));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // after hooks run in the order they were added, so this one runs before openCoinHere's: close the coin
+  // database first, because Windows cannot remove a folder that holds an open file.
+  t.after(() => {
+    coin.resetCoinDatabaseForTests();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
   return root;
 }
 
