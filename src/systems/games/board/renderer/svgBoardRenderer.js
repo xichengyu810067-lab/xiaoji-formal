@@ -5,7 +5,7 @@ const { BoardCoreError, cloneJson } = require('../core/contracts');
 
 const RESVG_VERSION = '2.6.2';
 // Font bytes remain at the original public asset path during this relocation.
-const FONT_DIRECTORY = path.join(__dirname, '..', '..', '..', '..', 'games', 'assets', 'fonts');
+const FONT_DIRECTORY = path.join(__dirname, '..', '..', '..', '..', '..', 'assets', 'fonts');
 const FONT_FILES = Object.freeze([
   path.join(FONT_DIRECTORY, 'NotoSansSymbols-Regular.ttf'),
   path.join(FONT_DIRECTORY, 'Cubic_11.ttf'),

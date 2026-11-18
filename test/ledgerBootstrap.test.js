@@ -7,7 +7,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { makeRealTempDir } = require('./support/realTempDir');
-const coin = require('../src/services/coinDatabase');
+const coin = require('../src/systems/economy/storage/coinDatabase');
 const {
   LEGACY_LEDGER_VARIABLES,
   TEST_CRASH_CODE,
@@ -569,6 +569,8 @@ test('a process killed in the middle of a creation leaves files the next start r
   for (const [label, phase] of [['create-ledger', 'after-database'], ['commit-staged-ledger', 'before-rename-database']]) {
     await t.test(`${label}:${phase}`, async (subtest) => {
       const env = await environment(subtest, `killed-${phase}`);
+      // The child opens the coin database itself, and only one process at a time can hold it.
+      coin.resetCoinDatabaseForTests();
       const child = spawn(process.execPath, [CHILD, JSON.stringify({ mode: 'bootstrap-crash', dataRoot: env.dataRoot,
         coinDbPath: env.coinDbPath, botId: BOT_ID, ownerId: OWNER_ID, label, phase })],
       { stdio: ['ignore', 'pipe', 'inherit'], cwd: env.root });

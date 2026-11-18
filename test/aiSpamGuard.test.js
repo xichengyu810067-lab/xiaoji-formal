@@ -43,7 +43,7 @@ const {
   clearConversationStateForTests,
   hasActiveConversation,
   isConversationSilenced,
-} = require('../src/services/conversationModeService');
+} = require('../src/systems/conversation/conversationMode');
 const { openArchive } = require('../src/systems/conversation/aiArchive');
 const {
   ARCHIVE_POLICY_VERSION,

@@ -33,8 +33,8 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const workService = require('../src/services/workService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const workService = require('../src/systems/work/workService');
 const logger = require('../src/utils/logger');
 
 const GUILD_ID = '740000000000000001';

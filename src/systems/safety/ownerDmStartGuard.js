@@ -44,7 +44,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const defaultLogger = require('../../utils/logger');
 const { runWithBackgroundContext } = require('../../platform/hostOperationContext');
-const { getCoinDatabasePath } = require('../../services/coinDatabase');
+const { getCoinDatabasePath } = require('../economy/storage/coinDatabase');
 const { resolveLedgerBase } = require('./ledgerLayout');
 const { fsyncDirectory } = require('./ledgerStore');
 

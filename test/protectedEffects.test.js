@@ -28,7 +28,7 @@ const {
   resolveBotIdentity,
 } = require('../src/systems/safety/protectedEffects');
 const { buildFeatureStatuses, buildPublicStatusSnapshot } = require('../src/services/publicStatusService');
-const coinDatabase = require('../src/services/coinDatabase');
+const coinDatabase = require('../src/systems/economy/storage/coinDatabase');
 const { createReporter } = require('../src/platform/testControlPolicy');
 const { parseSafeControlLine, safeControlLine } = require('../src/platform/testControlProtocol');
 const {
@@ -120,7 +120,7 @@ test('the coin database inside the program folder: every purpose fails closed, n
     const started = await proc.preflight();
     assert.equal(started.ledgers.size, 0);
     assert.deepEqual([started.owner.enabled, started.welcome.enabled, started.public.enabled], [false, false, []]);
-    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite']);
+    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite', 'xiaoji.sqlite-wal']);
     assert.ok(proc.logger.lines.some(([, line]) =>
       line === '[SAFETY_LEDGER] purpose=welcome code=LEDGER_PATH_IN_PROJECT reason=base'));
 
@@ -143,7 +143,7 @@ test('the coin database inside the program folder: every purpose fails closed, n
     await again.ready();
     assert.deepEqual(protectedCalls(again.rest), []);
     assert.equal(await again.stop(), 3);
-    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite']);
+    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite', 'xiaoji.sqlite-wal']);
   });
 
 // The Owner DM start guard of the fourth start after three that failed, with its count in its
@@ -221,7 +221,7 @@ test('the kill switch: no ledger is created or opened, no protected request, and
     assert.deepEqual(FEATURES.map((key) => proc.protectedEffects.featureStatus(key)),
       ['maintenance', 'maintenance', 'maintenance']);
     assert.equal(await proc.stop(), 0);
-    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite']);
+    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite', 'xiaoji.sqlite-wal']);
     assert.deepEqual(await registrations(), {});
   }
 });
@@ -244,7 +244,7 @@ test('a configured bot ID that differs at ready: no ledger is created for it, ev
       assert.ok(proc.logger.lines.some(([, line]) =>
         line === `[SAFETY_LEDGER] purpose=${purposeId} code=LEDGER_IDENTITY_UNVERIFIED reason=configured`), purposeId);
     }
-    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite']);
+    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite', 'xiaoji.sqlite-wal']);
     assert.deepEqual(await registrations(), {});
 
     await proc.ready();
@@ -497,7 +497,7 @@ test('an identity read or a bootstrap report that throws is handled like a faile
     assert.ok(proc.logger.lines.some(([, line]) => line === '[SAFETY_LEDGER] code=LEDGER_BOT_IDENTITY_UNAVAILABLE'));
     assert.ok(proc.logger.lines.some(([, line]) =>
       line === '[SAFETY_LEDGER] purpose=welcome code=LEDGER_IDENTITY_INVALID reason=bot'));
-    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite']);
+    assert.deepEqual(filesUnder(layout.dataDir), ['xiaoji.sqlite', 'xiaoji.sqlite-wal']);
     await proc.ready();
     const messages = ownerMessages(proc.rest);
     assert.equal(messages.length, 1);
@@ -690,11 +690,13 @@ test('the status cards follow the protected side effects only where they would b
   assert.equal(snapshot.bot.status, 'degraded');
 });
 
-// One ordinary coin database write whose directory fsync fails after the rename (the POSIX
-// order, simulated on every host): the write stands, and it is escalated. Later writes (the
-// stop's lastSeen) use the real file system again.
-async function writeWithFailingDirectorySync(coinDbPath, key) {
-  const directory = path.dirname(coinDbPath);
+// A new coin database whose directory fsync fails after the file was created (the POSIX order,
+// simulated on every host): the database stands, and it is escalated (stage=open). Every write
+// after that is a SQLite COMMIT and never escalates.
+async function openFreshCoinDatabaseWithFailingDirectorySync(layout) {
+  coinDatabase.resetCoinDatabaseForTests();
+  process.env.COIN_DB_PATH = layout.coinDbPath;
+  const directory = path.dirname(layout.coinDbPath);
   const directoryDescriptor = -4242;
   const failingDirectory = {
     ...fs,
@@ -708,58 +710,41 @@ async function writeWithFailingDirectorySync(coinDbPath, key) {
   };
   coinDatabase.setCoinDatabaseDurabilityForTests({ filesystem: failingDirectory, platform: 'linux' });
   try {
-    await coinDatabase.withCoinTransaction((api) => api.run(
-      'INSERT INTO coin_metadata (key, value, updated_at) VALUES (?, ?, ?)', [key, '1', '2026-10-03T00:00:00.000Z']));
+    await coinDatabase.initializeNewCoinDatabase({ expectedPath: layout.coinDbPath });
   } finally {
     coinDatabase.setCoinDatabaseDurabilityForTests(null);
   }
 }
 
 const COIN_DB_ESCALATION_LINE = ['error', '[SIDE_EFFECT_LEDGER] code=LEDGER_ESCALATION purpose=coin-database ' +
-  'cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=runtime'];
+  'cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=open'];
 
-test('a coin database write whose directory sync failed ends the stop with exit code 3 and its escalation', async (t) => {
-  const layout = createLayout(t, 'coin-db-escalation');
-  await openCoinDatabase(layout, { fresh: true });
-  const proc = createProcess(layout, { env: {} });
-  const started = await proc.preflight();
-  await proc.ready();
-  await writeWithFailingDirectorySync(layout.coinDbPath, 'escalation_probe');
-  // Reported with the ledgers' escalations, and not again by the last report before the exit.
-  assert.equal(await proc.stop(), 3);
-  assert.deepEqual(proc.logger.lines.filter(([, line]) => line.includes('code=LEDGER_ESCALATION')), [
-    COIN_DB_ESCALATION_LINE,
-  ]);
-  // The stop itself completed (every ledger closed, the registrations in the file), and the
-  // probe write was never rolled back.
-  for (const ledger of started.ledgers.values()) assert.equal(ledger.closed, true);
-  const inFile = await coinDatabase.inspectSafetyRegistrationsFromFile(layout.coinDbPath);
-  assert.equal(Object.keys(inFile.registrations).length > 0, true);
-  assert.equal(await coinDatabase.withCoinDatabase((api) => api.get(
-    "SELECT value FROM coin_metadata WHERE key = 'escalation_probe'")?.value), '1');
-});
-
-test('a coin database write that fails during the later stop steps still ends the stop with exit code 3, reported once',
+test('a coin database whose directory sync failed when it was created ends the stop with exit code 3, reported once',
   async (t) => {
-    const layout = createLayout(t, 'coin-db-late-escalation');
-    await openCoinDatabase(layout, { fresh: true });
+    const layout = createLayout(t, 'coin-db-escalation');
+    await openFreshCoinDatabaseWithFailingDirectorySync(layout);
     const proc = createProcess(layout, { env: {} });
-    await proc.preflight();
+    const started = await proc.preflight();
     await proc.ready();
-    // Nothing is pending when the ledgers are reported; the board lifecycle's stop (standing in:
-    // laterSteps) then writes to the coin database and its directory fsync fails.
+    await coinDatabase.withCoinTransaction((api) => api.run(
+      'INSERT INTO coin_metadata (key, value, updated_at) VALUES (?, ?, ?)', ['escalation_probe', '1', '2026-10-03T00:00:00.000Z']));
+    // Reported with the ledgers' escalations, and not again by the last report before the exit.
     let reportedBeforeLaterSteps = null;
-    const exitCode = await proc.stop({ laterSteps: async () => {
+    assert.equal(await proc.stop({ laterSteps: async () => {
       reportedBeforeLaterSteps = proc.logger.lines.filter(([, line]) => line.includes('code=LEDGER_ESCALATION')).length;
-      await writeWithFailingDirectorySync(layout.coinDbPath, 'late_probe');
-      // A second failure in the same stage is the same escalation.
-      await writeWithFailingDirectorySync(layout.coinDbPath, 'late_probe_again');
-    } });
-    assert.equal(reportedBeforeLaterSteps, 0);
-    assert.equal(exitCode, 3);
+    } }), 3);
+    assert.equal(reportedBeforeLaterSteps, 1);
     assert.deepEqual(proc.logger.lines.filter(([, line]) => line.includes('code=LEDGER_ESCALATION')), [
       COIN_DB_ESCALATION_LINE,
     ]);
+    // The stop itself completed (every ledger closed, the registrations written), and the
+    // database kept every write.
+    for (const ledger of started.ledgers.values()) assert.equal(ledger.closed, true);
+    assert.equal(await coinDatabase.withCoinDatabase((api) => api.get(
+      "SELECT value FROM coin_metadata WHERE key = 'escalation_probe'")?.value), '1');
+    await coinDatabase.closeCoinDatabase();
+    const inFile = await coinDatabase.inspectSafetyRegistrationsFromFile(layout.coinDbPath);
+    assert.equal(Object.keys(inFile.registrations).length > 0, true);
   });
 
 test('a later stop step that throws is logged once; the stop still makes its last report and exits non-zero',
@@ -778,16 +763,13 @@ test('a later stop step that throws is logged once; the stop still makes its las
     assert.deepEqual(shutdownLines(quiet), [['error', '[SHUTDOWN] code=SHUTDOWN_STEP_FAILED cause=EBOARD']]);
     assert.deepEqual(quiet.logger.lines.filter(([, line]) => line.includes('code=LEDGER_ESCALATION')), []);
 
-    // A later step that escalates and then throws: the last report still runs, exit code 3.
-    const late = createLayout(t, 'later-step-escalates-then-throws');
-    await openCoinDatabase(late, { fresh: true });
+    // An escalation and a later step that throws: the escalation code 3 is kept.
+    const late = createLayout(t, 'escalated-then-later-step-throws');
+    await openFreshCoinDatabaseWithFailingDirectorySync(late);
     const proc = createProcess(late, { env: {} });
     await proc.preflight();
     await proc.ready();
-    assert.equal(await proc.stop({ laterSteps: async () => {
-      await writeWithFailingDirectorySync(late.coinDbPath, 'late_then_throw');
-      await throwing('EBOARD')();
-    } }), 3);
+    assert.equal(await proc.stop({ laterSteps: throwing('EBOARD') }), 3);
     assert.deepEqual(shutdownLines(proc), [['error', '[SHUTDOWN] code=SHUTDOWN_STEP_FAILED cause=EBOARD']]);
     assert.deepEqual(proc.logger.lines.filter(([, line]) => line.includes('code=LEDGER_ESCALATION')), [
       COIN_DB_ESCALATION_LINE,

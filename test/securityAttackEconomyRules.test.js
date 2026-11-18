@@ -17,8 +17,8 @@ const harness = require('./support/securityAttackHarness');
 
 const root = harness.createAttackEnvironment('xiaoji-attack-rules-');
 
-const coin = require('../src/services/coinService');
-const luxuryService = require('../src/services/luxuryService');
+const coin = require('../src/systems/economy/coinService');
+const luxuryService = require('../src/systems/economy/luxuryService');
 const casinoService = require('../src/services/casinoService');
 
 const GUILD = '840000000000000001';

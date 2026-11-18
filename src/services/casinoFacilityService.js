@@ -1,18 +1,18 @@
 const { randomInt } = require('node:crypto');
-const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
+const { withCoinDatabase, withCoinTransaction } = require('../systems/economy/storage/coinDatabase');
 const {
   CoinServiceError,
   ShopItemTypes,
   ensureGuildSettings,
   ensurePlayer,
-} = require('./coinService');
+} = require('../systems/economy/coinService');
 const {
   ChipLedgerType,
   assertPayoutWithinLimit,
   creditChipsWithApi,
   debitChipsForCasinoWithApi,
   normalizeAmount,
-} = require('./chipService');
+} = require('../systems/economy/chipService');
 const { applyGameLaunchOnce } = require('../systems/games/gameLaunchReceipt');
 
 // A won tower fight pays back twice the wager; a bet is refused before the fight when that is above the chip limit.

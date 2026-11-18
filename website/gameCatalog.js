@@ -1,3 +1,6 @@
+// Source of truth: src/platform/catalogs/gameCatalog.js, loaded by the bot with require(). website/gameCatalog.js is a byte-for-byte
+// copy that the status page loads with a <script> tag; `npm run site:render` writes it and `npm run check` refuses a stale
+// copy. Edit this file, never the copy.
 (function exposeGameCatalog(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;

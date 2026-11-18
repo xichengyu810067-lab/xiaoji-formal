@@ -34,14 +34,14 @@ const bankCommand = require('../src/commands/bank');
 const coinsCommand = require('../src/commands/coins');
 const economyCommand = require('../src/commands/economy');
 const workCommand = require('../src/commands/work');
-const coin = require('../src/services/coinService');
-const workService = require('../src/services/workService');
+const coin = require('../src/systems/economy/coinService');
+const workService = require('../src/systems/work/workService');
 const projection = require('../src/systems/conversation/projection');
 const { captureIngressVisibility } = require('../src/systems/conversation/publicVisibility');
 const { createRuntimeRewardCoordinator } = require('../src/coordinators/rewardRuntime');
 const { configureWorkRewardCoordinator } = require('../src/systems/work/workRewardPort');
 const { createGuild, createSlashInteraction } = require('./support/fakeSlashInteraction');
-const { formatCoins } = require('../src/utils/coinPresentation');
+const { formatCoins } = require('../src/systems/economy/coinPresentation');
 
 configureWorkRewardCoordinator(createRuntimeRewardCoordinator());
 

@@ -21,6 +21,7 @@ const {
   openLedgerStore,
   readWitness,
   renameWithRetry,
+  snapshotOpenLedger,
   witnessIdentityDigest,
 } = require('../src/systems/safety/ledgerStore');
 const {
@@ -261,6 +262,82 @@ test('a format-2 ledger is one SQLite file with WAL, FULL sync, an exclusive loc
   store.close();
   assert.equal(fs.existsSync(`${paths.filePath}-wal`), false);
   assert.deepEqual(fs.readdirSync(path.dirname(paths.filePath)), ['ledger.sqlite']);
+});
+
+// What another process sees when it opens the ledger: 'OPENED', or the store's error code.
+function openElsewhere(paths) {
+  const probe = spawnSync(process.execPath, ['-e', [
+    'const [storeModule, filePath, witnessPath, botId] = process.argv.slice(1);',
+    'try {',
+    "  require(storeModule).openLedgerStore({ filePath, witnessPaths: [witnessPath], kind: 'public',",
+    "    expected: { botId, runtimeMode: 'production' } }).close();",
+    "  process.stdout.write('OPENED');",
+    '} catch (error) { process.stdout.write(String(error.code)); }',
+  ].join('\n'), STORE_MODULE, paths.filePath, paths.witnessPath, BOT_ID], { encoding: 'utf8' });
+  return probe.stdout || probe.stderr;
+}
+
+test('a snapshot of a ledger held here comes from its connection, keeps the lock, and restores as a ledger', (t) => {
+  const { root, defer } = workspace(t, 'snapshot');
+  const paths = layout(root);
+  createStore(paths);
+  const target = path.join(root, 'snapshot.sqlite');
+  assert.equal(snapshotOpenLedger(paths.filePath, target), null, 'not open here: nothing is done');
+  assert.equal(fs.existsSync(target), false);
+
+  const store = openStore(paths);
+  let closed = false;
+  defer(() => { if (!closed) store.close(); });
+  store.begin(beginInput(1));
+  assert.ok(fs.statSync(`${paths.filePath}-wal`).size > 0, 'the newest steps are only in the -wal');
+  const ledgerDirectory = path.dirname(paths.filePath);
+  const before = fs.readdirSync(ledgerDirectory).map((name) => {
+    const stat = fs.statSync(path.join(ledgerDirectory, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  });
+
+  assert.throws(() => snapshotOpenLedger(paths.filePath, 'relative.sqlite'),
+    (error) => error.code === 'LEDGER_PATH_INVALID');
+  assert.throws(() => snapshotOpenLedger(paths.filePath, `${paths.filePath}-wal`),
+    (error) => error.code === 'LEDGER_INPUT_INVALID');
+  fs.writeFileSync(target, 'occupied');
+  assert.throws(() => snapshotOpenLedger(paths.filePath, target), (error) => error.code === 'LEDGER_EXISTS');
+  assert.equal(fs.readFileSync(target, 'utf8'), 'occupied', 'an existing file is never overwritten');
+  fs.rmSync(target);
+
+  assert.deepEqual(snapshotOpenLedger(paths.filePath, target), { path: target });
+  assert.deepEqual(fs.readdirSync(root).filter((name) => name.startsWith('snapshot')), ['snapshot.sqlite'],
+    'the snapshot is one self-contained file');
+  // On POSIX systems closing any descriptor of the ledger file in this process would drop its lock.
+  assert.equal(openElsewhere(paths), 'LEDGER_IN_USE');
+  assert.deepEqual(fs.readdirSync(ledgerDirectory).map((name) => {
+    const stat = fs.statSync(path.join(ledgerDirectory, name));
+    return `${name}:${stat.size}:${stat.mtimeMs}`;
+  }), before, 'nothing beside the ledger was added, removed, or changed');
+  store.finish(finishInput(1));
+  store.close();
+  closed = true;
+
+  // The snapshot passes the header check and opens as the ledger it was taken from, with the
+  // begin that was only in the -wal (finish is not a sequenced step, so the witness still matches).
+  const header = fs.readFileSync(target).subarray(0, 20);
+  assert.deepEqual([header[18], header[19]], [2, 2], 'the snapshot is a WAL database like the ledger');
+  const restoredPaths = layout(root, 'restored');
+  fs.copyFileSync(target, restoredPaths.filePath);
+  fs.copyFileSync(paths.witnessPath, restoredPaths.witnessPath);
+  const report = inspectLedgerStore({ filePath: restoredPaths.filePath, witnessPaths: [restoredPaths.witnessPath] });
+  assert.equal(report.header, 'ok');
+  assert.deepEqual(report.problems, []);
+  assert.equal(report.rows.operations, 1);
+  const restored = openStore(restoredPaths);
+  try {
+    assert.equal(restored.identity.bootEpoch, 2);
+    assert.equal(restored.getOperation(PURPOSE, 'operation-1').state, 'unknown');
+  } finally {
+    restored.close();
+  }
+
+  assert.equal(snapshotOpenLedger(paths.filePath, path.join(root, 'after-close.sqlite')), null, 'closed: not held here');
 });
 
 test('a second process gets LEDGER_IN_USE, and a force-killed holder releases the ledger within 5 seconds',

@@ -10,10 +10,10 @@ const path = require('node:path');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-word-judge-'));
 process.env.COIN_DB_PATH = path.join(root, 'synthetic.sqlite');
 
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
-const { acceptWordChainMessage, startWordChain } = require('../src/services/wordChainService');
-const { hasWord } = require('../src/services/wordChainLexicon');
-const { LIMITS, SYSTEM_PROMPT, judgeWord, parseVerdict, resetWordChainJudgeForTests } = require('../src/systems/community/wordChainJudge');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
+const { acceptWordChainMessage, startWordChain } = require('../src/systems/community/chains/wordChainService');
+const { hasWord } = require('../src/systems/community/chains/wordChainLexicon');
+const { LIMITS, SYSTEM_PROMPT, judgeWord, parseVerdict, resetWordChainJudgeForTests } = require('../src/systems/community/chains/wordChainJudge');
 const { configureChainReactionFence } = require('../src/systems/safety/chainReactionFence');
 
 // The reaction fence of the chain games, as in wordChainPublic.test.js.

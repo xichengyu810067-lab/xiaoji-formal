@@ -8,7 +8,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { makeRealTempDir, removeRealTempDir } = require('../support/realTempDir');
-const coinDatabase = require('../../src/services/coinDatabase');
+const coinDatabase = require('../../src/systems/economy/storage/coinDatabase');
 const coinDatabaseEscalations = require('../../src/systems/economy/coinDatabaseEscalations');
 const { createPublicEffectAuthority } = require('../../src/platform/publicEffectGrant');
 const { configurePublicEffectAdapter } = require('../../src/platform/publicEffectAdapter');

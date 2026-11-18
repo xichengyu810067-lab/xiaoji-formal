@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
-const coin = require('../src/services/coinDatabase');
+const coin = require('../src/systems/economy/storage/coinDatabase');
 const { TEST_CRASH_CODE, bootstrapSafetyLedgers } = require('../src/systems/safety/ledgerBootstrap');
 const { DatabaseSync } = require('node:sqlite');
 const layout = require('../src/systems/safety/ledgerLayout');
@@ -53,8 +53,10 @@ async function environment(t, prefix) {
     results.push(result);
     return result;
   };
-  // The script runs as another process, from a folder without any .env file.
+  // The script runs as another process, from a folder without any .env file. It reads the coin database file of a
+  // stopped bot, so this process closes its own connection first (the next coin call here opens it again).
   const scriptAt = (base, ...args) => {
+    coin.resetCoinDatabaseForTests();
     const env = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, TEMP: os.tmpdir(), TMP: os.tmpdir() };
     const result = spawnSync(process.execPath, [SCRIPT, ...args, '--data-root', base, '--coin-db', coinDbPath],
       { cwd: root, env, encoding: 'utf8' });
@@ -78,7 +80,10 @@ async function crashAfterCreatingRegistration(env, options = {}) {
 }
 
 // Digest of every file under the data root (only while no ledger is open here).
+// The digest of every file under a stopped bot's data folder: this process closes its coin database first, so the
+// file holds everything and no -wal lies beside it (the next coin call here opens it again).
 function tree(directory) {
+  coin.resetCoinDatabaseForTests();
   const entries = {};
   for (const entry of fs.readdirSync(directory, { withFileTypes: true, recursive: true })) {
     if (!entry.isFile()) continue;
@@ -213,6 +218,8 @@ test('the operations guide upgrade steps stop the bot before every start', () =>
 test('status while the bot holds the ledgers reports them in use and leaves them alone', async (t) => {
   const env = await environment(t, 'status-in-use');
   const held = await env.boot();
+  // The ledgers stay held; the coin database is closed now rather than by the script run below.
+  coin.resetCoinDatabaseForTests();
   const before = statTree(env.dataRoot);
   const status = env.script('status', '--json');
   assert.equal(status.status, 2);
@@ -260,6 +267,7 @@ test('reinit refuses unless the bot is stopped and the code matches; refusals ch
   const env = await environment(t, 'reinit-refused');
   const held = await env.boot();
   const code = layout.confirmationCode(byId(held).welcome.ledgerId);
+  coin.resetCoinDatabaseForTests();
   const heldBefore = statTree(env.dataRoot);
   const running = env.script('reinit', '--purpose', 'welcome', '--bot-stopped', '--confirm', `welcome=${code}`);
   assert.equal(running.status, 1);
@@ -498,6 +506,7 @@ test('reinit retires the files and writes a request without writing the coin dat
     const first = await env.boot();
     const old = byId(first).welcome;
     first.close();
+    coin.resetCoinDatabaseForTests();
     const coinBefore = sha256(fs.readFileSync(env.coinDbPath));
     const coinStat = fs.statSync(env.coinDbPath).mtimeMs;
     const p = env.paths('welcome');
@@ -600,6 +609,8 @@ test('status probes whether the data folders sync a directory, read-only, and re
   const folders = { 'coin-database': env.dataRoot, ledger: env.directories.ledgerDirectory,
     witness: env.directories.witnessDirectory };
   const status = async ({ failures = {}, platform = 'linux', json = false } = {}) => {
+    // The status of a stopped bot: this process closes its coin database first.
+    coin.resetCoinDatabaseForTests();
     const filesystem = directoryProbeFileSystem(new Map(Object.entries(failures)
       .map(([folder, failure]) => [path.resolve(folders[folder]), failure])));
     const output = { stdout: '', stderr: '' };

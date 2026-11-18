@@ -18,10 +18,10 @@ const attack = require('./support/attackSession');
 
 const session = attack.createAttackSession({ prefix: 'xiaoji-attack-permissions-' });
 
-const coinService = require('../src/services/coinService');
-const workService = require('../src/services/workService');
-const { withCoinDatabase } = require('../src/services/coinDatabase');
-const { COMMAND_CATALOG, getSubcommandAudience } = require('../website/commandCatalog');
+const coinService = require('../src/systems/economy/coinService');
+const workService = require('../src/systems/work/workService');
+const { withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
+const { COMMAND_CATALOG, getSubcommandAudience } = require('../src/platform/catalogs/commandCatalog');
 
 const { IDS } = session;
 const HOME = IDS.approvedGuild;
@@ -70,8 +70,8 @@ const COIN_ADMIN_FORMS = Object.freeze([
     options: () => ({ user: IDS.target, amount: 1, reason: '攻擊測試設定餘額' }), ownerOnly: true },
   { name: 'reset-user', path: 'coin-admin reset-user',
     options: () => ({ user: IDS.target, confirm: 'RESET', reason: '攻擊測試重置' }), ownerOnly: true },
-  // The transaction lookup of one member needs only Administrator; the same subcommand with a campaign-id is the
-  // campaign reconciliation, which is owner only (src/commands/coin-admin.js: `campaignHistory`).
+  // history is owner only in both forms: the transaction lookup of one member and, with a campaign-id, the campaign
+  // reconciliation (src/commands/coin-admin.js).
   { name: 'history of one campaign', path: 'coin-admin history',
     options: () => ({ 'campaign-id': 'attack-role-campaign', audience: 'member', user: IDS.target }), ownerOnly: true },
   { name: 'history of one campaign, review', path: 'coin-admin history',
@@ -81,7 +81,7 @@ const COIN_ADMIN_FORMS = Object.freeze([
     options: () => ({ 'campaign-id': 'attack-role-campaign', audience: 'member', user: IDS.target, action: 'import',
       'review-token': 'a'.repeat(64), confirm: '已發對應', 'transaction-id': 1, reason: '攻擊測試匯入' }), ownerOnly: true },
   { name: 'history of one member', path: 'coin-admin history',
-    options: () => ({ user: IDS.target }), ownerOnly: false },
+    options: () => ({ user: IDS.target }), ownerOnly: true },
   { name: 'enable', path: 'coin-admin enable', options: () => ({}), ownerOnly: false },
   { name: 'disable', path: 'coin-admin disable', options: () => ({}), ownerOnly: false },
 ]);
@@ -94,10 +94,10 @@ test('an ordinary member is refused every form of /coin-admin, and nothing moves
   }
 });
 
-test('a server Administrator who is not the bot owner is refused every owner-only form, campaign history included', async () => {
+test('a server Administrator who is not the bot owner is refused every owner-only form, both forms of history included', async () => {
   const before = await wallets();
   const ownerOnly = COIN_ADMIN_FORMS.filter((form) => form.ownerOnly);
-  assert.ok(ownerOnly.length >= 8);
+  assert.ok(ownerOnly.length >= 9);
   for (const form of ownerOnly) {
     for (const [as, where] of [['admin', 'home'], ['awayAdmin', 'away']]) {
       const outcome = await session.run(form.path, { as, where, options: form.options() });
@@ -106,12 +106,7 @@ test('a server Administrator who is not the bot owner is refused every owner-onl
   }
 });
 
-test('a server Administrator may look up one member\'s transactions and switch the guild economy, and nothing else', async () => {
-  const history = await session.run('coin-admin history', { as: 'admin', options: { user: IDS.target } });
-  attack.assertRanCleanly(history, 'admin history');
-  assert.match(history.last, /最近交易紀錄|目前沒有吉幣交易紀錄/u);
-  assert.deepEqual(session.changesBeyondTheCount(history), [], 'a lookup writes nothing');
-
+test('a server Administrator may switch the guild economy, and nothing else', async () => {
   const off = await session.run('coin-admin disable', { as: 'admin' });
   attack.assertRanCleanly(off, 'admin disable');
   assert.equal(off.last, '目前伺服器吉幣系統已停用。');
@@ -135,13 +130,11 @@ test('the bot owner passes every form of /coin-admin that the others were refuse
   }
 });
 
-test('the catalog marks /coin-admin history as admin while its campaign form is owner only', {
-  todo: 'the command catalog lists /coin-admin history for Administrators, but history with campaign-id refuses everyone but the bot owner (src/commands/coin-admin.js, ensureBotOwner for campaignHistory)',
-}, () => {
+test('the catalog marks /coin-admin history as owner only, like both of its forms', () => {
+  // history refuses everyone but the bot owner, with or without campaign-id (src/commands/coin-admin.js), so the
+  // catalog must not list it for every Administrator.
   const entry = COMMAND_CATALOG.find((candidate) => candidate.name === 'coin-admin');
-  // What the catalog should say once the campaign form is no longer hidden behind the plain audience of the
-  // subcommand: that /coin-admin history is not for every Administrator.
-  assert.notEqual(getSubcommandAudience(entry, 'history'), 'admin');
+  assert.equal(getSubcommandAudience(entry, 'history'), 'owner');
 });
 
 // ---------------------------------------------------------------------------------------------------------

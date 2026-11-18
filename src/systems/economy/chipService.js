@@ -1,4 +1,4 @@
-const { withCoinDatabase, withCoinTransaction } = require('../../services/coinDatabase');
+const { withCoinDatabase, withCoinTransaction } = require('./storage/coinDatabase');
 const {
   CoinServiceError,
   TransactionType,

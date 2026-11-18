@@ -1,8 +1,11 @@
 'use strict';
 
-// The coin database's escalations for the shutdown report: a directory fsync that failed
-// after a write was already committed (see "Durable persistence" in coinDatabase.js). They
-// have the same shape as the side-effect ledgers' own (src/systems/safety/ledgerEscalation.js),
+// The coin database's part of the stop, for src/index.js, which does not load the storage engine
+// itself: the escalations for the shutdown report and closeCoinDatabase.
+//
+// The escalations: a directory fsync that failed after a new database file was already created
+// (see storage/durableFile.js); every other write is a SQLite COMMIT, so there are normally none.
+// They have the same shape as the side-effect ledgers' own (src/systems/safety/ledgerEscalation.js),
 // so src/index.js lists this module among its shutdown sources and a pending one ends the
 // process with the escalation exit code. Entry code does not load the storage engine itself,
 // so it reads them through here.
@@ -16,7 +19,7 @@
 // getLedgerEscalations: a call takes the escalations it returns, so any other reader would
 // keep them from the exit code. The name is the one every shutdown source must have.
 
-const coinDatabase = require('../../services/coinDatabase');
+const coinDatabase = require('./storage/coinDatabase');
 
 const handedOut = new WeakSet();
 
@@ -26,4 +29,11 @@ function getLedgerEscalations() {
   return Object.freeze(fresh);
 }
 
-module.exports = { getLedgerEscalations };
+// Closes the coin database once every writer has stopped (the last step of the stop before the
+// last report): new operations are refused, queued ones finish, and the connection closes, which
+// checkpoints its -wal into the file and removes it.
+function closeCoinDatabase() {
+  return coinDatabase.closeCoinDatabase();
+}
+
+module.exports = { closeCoinDatabase, getLedgerEscalations };

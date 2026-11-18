@@ -7,7 +7,6 @@ const requestedPort = Number.parseInt(process.env.WEBSITE_PORT || '4173', 10);
 const port = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535
   ? requestedPort
   : 4173;
-const gameProxyPort = Number.parseInt(process.env.GAME_PREVIEW_PORT || '8790', 10);
 const publicStatusProxyPort = Number.parseInt(process.env.PUBLIC_STATUS_PREVIEW_PORT || '8787', 10);
 
 const ALLOWED_PUBLIC_STATUS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -34,33 +33,6 @@ function resolveRequestPath(requestUrl) {
   } catch (_error) {
     return null;
   }
-}
-
-function proxyGameRequest(request, response) {
-  const proxy = http.request({
-    host: '127.0.0.1',
-    port: gameProxyPort,
-    method: request.method,
-    path: request.url,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': request.headers['content-type'] || 'application/json',
-      Origin: `http://127.0.0.1:${port}`,
-    },
-  }, (upstream) => {
-    response.writeHead(upstream.statusCode || 502, {
-      'Content-Type': upstream.headers['content-type'] || 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    upstream.pipe(response);
-  });
-  proxy.setTimeout(6000, () => proxy.destroy(new Error('preview proxy timeout')));
-  proxy.on('error', () => {
-    if (!response.headersSent) response.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    response.end(JSON.stringify({ error: 'game_preview_unavailable' }));
-  });
-  request.pipe(proxy);
 }
 
 function writeStaticJsonFailure(response, statusCode, payload, { headOnly = false } = {}) {
@@ -135,11 +107,6 @@ function proxyPublicStatusRequest(request, response) {
 }
 
 const server = http.createServer((request, response) => {
-  if (request.url === '/api/games/session/exchange' || request.url === '/api/games/action') {
-    proxyGameRequest(request, response);
-    return;
-  }
-
   if (request.url && request.url.startsWith('/api/public/')) {
     proxyPublicStatusRequest(request, response);
     return;

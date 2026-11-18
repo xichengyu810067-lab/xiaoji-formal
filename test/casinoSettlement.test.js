@@ -20,9 +20,9 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const { enterDuelTower } = require('../src/services/casinoFacilityService');
-const { adjustPlayerBalance } = require('../src/services/coinService');
+const { adjustPlayerBalance } = require('../src/systems/economy/coinService');
 const {
   hitBlackjack,
   playBaccarat,

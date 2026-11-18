@@ -20,7 +20,7 @@ process.env.XIAOJI_AUDIT_DATA_PATH = path.join(root, 'guildAudit.json');
 process.env.XIAOJI_INVITER_WHITELIST_PATH = path.join(root, 'inviterWhitelist.json');
 process.env.BOT_OWNER_ID = 'owner-user';
 
-const { resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
+const { resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
 const logger = require('../src/utils/logger');
 const venueCommand = require('../src/commands/casino-venue');
 

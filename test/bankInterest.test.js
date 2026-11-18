@@ -16,14 +16,14 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-bank-interest-'));
 process.env.COIN_DB_PATH = path.join(root, 'bank-interest.sqlite');
 process.env.COIN_TIMEZONE = 'Asia/Taipei';
 
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase } = require('../src/services/coinDatabase');
-const { adjustPlayerBalance } = require('../src/services/coinService');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance } = require('../src/systems/economy/coinService');
 const {
   createFixedDeposit,
   deposit,
   processBankInterest,
   withdraw,
-} = require('../src/services/bankService');
+} = require('../src/systems/economy/bankService');
 
 const GUILD_ID = 'bank-interest-guild';
 const DEPOSIT = 1_000_000;

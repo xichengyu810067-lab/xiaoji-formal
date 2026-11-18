@@ -16,8 +16,8 @@ process.env.COIN_DB_PATH = path.join(root, 'leaderboard.sqlite');
 process.env.COIN_TIMEZONE = 'Asia/Taipei';
 
 const leaderboardCommand = require('../src/commands/leaderboard');
-const { CoinDatabaseError, initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
-const { adjustPlayerBalance, setGuildEconomyEnabled } = require('../src/services/coinService');
+const { CoinDatabaseError, initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance, setGuildEconomyEnabled } = require('../src/systems/economy/coinService');
 
 const GUILD_ID = 'leaderboard-guild';
 const EMPTY_GUILD_ID = 'leaderboard-guild-without-players';
@@ -127,7 +127,7 @@ async function runBoard({
 // fresh load while the service is patched. The service and the module cache are put back right after.
 function loadCommandWithFailingBoardQuery(error) {
   const commandPath = require.resolve('../src/commands/leaderboard');
-  const service = require('../src/services/bankService');
+  const service = require('../src/systems/economy/bankService');
   const originalQuery = service.getAllBalanceSummaries;
   const originalEntry = require.cache[commandPath];
   service.getAllBalanceSummaries = async () => { throw error; };

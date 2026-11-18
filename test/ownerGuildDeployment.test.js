@@ -36,7 +36,7 @@ const {
 const { createExtensionHost } = require('../src/extensions/extensionHost');
 const { loadCommandData } = require('../src/loadCommands');
 const { loadTestControlPolicy } = require('../src/platform/testControlPolicy');
-const commandCatalog = require('../website/commandCatalog');
+const commandCatalog = require('../src/platform/catalogs/commandCatalog');
 const { IDS, createFixture } = require('./testControlSupport');
 
 const APP = '123456789012345678';

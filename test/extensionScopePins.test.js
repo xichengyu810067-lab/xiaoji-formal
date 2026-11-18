@@ -31,15 +31,15 @@ const { buildDeploymentPlan, deployCommands } = require('../deploy-commands');
 const { createExtensionHost } = require('../src/extensions/extensionHost');
 const interactionCreate = require('../src/events/interactionCreate');
 const { loadCommandData, loadPrivateCommandGroups } = require('../src/loadCommands');
-const commandCatalog = require('../website/commandCatalog');
+const commandCatalog = require('../src/platform/catalogs/commandCatalog');
 const {
   getCoinDatabasePath,
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const workService = require('../src/services/workService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const workService = require('../src/systems/work/workService');
 const logger = require('../src/utils/logger');
 const { GROUPS, GUILDS, createSyntheticExtension } = require('./fixtures/synthetic-extension');
 

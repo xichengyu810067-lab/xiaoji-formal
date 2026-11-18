@@ -1,4 +1,4 @@
-const { withCoinTransaction, withCoinDatabase } = require('../../services/coinDatabase');
+const { withCoinTransaction, withCoinDatabase } = require('./storage/coinDatabase');
 const {
   CoinServiceError,
   TransactionType,
@@ -296,7 +296,7 @@ async function setRate(guildId, rateKey, ratePercent, { operatorId, reason, dura
 
 async function getRateHistory(guildId, { limit = 10 } = {}) {
   return withCoinDatabase((api) => {
-    const count = Math.min(Math.max(Number(limit) || 10, 1), 25);
+    const count = listLimit(limit, 10);
     const globalRows = api.all(`SELECT * FROM coin_rate_history_global
       ORDER BY created_at DESC, id DESC LIMIT ?`, [count]);
     const legacyRows = api.all(`SELECT * FROM coin_rate_history
@@ -403,6 +403,12 @@ async function withdraw(guildId, userId, amount) {
   });
 }
 
+// The number of rows a list shows: a whole number from 1 to 25, the fallback when none is given. A fraction is cut to
+// the whole number below it instead of reaching the query as it is.
+function listLimit(limit, fallback) {
+  return Math.min(Math.max(Math.trunc(Number(limit)) || fallback, 1), 25);
+}
+
 async function createFixedDeposit(guildId, userId, { amount, termDays, source = 'wallet' }) {
   return withCoinTransaction((api) => {
     const settings = ensureGuildSettings(api, guildId);
@@ -417,7 +423,12 @@ async function createFixedDeposit(guildId, userId, { amount, termDays, source = 
     }
 
     const term = normalizeTerm(termDays);
-    const normalizedSource = source === 'bank' ? 'bank' : 'wallet';
+    // Only the two choices the option offers; anything else (an empty text, a typo, "Bank") is refused instead of
+    // being read as the wallet.
+    if (source !== 'wallet' && source !== 'bank') {
+      throw new CoinServiceError('INVALID_FIXED_DEPOSIT_SOURCE', '定存來源只能選錢包或活存。');
+    }
+    const normalizedSource = source;
     const player = ensurePlayer(api, guildId, userId);
 
     if (normalizedSource === 'wallet' && player.balance < principal) {
@@ -484,7 +495,7 @@ async function listFixedDeposits(guildId, { userId = null, includeClosed = true,
       where += " AND status IN ('active', 'matured')";
     }
 
-    params.push(Math.min(Math.max(Number(limit) || 10, 1), 25));
+    params.push(listLimit(limit, 10));
 
     return api
       .all(
@@ -687,7 +698,7 @@ async function getAllBalanceSummaries(guildId, { limit = 25 } = {}) {
        GROUP BY p.guild_id, p.user_id
        ORDER BY (w.balance + COALESCE(ba.balance, 0) + fixed_principal + fixed_interest) DESC
        LIMIT ?`,
-      [nowIso(), guildId, Math.min(Math.max(Number(limit) || 25, 1), 25)]
+      [nowIso(), guildId, listLimit(limit, 25)]
     ).map((row) => ({
       userId: row.user_id,
       walletBalance: Number(row.balance || 0),

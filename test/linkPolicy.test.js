@@ -1544,7 +1544,7 @@ test('the texts the bot writes by itself hold no name that would be taken for a 
   // written with https:// (and approved), everything else must read as text.
   const { buildHelpReply } = require('../src/commands/help');
   const about = require('../src/commands/about');
-  const { COMMAND_CATALOG } = require('../website/commandCatalog');
+  const { COMMAND_CATALOG } = require('../src/platform/catalogs/commandCatalog');
   const replies = [];
   await about.execute({ async reply(payload) { replies.push(payload); } });
   const release = buildReleaseMessage({

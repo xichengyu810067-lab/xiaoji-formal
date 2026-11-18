@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { getCoinDatabaseInfo, withCoinDatabase, withCoinTransaction } = require('../../services/coinDatabase');
+const { getCoinDatabaseInfo, withCoinDatabase, withCoinTransaction } = require('./storage/coinDatabase');
 const { getWalletPlayerWithApi, mutateWalletWithApi, readWalletPlayerWithApi } = require('./coinWalletService');
 const { describeTransactionReason } = require('./transactionReasons');
 

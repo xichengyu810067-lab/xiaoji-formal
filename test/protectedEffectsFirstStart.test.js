@@ -14,21 +14,21 @@ const path = require('node:path');
 const test = require('node:test');
 const { fileURLToPath } = require('node:url');
 
-const { withCoinDatabase, withCoinTransaction } = require('../src/services/coinDatabase');
+const { withCoinDatabase, withCoinTransaction } = require('../src/systems/economy/storage/coinDatabase');
 const { enqueueFeatureOutboxWithApi } = require('../src/services/featurePlatformService');
-const { buildReactionOutboxPayload } = require('../src/services/chainReactionDelivery');
+const { buildReactionOutboxPayload } = require('../src/systems/community/chains/chainReactionDelivery');
 const {
   acceptWordChainMessage,
   processWordChainReactionOutbox,
   startWordChain,
-} = require('../src/services/wordChainService');
+} = require('../src/systems/community/chains/wordChainService');
 const {
   processWorkPenaltyAnnouncements,
   processWorkReminders,
   resetWorkReminderRetryStateForTests,
 } = require('../src/systems/work/workService');
 const { buildPublicStatusSnapshot } = require('../src/services/publicStatusService');
-const { COMMAND_CATALOG } = require('../website/commandCatalog');
+const { COMMAND_CATALOG } = require('../src/platform/catalogs/commandCatalog');
 const { LEGACY_LEDGER_VARIABLES } = require('../src/systems/safety/ledgerBootstrap');
 const { PURPOSE_IDS } = require('../src/systems/safety/ledgerLayout');
 const {

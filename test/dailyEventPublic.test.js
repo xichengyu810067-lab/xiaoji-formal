@@ -21,10 +21,10 @@ process.env.BOT_OWNER_ID = 'owner-user';
 const {
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
-} = require('../src/services/coinDatabase');
-const riddleService = require('../src/services/dailyRiddleService');
-const discussionService = require('../src/services/dailyDiscussionService');
-const { riddles } = require('../src/services/dailyRiddleCorpus');
+} = require('../src/systems/economy/storage/coinDatabase');
+const riddleService = require('../src/systems/community/daily/dailyRiddleService');
+const discussionService = require('../src/systems/community/daily/dailyDiscussionService');
+const { riddles } = require('../src/systems/community/daily/dailyRiddleCorpus');
 
 const LOCAL_DATE = '2026-09-30';
 // Taipei 11:00 and 09:00, inside the publish window of the riddle and of the discussion.

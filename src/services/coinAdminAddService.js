@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
-const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
-const { adjustPlayerBalanceWithApi } = require('./coinService');
-const { CoinCampaignError } = require('./coinCampaignService');
+const { withCoinDatabase, withCoinTransaction } = require('../systems/economy/storage/coinDatabase');
+const { adjustPlayerBalanceWithApi } = require('../systems/economy/coinService');
+const { CoinCampaignError } = require('../systems/economy/coinCampaignService');
 
 const MAX_COIN_AMOUNT = 9_000_000_000;
 const VALID_STATUSES = new Set(['pending', 'partial', 'completed', 'cancelled']);

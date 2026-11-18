@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
-const catalog = require('../website/commandCatalog');
+const catalog = require('../src/platform/catalogs/commandCatalog');
 const {
   FAILURES_TO_BREAK,
   SERVICES,
@@ -20,7 +20,7 @@ const {
 const { COMMAND_DEPENDENCIES, listPublicCommands } = require('../src/platform/publicCommandStatus');
 const { PUBLIC_FEATURES, buildPublicStatusSnapshot } = require('../src/services/publicStatusService');
 const { createMarketData } = require('../src/systems/stocks/marketData');
-const { describeHealthCheck, describeReason, indexStatusPayload, matchesStatusFilter } = require('../website/statusData');
+const { describeHealthCheck, describeReason, indexStatusPayload, matchesStatusFilter } = require('../src/platform/catalogs/statusData');
 const { TARGET, render } = require('../scripts/build-status-worker-commands');
 
 const NOW = Date.parse('2026-11-14T12:00:00Z');

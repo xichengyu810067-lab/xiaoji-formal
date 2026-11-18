@@ -79,7 +79,6 @@ const { selectExtensionHost } = require('./platform/testControlExtension');
 const logger = require('./utils/logger');
 const { stopPublicStatusServer } = require('./services/publicStatusServer');
 const { stopStatusSnapshotPublisher } = require('./services/statusSnapshotPublisher');
-const { stopGameServer } = require('./services/gameServer');
 const { stopReleaseAnnouncementScheduler } = require('./services/releaseAnnouncementService');
 const { OwnerSafetyNotifier } = require('./systems/safety/ownerSafetyNotifier');
 const { createOutageNotice } = require('./systems/safety/outageNotice');
@@ -334,9 +333,6 @@ async function shutdown(signal, exitCode = 0) {
     await boardRuntime.stopLifecycle();
     await stopReleaseAnnouncementScheduler();
     await extensionHost.runHook('shutdown', { client, signal });
-    await stopGameServer().catch(() => {
-      logger.warn('[GAME_SERVER] Server shutdown failed.');
-    });
     await stopPublicStatusServer().catch(() => {
       logger.warn('[PUBLIC_STATUS] Server shutdown failed.');
     });
@@ -350,6 +346,15 @@ async function shutdown(signal, exitCode = 0) {
     logger.error(`[SHUTDOWN] code=SHUTDOWN_STEP_FAILED cause=${cause}`);
   } finally {
     flushMemberRecords();
+    // Every coin database writer has stopped by now: the connection is closed, which checkpoints
+    // its -wal into the file. A close that fails leaves the committed writes in the -wal (SQLite
+    // replays it at the next start); it is one fixed line and a failed stop.
+    try {
+      await coinDatabaseEscalations.closeCoinDatabase();
+    } catch {
+      stepFailed = true;
+      logger.error('[SHUTDOWN] code=COIN_DB_CLOSE_FAILED');
+    }
     // A coin database write during the later steps (the board lifecycle, the extension hook,
     // an event still in flight) can escalate after the report above. This last shutdown report
     // reads coinDatabaseEscalations once more and gets only those, so none is printed twice

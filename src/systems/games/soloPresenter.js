@@ -6,7 +6,7 @@ const { nextTetrisShape } = require('./soloGameRules');
 const LABELS = Object.freeze({ tetris: '俄羅斯方塊', 'number-match': '數字配對', sudoku: '數獨' });
 const DIFFICULTIES = Object.freeze({ easy: '簡單', normal: '一般', complex: '複雜', hard: '困難' });
 const CELL = 34;
-const FONT_FILE = path.join(__dirname, '..', '..', 'games', 'assets', 'fonts', 'Cubic_11.ttf');
+const FONT_FILE = path.join(__dirname, '..', '..', '..', 'assets', 'fonts', 'Cubic_11.ttf');
 
 function box(x, y, width, height, fill, stroke = '#38435d') {
   return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="3" fill="${fill}" stroke="${stroke}"/>`;

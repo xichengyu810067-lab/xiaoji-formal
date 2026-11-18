@@ -4,8 +4,8 @@ const {
   pawnLuxuryItem,
   quotePawnItem,
   redeemPawnRecord,
-} = require('../services/luxuryService');
-const { formatCoins, replyCoinError } = require('../utils/coinPresentation');
+} = require('../systems/economy/luxuryService');
+const { formatCoins, replyCoinError } = require('../systems/economy/coinPresentation');
 const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 function formatTimestamp(isoString) {

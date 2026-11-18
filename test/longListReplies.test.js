@@ -22,7 +22,7 @@ const GOLDEN = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'long
 // What a service function answers during a run is set per test; the stub calls whatever is set.
 const state = {};
 for (const [service, names] of Object.entries(SERVICE_FUNCTIONS)) {
-  const file = require.resolve(`../src/services/${service}`);
+  const file = require.resolve(`../src/${service}`);
   const real = require(file);
   const stubs = Object.fromEntries(names.map((name) => [name, (...args) => state[name](...args)]));
   require.cache[file].exports = { ...real, ...stubs };

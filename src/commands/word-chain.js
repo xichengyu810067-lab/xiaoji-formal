@@ -3,7 +3,7 @@ const {
   describeWordChainStatus,
   getWordChainStatus,
   stopWordChain,
-} = require('../services/wordChainService');
+} = require('../systems/community/chains/wordChainService');
 const {
   ensureWordChainAccess,
   replyWordChainFailure,

@@ -13,8 +13,8 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-luxury-pawn-'));
 process.env.COIN_DB_PATH = path.join(root, 'luxury-pawn.sqlite');
 process.env.COIN_TIMEZONE = 'Asia/Taipei';
 
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase } = require('../src/services/coinDatabase');
-const { adjustPlayerBalance } = require('../src/services/coinService');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance } = require('../src/systems/economy/coinService');
 const {
   createLuxuryItem,
   getLuxuryInventory,
@@ -23,7 +23,7 @@ const {
   pawnLuxuryItem,
   purchaseLuxuryItem,
   redeemPawnRecord,
-} = require('../src/services/luxuryService');
+} = require('../src/systems/economy/luxuryService');
 
 const GUILD_ID = 'pawn-guild';
 const PRICE = 100;

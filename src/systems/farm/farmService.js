@@ -7,7 +7,7 @@
 //
 // The tables are the farm's own and are created here when first used; the coin schema version is not touched.
 
-const { withCoinTransaction } = require('../../services/coinDatabase');
+const { withCoinTransaction } = require('../economy/storage/coinDatabase');
 const { ensureGuildEconomyRowWithApi, readGuildEconomyEnabledWithApi } = require('../economy/coinService');
 const { getWalletPlayerWithApi, mutateWalletWithApi } = require('../economy/coinWalletService');
 const { FARM_RULES } = require('./farmCatalog');

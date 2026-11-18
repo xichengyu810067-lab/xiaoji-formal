@@ -12,7 +12,7 @@ const { makeRealTempDir } = require('./support/realTempDir');
 const root = makeRealTempDir('xiaoji-outbox-health-');
 process.env.COIN_DB_PATH = path.join(root, 'synthetic.sqlite');
 
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
 const {
   claimFeatureOutbox,
   deadLetterFeatureOutbox,

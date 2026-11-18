@@ -1,10 +1,10 @@
 const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
-const { corpusVersion } = require('../services/dailyDiscussionCorpus');
+const { corpusVersion } = require('../systems/community/daily/dailyDiscussionCorpus');
 const {
   FEATURE_KEY,
   getDailyDiscussionEvent,
   processDailyDiscussionTick,
-} = require('../services/dailyDiscussionService');
+} = require('../systems/community/daily/dailyDiscussionService');
 const { getGuildFeatureSetting, setGuildFeatureSetting } = require('../services/featurePlatformService');
 const { formatDailyEventStatus } = require('../utils/dailyEventStatus');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');

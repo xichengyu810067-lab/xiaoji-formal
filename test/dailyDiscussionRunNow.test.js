@@ -21,8 +21,8 @@ process.env.BOT_OWNER_ID = 'owner-user';
 const {
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
-} = require('../src/services/coinDatabase');
-const discussionService = require('../src/services/dailyDiscussionService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const discussionService = require('../src/systems/community/daily/dailyDiscussionService');
 const { setGuildFeatureSetting } = require('../src/services/featurePlatformService');
 const command = require('../src/commands/daily-discussion');
 

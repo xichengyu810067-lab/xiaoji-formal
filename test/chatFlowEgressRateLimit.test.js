@@ -16,7 +16,7 @@ const {
   getRecentConversationTurns,
   resetConversationHistoryForTests,
 } = require('../src/services/conversationHistoryService');
-const { clearConversationStateForTests } = require('../src/services/conversationModeService');
+const { clearConversationStateForTests } = require('../src/systems/conversation/conversationMode');
 const { openArchive } = require('../src/systems/conversation/aiArchive');
 const {
   ARCHIVE_POLICY_VERSION,

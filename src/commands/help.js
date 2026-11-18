@@ -1,6 +1,6 @@
 const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
-const commandCatalog = require('../../website/commandCatalog');
-const { GAME_CATALOG } = require('../../website/gameCatalog');
+const commandCatalog = require('../platform/catalogs/commandCatalog');
+const { GAME_CATALOG } = require('../platform/catalogs/gameCatalog');
 
 // Discord allows 1024 characters per embed field value; stay below it.
 const FIELD_VALUE_LIMIT = 1000;
@@ -20,7 +20,6 @@ const HELP_NOTES = Object.freeze({
   leaderboard: '用 type 切換；總資產固定顯示前 25 名',
   shop: '購買請用 /shop buy',
   work: '目前不開放辭職（cancel 只顯示說明），工作期滿後自動結算',
-  'coin-admin': 'history 指定 campaign-id 的活動對帳限小吉擁有者',
   board: `開始或查看遊戲：${gameNames}；加入、離開或結束適用的公開桌遊與推理遊戲；/board stop 也能結束你自己的個人遊戲`,
   farm: '個人農場，跨伺服器共用；作物與料理每天合計最多賣 500 吉幣；也能從 /board start 打開',
   kitchen: '每天最多送出 5 道料理，收到的料理只能吃',

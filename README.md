@@ -7,7 +7,7 @@
 
 <br>
 
-<a href="https://github.com/xichengyu810067-lab/xiaoji-formal/releases"><img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC-1.3.2-e8789f?style=for-the-badge" alt="版本 1.3.2"></a>
+<a href="https://github.com/xichengyu810067-lab/xiaoji-formal/releases"><img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC-1.3.3-e8789f?style=for-the-badge" alt="版本 1.3.3"></a>
 <a href="https://xiaoji-zeta.vercel.app"><img src="https://img.shields.io/badge/%E5%AE%98%E7%B6%B2-%E9%BB%9E%E6%88%91%E9%80%B2%E5%85%A5-f19a84?style=for-the-badge" alt="官網"></a>
 <a href="https://discord.gg/TqkCx9kYmk"><img src="https://img.shields.io/badge/%E5%AE%98%E6%96%B9%E7%A4%BE%E7%BE%A4-%E5%8A%A0%E5%85%A5-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="官方社群"></a>
 <a href="https://xiaoji-zeta.vercel.app/status.html"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fxiaoji-public-status.xichengyu810067.workers.dev%2Fapi%2Fpublic%2Fbadge&style=for-the-badge" alt="小吉現在的狀態"></a>
@@ -260,7 +260,7 @@ flowchart LR
 
 <h2><a id="more"></a><img src="docs/images/readme/titles/more.svg" alt="想知道更多"></h2>
 
-- 這次更新的完整內容：[1.3.2 版本說明](docs/releases/1.3.2.md)、[1.3.1 版本說明](docs/releases/1.3.1.md)
+- 這次更新的完整內容：[1.3.3 版本說明](docs/releases/1.3.3.md)、[1.3.2 版本說明](docs/releases/1.3.2.md)
 - 使用說明：[使用指南](docs/USER_GUIDE.md)
 
 <details>

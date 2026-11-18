@@ -34,7 +34,7 @@ const {
 const { handleMentionMessage } = require('../src/systems/conversation/chatFlow');
 const { providerCallGuard } = require('../src/systems/conversation/providerGuard');
 const { clearMemoryForTests } = require('../src/systems/conversation/projection');
-const { clearConversationStateForTests } = require('../src/services/conversationModeService');
+const { clearConversationStateForTests } = require('../src/systems/conversation/conversationMode');
 const { resetConversationHistoryForTests } = require('../src/services/conversationHistoryService');
 const { closeArchiveForTests } = require('../src/services/aiArchiveService');
 

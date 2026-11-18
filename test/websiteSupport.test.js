@@ -115,3 +115,19 @@ test('the worker routes the support path', () => {
   const migration = fs.readFileSync(path.join(__dirname, '..', 'cloudflare', 'status-worker', 'migrations', '0002_support_usage.sql'), 'utf8');
   assert.match(migration, /CREATE TABLE IF NOT EXISTS support_usage/u);
 });
+
+test('the worker declares every package it imports, at the version the bot uses', () => {
+  const workerRoot = path.join(__dirname, '..', 'cloudflare', 'status-worker');
+  const workerPackage = JSON.parse(fs.readFileSync(path.join(workerRoot, 'package.json'), 'utf8'));
+  const rootPackage = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const imported = new Set();
+  for (const file of fs.readdirSync(path.join(workerRoot, 'src')).filter((name) => name.endsWith('.mjs'))) {
+    const source = fs.readFileSync(path.join(workerRoot, 'src', file), 'utf8');
+    for (const [, specifier] of source.matchAll(/^\s*import\s[^'"]*['"]([^'"]+)['"]/gmu)) {
+      if (specifier.startsWith('.') || specifier.startsWith('node:') || specifier.startsWith('cloudflare:')) continue;
+      imported.add(specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]);
+    }
+  }
+  assert.deepEqual([...imported].sort(), Object.keys(workerPackage.dependencies).sort());
+  for (const name of imported) assert.equal(workerPackage.dependencies[name], rootPackage.dependencies[name], name);
+});

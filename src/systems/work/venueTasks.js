@@ -39,7 +39,7 @@ function serializeArray(value) {
 // The order SQLite's ORDER BY gives the values of one column: NULL first, then numbers by value,
 // then text in the BINARY collation (byte order of its UTF-8 encoding), then blobs byte by byte.
 // This relies on the sort columns (cycle_id, starts_at, created_at, id) being made by the system
-// and being valid UTF-8.  Text with a lone surrogate would come back from sql.js with U+FFFD in
+// and being valid UTF-8.  Text with a lone surrogate is stored (and comes back) with U+FFFD in
 // its place, and the order would then no longer be sure to match SQLite's.
 function sqliteTypeRank(value) {
   if (value === null || value === undefined) return 0;

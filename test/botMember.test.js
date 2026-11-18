@@ -10,7 +10,7 @@ const { ChannelType, Client, ClientUser, GatewayIntentBits, PermissionFlagsBits,
 const { cachedBotMember, resolveBotMember } = require('../src/utils/botMember');
 const { ensureModerationAccess } = require('../src/utils/moderation');
 const { selectReleaseChannel } = require('../src/services/releaseAnnouncementService');
-const { hasReactionPermission } = require('../src/services/chainReactionDelivery');
+const { hasReactionPermission } = require('../src/systems/community/chains/chainReactionDelivery');
 const { validateDelivery } = require('../src/systems/schedule/delivery/reminderDelivery');
 const logger = require('../src/utils/logger');
 

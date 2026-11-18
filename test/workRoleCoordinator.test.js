@@ -38,7 +38,7 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const workCommand = require('../src/commands/work');
 const workService = require('../src/systems/work/workService');
 const {

@@ -1,5 +1,5 @@
-const { CoinServiceError, TransactionType } = require('../../services/coinService');
-const { mutateWalletWithApi } = require('../../services/coinWalletService');
+const { CoinServiceError, TransactionType } = require('../economy/coinService');
+const { mutateWalletWithApi } = require('../economy/coinWalletService');
 const { GLOBAL_RULE_VERSION, BASIC_RATIO } = require('./workRules');
 const {
   findEscrowedPrimaryWaiterOrderWithApi,

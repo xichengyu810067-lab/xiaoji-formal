@@ -16,9 +16,9 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const { setGuildEconomyEnabled } = require('../src/services/coinService');
-const { getWalletPlayerWithApi, setDebtWithApi } = require('../src/services/coinWalletService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const { setGuildEconomyEnabled } = require('../src/systems/economy/coinService');
+const { getWalletPlayerWithApi, setDebtWithApi } = require('../src/systems/economy/coinWalletService');
 const { grantRewardOnceV2WithApi } = require('../src/services/featurePlatformService');
 const { buildSudoku } = require('../src/systems/games/soloGameRules');
 const { createSoloSessionService } = require('../src/systems/games/soloSessionService');

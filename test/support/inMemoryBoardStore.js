@@ -1,4 +1,4 @@
-const { BoardCoreError, cloneJson } = require('../../src/games/contracts');
+const { BoardCoreError, cloneJson } = require('../../src/systems/games/board/core/contracts');
 
 function interactionKey(interactionId) {
   return String(interactionId || '');

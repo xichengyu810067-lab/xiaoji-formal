@@ -10,11 +10,11 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { ChannelType, PermissionFlagsBits } = require('discord.js');
-const bankService = require('../src/services/bankService');
-const coinService = require('../src/services/coinService');
-const workService = require('../src/services/workService');
+const bankService = require('../src/systems/economy/bankService');
+const coinService = require('../src/systems/economy/coinService');
+const workService = require('../src/systems/work/workService');
 const { loadCommands } = require('../src/loadCommands');
-const commandCatalog = require('../website/commandCatalog');
+const commandCatalog = require('../src/platform/catalogs/commandCatalog');
 
 const { COMMAND_CATALOG, getSubcommandAudience } = commandCatalog;
 const { CoinServiceError } = coinService;
@@ -297,10 +297,10 @@ test('an owner-only subcommand inside a wider command does not widen that comman
   }
   const coinAdmin = commandCatalog.getCommand('coin-admin');
   assert.equal(coinAdmin.audience, 'admin');
-  for (const subcommand of ['add', 'remove', 'set', 'reset-user']) {
+  for (const subcommand of ['add', 'remove', 'set', 'history', 'reset-user']) {
     assert.equal(getSubcommandAudience(coinAdmin, subcommand), 'owner', `/coin-admin ${subcommand}`);
   }
-  for (const subcommand of ['history', 'enable', 'disable']) {
+  for (const subcommand of ['enable', 'disable']) {
     assert.equal(getSubcommandAudience(coinAdmin, subcommand), 'admin', `/coin-admin ${subcommand}`);
   }
 });

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const commandPath = path.join(__dirname, '..', 'src', 'commands', 'coins.js');
-const coinServicePath = path.join(__dirname, '..', 'src', 'services', 'coinService.js');
+const coinServicePath = path.join(__dirname, '..', 'src', 'systems', 'economy', 'coinService.js');
 
 // /coins answers about the caller only: the interaction offers no user option at all, so a command that still asked
 // for one would throw here.

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { formatMemberName, formatUser, isPrimaryPayrollVisibleTo } = require('../src/utils/coinPresentation');
+const { formatMemberName, formatUser, isPrimaryPayrollVisibleTo } = require('../src/systems/economy/coinPresentation');
 
 test('formatUser uses guild/member display name and avoids user id', () => {
   assert.equal(formatUser({ displayName: '奶昔女王' }), '奶昔女王');

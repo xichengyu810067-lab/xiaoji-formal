@@ -1,11 +1,11 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { BoardRuleError } = require('../src/games/contracts');
-const { BoardEngineRegistry } = require('../src/games/engineRegistry');
-const { BoardSessionService } = require('../src/games/boardSessionService');
-const { createTrustedSystemAction } = require('../src/games/trustedSystemActions');
+const { BoardRuleError } = require('../src/systems/games/board/core/contracts');
+const { BoardEngineRegistry } = require('../src/systems/games/board/core/engineRegistry');
+const { BoardSessionService } = require('../src/systems/games/board/core/boardSessionService');
+const { createTrustedSystemAction } = require('../src/systems/games/board/core/trustedSystemActions');
 const { InMemoryBoardStore } = require('./support/inMemoryBoardStore');
-const engine = require('../src/games/engines/checkers');
+const engine = require('../src/systems/games/board/engines/checkers');
 
 function createState(count = 2) {
   const players = Array.from({ length: count }, (_value, index) => `player-${index + 1}`);

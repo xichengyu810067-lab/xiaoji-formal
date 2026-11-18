@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   FAILURES_TO_BREAK,
@@ -12,7 +14,7 @@ const {
   serviceStatus,
 } = require('../src/platform/serviceHealth');
 const { buildPublicStatusSnapshot, createFeatureStatusWatcher } = require('../src/services/publicStatusService');
-const { PUBLIC_FEATURE_CATALOG } = require('../website/statusData');
+const { PUBLIC_FEATURE_CATALOG } = require('../src/platform/catalogs/statusData');
 
 const NOW = Date.parse('2026-11-12T12:00:00Z');
 
@@ -148,6 +150,55 @@ test('the solo games played through /board are normal without a report from the 
     usageReader: async () => [],
   });
   assert.equal(snapshot.features.find((feature) => feature.key === 'sudoku').status, 'broken');
+});
+
+test('a maintenance row for a solo game is shown, now that the coin database deletes the stale ones on open', async (t) => {
+  useHealth(t);
+  const at = '2026-11-12T11:00:00.000Z';
+  const snapshot = await buildPublicStatusSnapshot(client, {
+    now: new Date(NOW),
+    healthReader: async () => [
+      { featureKey: 'tetris', status: 'broken', detail: 'reward_contract_invalid', updatedAt: at },
+      { featureKey: 'number_match', status: 'maintenance', detail: 'operator_pause', updatedAt: at },
+      { featureKey: 'daily_riddle', status: 'maintenance', detail: 'paused', updatedAt: at },
+    ],
+    usageReader: async () => [],
+  });
+  const cards = Object.fromEntries(snapshot.features.map((feature) => [feature.key, feature]));
+  assert.equal(cards.tetris.status, 'broken');
+  assert.equal(cards.number_match.status, 'maintenance');
+  assert.equal(cards.number_match.updatedAt, at);
+  assert.equal(cards.sudoku.status, 'normal');
+  assert.equal(cards.daily_riddle.status, 'maintenance');
+});
+
+test('no public code reports health for the solo games on its own', () => {
+  // featurePlatformService.js stores whatever a caller reports, and the coin database storage creates and migrates the
+  // table; every other writer reports for its own feature key. None of them names a solo game key, so a maintenance row
+  // for these cards can only come from an operator.
+  const root = path.join(__dirname, '..', 'src');
+  const files = [];
+  const walk = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.js')) files.push(full);
+    }
+  };
+  walk(root);
+  const relative = (file) => path.relative(root, file).split(path.sep).join('/');
+  const store = 'services/featurePlatformService.js';
+  const writers = files.filter((file) => {
+    const name = relative(file);
+    if (name === store || name.startsWith('systems/economy/storage/')) return false;
+    const source = fs.readFileSync(file, 'utf8');
+    return /setFeatureHealth|healthReporter|(?:INSERT INTO|UPDATE)\s+feature_health/u.test(source);
+  });
+  assert.ok(writers.length >= 4, writers.map(relative).join(', '));
+  for (const file of writers) {
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /['"`](?:tetris|number_match|sudoku)['"`]/u, relative(file));
+  }
+  assert.doesNotMatch(fs.readFileSync(path.join(root, store), 'utf8'), /(?:INSERT INTO|UPDATE)\s+feature_health[^`]*(?:tetris|number_match|sudoku)/u);
 });
 
 test('with every service configured and nothing failing, every card is normal', async (t) => {

@@ -22,7 +22,7 @@ const {
 const { developerInstructions, getProtectedPromptTexts } = require('../src/systems/conversation/provider');
 const { listPublicFactIds, resolvePublicFactId } = require('../src/systems/conversation/publicFacts');
 const { buildHelpSections } = require('../src/commands/help');
-const commandCatalog = require('../website/commandCatalog');
+const commandCatalog = require('../src/platform/catalogs/commandCatalog');
 
 const ADMIN_PART = 'Commands that need a server permission (Manage Server or Administrator):';
 const GAME_NOTE = 'All new games start from /board start.';
@@ -48,7 +48,7 @@ const catalogNames = (catalog, audience) => catalog.COMMAND_CATALOG
   .filter((command) => command.listInHelp === true && command.audience === audience)
   .map((command) => command.name);
 
-// A stand-in catalog with the shape of website/commandCatalog.js.
+// A stand-in catalog with the shape of src/platform/catalogs/commandCatalog.js.
 function stubCatalog(changes = {}) {
   const { add = [], remove = [] } = changes;
   const entries = commandCatalog.COMMAND_CATALOG

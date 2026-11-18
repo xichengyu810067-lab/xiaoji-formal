@@ -1,5 +1,5 @@
 const logger = require('../utils/logger');
-const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
+const { withCoinDatabase, withCoinTransaction } = require('../systems/economy/storage/coinDatabase');
 const { setFeatureHealth } = require('./featurePlatformService');
 const { normalizeChatStyle } = require('./chatStyleService');
 

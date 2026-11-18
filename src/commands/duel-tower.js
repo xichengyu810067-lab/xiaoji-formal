@@ -5,7 +5,7 @@ const {
   listOwnedBattleWeapons,
 } = require('../services/casinoFacilityService');
 const { executeDuelTowerGame, formatSignedChips } = require('../systems/casino/discord/duelTowerLaunch');
-const { replyCoinError } = require('../utils/coinPresentation');
+const { replyCoinError } = require('../systems/economy/coinPresentation');
 const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 function formatTimestamp(isoString) {

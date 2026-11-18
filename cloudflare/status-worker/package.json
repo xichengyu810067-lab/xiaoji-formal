@@ -1,0 +1,9 @@
+{
+  "name": "xiaoji-public-status-worker",
+  "private": true,
+  "type": "module",
+  "description": "The public status and support Worker. It declares its own packages so it builds on its own; the version follows the bot's package.json.",
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0"
+  }
+}

@@ -24,8 +24,8 @@ const {
 } = require('../scripts/command-doc-checks');
 const { buildPublicExportPlan } = require('../scripts/create-public-export');
 const { renderCommandDocs, synchronizeCommandDocs } = require('../scripts/render-command-docs');
-const commandCatalog = require('../website/commandCatalog');
-const { PUBLIC_SYSTEM_CATALOG } = require('../website/publicFeatureCatalog');
+const commandCatalog = require('../src/platform/catalogs/commandCatalog');
+const { PUBLIC_SYSTEM_CATALOG } = require('../src/platform/catalogs/publicFeatureCatalog');
 
 const { COMMAND_ALIASES, COMMAND_AUDIENCES, COMMAND_CATALOG, COMMAND_GROUPS, REMOVED_COMMANDS } = commandCatalog;
 const ROOT = path.join(__dirname, '..');
@@ -345,10 +345,6 @@ test('the website check reads every page and script under website/ and passes on
   const files = listWebsiteTextFiles();
   for (const required of [
     'siteSupport.js',
-    'games/gameClient.js',
-    'games/number-match/index.html',
-    'games/sudoku/index.html',
-    'games/tetris/index.html',
     'index.html',
     'status.html',
     'policies.html',
@@ -361,9 +357,7 @@ test('the website check reads every page and script under website/ and passes on
   assert.equal(files.some((file) => file.startsWith('assets/')), false, 'images are not text files');
 
   // These show /board start or /board status to people, so the extractor must reach those words.
-  for (const file of [
-    'siteSupport.js', 'games/gameClient.js', 'games/number-match/index.html', 'games/sudoku/index.html', 'games/tetris/index.html',
-  ]) {
+  for (const file of ['siteSupport.js']) {
     const pieces = extractWebsiteText(fs.readFileSync(path.join(ROOT, 'website', file), 'utf8'), path.extname(file));
     assert.ok(pieces.flatMap((piece) => findMentions(piece)).some((mention) => mention.command === 'board'), `${file} names /board`);
   }

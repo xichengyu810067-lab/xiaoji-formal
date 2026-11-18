@@ -12,25 +12,25 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const {
   ensureGuildEconomyRowWithApi,
   readGuildEconomyEnabledWithApi,
   setGuildEconomyEnabled,
-} = require('../src/services/coinService');
+} = require('../src/systems/economy/coinService');
 const { grantRewardOnce, grantRewardOnceV2 } = require('../src/services/featurePlatformService');
 const {
   claimDailyDiscussionEvent,
   claimDailyDiscussionSettlement,
   getDiscussionWindow,
   settleDailyDiscussion,
-} = require('../src/services/dailyDiscussionService');
+} = require('../src/systems/community/daily/dailyDiscussionService');
 const {
   claimDailyRiddleEvent,
   claimDailyRiddleSettlement,
   getRiddleWindow,
   settleDailyRiddle,
-} = require('../src/services/dailyRiddleService');
+} = require('../src/systems/community/daily/dailyRiddleService');
 const { buildSudoku } = require('../src/systems/games/soloGameRules');
 const { createSoloSessionService } = require('../src/systems/games/soloSessionService');
 

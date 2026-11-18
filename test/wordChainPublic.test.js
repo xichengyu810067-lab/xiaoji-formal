@@ -13,7 +13,7 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const {
   acceptWordChainMessage,
   getWordChainStatus,
@@ -21,7 +21,7 @@ const {
   startWordChain,
   stopWordChain,
   validateWord,
-} = require('../src/services/wordChainService');
+} = require('../src/systems/community/chains/wordChainService');
 const {
   corpusVersion,
   getSuccessors,
@@ -30,7 +30,7 @@ const {
   loadCorpusAssets,
   metadata,
   moeWords,
-} = require('../src/services/wordChainLexicon');
+} = require('../src/systems/community/chains/wordChainLexicon');
 const { buildPublicExportPlan } = require('../scripts/create-public-export');
 const { configureChainReactionFence } = require('../src/systems/safety/chainReactionFence');
 

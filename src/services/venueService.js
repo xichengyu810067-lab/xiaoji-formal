@@ -1,20 +1,20 @@
-const { readCoinSchemaVersionWithApi, withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
+const { readCoinSchemaVersionWithApi, withCoinDatabase, withCoinTransaction } = require('../systems/economy/storage/coinDatabase');
 const {
   CoinServiceError,
   ensureGuildSettings,
   ensurePlayer,
   getLocalDate,
   insertAdminLog,
-} = require('./coinService');
+} = require('../systems/economy/coinService');
 const {
   ChipLedgerType,
   creditChipsWithApi,
   debitChipsForCasinoWithApi,
-} = require('./chipService');
+} = require('../systems/economy/chipService');
 const {
   WAITER_JOB_NAMES,
   createWorkPenaltyWithApi,
-} = require('./workService');
+} = require('../systems/work/workService');
 const { getActiveCycleForUser, verifySavedSnapshot } = require('../systems/work/jobCycle');
 // Work-table SQL lives in the work system; these ports run inside this
 // file's own coin transactions.
@@ -748,6 +748,11 @@ function listVenueMenu(guildId, { itemType = null } = {}) {
   });
 }
 
+// /casino-venue add-menu is open to every member and each item is a row of the coin database, so the menu items still
+// on the menu are capped for each member and for each guild. A deleted item frees its place.
+const MAX_MENU_ITEMS_PER_MEMBER = 50;
+const MAX_MENU_ITEMS_PER_GUILD = 200;
+
 function addVenueMenuItem(guildId, { itemType, name, steps, createdBy } = {}) {
   return withCoinTransaction((api) => {
     ensureEconomyEnabled(api, guildId);
@@ -755,6 +760,17 @@ function addVenueMenuItem(guildId, { itemType, name, steps, createdBy } = {}) {
     const normalizedName = normalizeName(name);
     const normalizedSteps = normalizeSteps(steps);
     const timestamp = nowIso();
+    const countOf = (sql, params) => Number(api.get(sql, params).count);
+    if (countOf('SELECT COUNT(*) AS count FROM casino_venue_menu WHERE guild_id = ? AND created_by = ? AND deleted = 0',
+      [guildId, createdBy || 'unknown']) >= MAX_MENU_ITEMS_PER_MEMBER) {
+      throw new CoinServiceError('VENUE_MENU_MEMBER_LIMIT',
+        `每位成員最多只能在菜單上保留 ${MAX_MENU_ITEMS_PER_MEMBER} 個自己新增的項目，請管理員刪除不用的項目後再新增。`);
+    }
+    if (countOf('SELECT COUNT(*) AS count FROM casino_venue_menu WHERE guild_id = ? AND deleted = 0', [guildId])
+      >= MAX_MENU_ITEMS_PER_GUILD) {
+      throw new CoinServiceError('VENUE_MENU_GUILD_LIMIT',
+        `這個伺服器的菜單最多 ${MAX_MENU_ITEMS_PER_GUILD} 個項目，請管理員刪除不用的項目後再新增。`);
+    }
 
     api.run(
       `INSERT INTO casino_venue_menu
@@ -1321,6 +1337,8 @@ function processExpiredVenueOrderItems({ date = new Date() } = {}) {
 }
 
 module.exports = {
+  MAX_MENU_ITEMS_PER_GUILD,
+  MAX_MENU_ITEMS_PER_MEMBER,
   ORDER_RATE_LIMIT_PER_MINUTE,
   VENUE_BONUS_AMOUNT,
   VENUE_BONUS_THRESHOLD,

@@ -7,7 +7,7 @@ const {
   repayCasinoLoan,
 } = require('../services/casinoService');
 const { executeCasinoGame, formatAutoTopUp, formatSignedChips } = require('../systems/casino/discord/casinoLaunch');
-const { formatChips, formatCoins, formatLoanStatus, replyCoinError } = require('../utils/coinPresentation');
+const { formatChips, formatCoins, formatLoanStatus, replyCoinError } = require('../systems/economy/coinPresentation');
 const { fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 const ledgerTypeLabels = {

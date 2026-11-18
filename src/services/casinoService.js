@@ -5,21 +5,21 @@ const {
   ButtonStyle,
   EmbedBuilder,
 } = require('discord.js');
-const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
-const { CoinServiceError, ensureGuildSettings } = require('./coinService');
+const { withCoinDatabase, withCoinTransaction } = require('../systems/economy/storage/coinDatabase');
+const { CoinServiceError, ensureGuildSettings } = require('../systems/economy/coinService');
 const {
   ChipLedgerType,
   assertPayoutWithinLimit,
   creditChipsWithApi,
   debitChipsForCasinoWithApi,
   ensureChipAccount,
-} = require('./chipService');
+} = require('../systems/economy/chipService');
 const { CasinoLedgerType, insertCasinoLedger } = require('../systems/economy/casinoLedger');
 const { LOAN_INTEREST_RATE, LOAN_RELIEF_STEP_RATIO, MIN_LOAN_INTEREST_RATE,
   applyCasinoLoanRelief, applyLoanInterest, borrowCasinoLoan, collectCasinoDebt,
   getCasinoLoanStatus, processCasinoLoanInterest,
   readCasinoDebtStatus, repayCasinoLoan } = require('../systems/economy/loans');
-const { formatChips } = require('../utils/coinPresentation');
+const { formatChips } = require('../systems/economy/coinPresentation');
 const { applyGameLaunchOnce } = require('../systems/games/gameLaunchReceipt');
 
 const MAX_CASINO_AMOUNT = 9_000_000_000;
@@ -919,7 +919,11 @@ function startBlackjack(guildId, userId, { amount, rng = defaultRng, deck = null
   }));
 }
 
-function getBlackjackSession(api, guildId, userId, sessionId) {
+// place: { channelId, messageId } of the control that was pressed. A hand is bound to the channel it was dealt in and,
+// once its panel is posted, to that message, like the board and personal games: the player's own control ID sent
+// from another message or channel must not play the hand there or rewrite that other message. Callers that are not
+// a Discord control (the services' own tests) pass no place.
+function getBlackjackSession(api, guildId, userId, sessionId, place = null) {
   const row = api.get('SELECT * FROM casino_blackjack_sessions WHERE guild_id = ? AND id = ?', [guildId, sessionId]);
 
   if (!row) {
@@ -930,7 +934,24 @@ function getBlackjackSession(api, guildId, userId, sessionId) {
     throw new CoinServiceError('BLACKJACK_SESSION_OWNER_ONLY', '只有開局的玩家可以操作這局 21點。');
   }
 
+  if (place && ((row.channel_id && place.channelId !== row.channel_id)
+      || (row.message_id && place.messageId !== row.message_id))) {
+    throw new CoinServiceError('BLACKJACK_SESSION_ELSEWHERE', '這局 21點只能用原本牌局訊息上的按鈕操作。');
+  }
+
   return row;
+}
+
+// Records the message that shows the hand, once, after the panel is posted in the channel the hand was dealt in.
+function bindBlackjackMessage(guildId, userId, sessionId, { channelId, messageId }) {
+  return withCoinTransaction((api) => {
+    api.run(
+      `UPDATE casino_blackjack_sessions SET message_id = ?
+       WHERE guild_id = ? AND user_id = ? AND id = ? AND message_id IS NULL AND (channel_id IS NULL OR channel_id = ?)`,
+      [String(messageId), guildId, userId, sessionId, channelId]
+    );
+    return mapBlackjackSession(api.get('SELECT * FROM casino_blackjack_sessions WHERE id = ?', [sessionId]));
+  });
 }
 
 async function getActiveBlackjackSession(guildId, userId, { date = new Date() } = {}) {
@@ -960,9 +981,9 @@ function playDealerAndSettleBlackjack(api, row, date) {
   return settleBlackjackSession(api, updatedRow, { date });
 }
 
-function hitBlackjack(guildId, userId, sessionId, { date = new Date() } = {}) {
+function hitBlackjack(guildId, userId, sessionId, { date = new Date(), place = null } = {}) {
   return withCoinTransaction((api) => {
-    const row = getBlackjackSession(api, guildId, userId, sessionId);
+    const row = getBlackjackSession(api, guildId, userId, sessionId, place);
 
     if (row.status !== BlackjackStatus.ACTIVE) {
       return { session: mapBlackjackSession(row), settled: true };
@@ -1000,9 +1021,9 @@ function hitBlackjack(guildId, userId, sessionId, { date = new Date() } = {}) {
   });
 }
 
-function standBlackjack(guildId, userId, sessionId, { date = new Date() } = {}) {
+function standBlackjack(guildId, userId, sessionId, { date = new Date(), place = null } = {}) {
   return withCoinTransaction((api) => {
-    const row = getBlackjackSession(api, guildId, userId, sessionId);
+    const row = getBlackjackSession(api, guildId, userId, sessionId, place);
 
     if (row.status !== BlackjackStatus.ACTIVE) {
       return { session: mapBlackjackSession(row), settled: true };
@@ -1130,10 +1151,11 @@ async function handleBlackjackButton(interaction) {
   }
 
   try {
+    const place = { channelId: interaction.channelId, messageId: interaction.message?.id ?? null };
     const result =
       action === BlackjackAction.HIT
-        ? await hitBlackjack(interaction.guildId, interaction.user.id, sessionId)
-        : await standBlackjack(interaction.guildId, interaction.user.id, sessionId);
+        ? await hitBlackjack(interaction.guildId, interaction.user.id, sessionId, { place })
+        : await standBlackjack(interaction.guildId, interaction.user.id, sessionId, { place });
 
     await interaction.update(buildBlackjackPayload(result.session));
   } catch (error) {
@@ -1157,6 +1179,7 @@ module.exports = {
   CasinoLedgerType,
   BlackjackStatus,
   applyCasinoLoanRelief,
+  bindBlackjackMessage,
   buildBlackjackPayload,
   borrowCasinoLoan,
   collectCasinoDebt,

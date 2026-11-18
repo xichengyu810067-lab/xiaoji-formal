@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { ApplicationCommandOptionType, Collection } = require('discord.js');
-const defaultCommandCatalog = require('../website/commandCatalog');
+const defaultCommandCatalog = require('./platform/catalogs/commandCatalog');
 const { createExtensionHost } = require('./extensions/extensionHost');
 const logger = require('./utils/logger');
 

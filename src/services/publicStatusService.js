@@ -1,5 +1,5 @@
 const packageJson = require('../../package.json');
-const { PUBLIC_FEATURE_CATALOG } = require('../../website/statusData');
+const { PUBLIC_FEATURE_CATALOG } = require('../platform/catalogs/statusData');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
 const logger = require('../utils/logger');
 const { serviceStatus } = require('../platform/serviceHealth');
@@ -42,8 +42,9 @@ const PUBLIC_FEATURES = Object.freeze([
   publicFeature('memory', { commands: ['memory'], services: ['memory_store'] }),
   publicFeature('image_reading', { type: 'ready', services: ['claude'] }),
   publicFeature('web_search', { type: 'ready', services: ['claude'] }),
-  // The solo games are played in Discord through /board (soloDiscordRuntime.js). The retired web game server no longer
-  // reports their health, so they no longer wait for it; a broken row (a reward that broke its contract) still lowers them.
+  // The solo games are played in Discord through /board (soloDiscordRuntime.js). Nothing reports their health on its own;
+  // the maintenance rows (game_server_disabled) the retired web game server left behind are deleted whenever the coin
+  // database opens (staleGameHealthCleanup.js), so a row for these keys is one an operator set and is shown like any other.
   publicFeature('tetris', { commands: ['board'], healthKey: 'tetris' }),
   publicFeature('number_match', { commands: ['board'], healthKey: 'number_match' }),
   publicFeature('sudoku', { commands: ['board'], healthKey: 'sudoku' }),

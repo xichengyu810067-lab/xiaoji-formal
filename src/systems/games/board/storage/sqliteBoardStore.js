@@ -1,5 +1,5 @@
 const { BoardCoreError, cloneJson, stableJson } = require('../core/contracts');
-const coinDatabase = require('../../../../services/coinDatabase');
+const coinDatabase = require('../../../economy/storage/coinDatabase');
 const { installBoardSchema } = require('./boardSchema');
 
 const MAX_SESSION_JSON_BYTES = 1024 * 1024;

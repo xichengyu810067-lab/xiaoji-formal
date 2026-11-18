@@ -133,10 +133,12 @@ const REJECTION_CODES = new Set([
   'LEDGER_WRITE_FORBIDDEN',
 ]);
 
-// Databases this process holds open, keyed by exact file identity. A second open is
-// refused before any descriptor is touched: on POSIX, closing any descriptor of a file
-// drops every advisory lock this process holds on it, including SQLite's.
-const OPEN_DATABASES = new Set();
+// Databases this process holds open, keyed by exact file identity, with the store that holds
+// each one (null only while LedgerStore.open runs). A second open is refused before any
+// descriptor is touched: on POSIX, closing any descriptor of a file drops every advisory lock
+// this process holds on it, including SQLite's. For the same reason a backup running in this
+// process takes its copy through the holding store (snapshotOpenLedger), never from the file.
+const OPEN_DATABASES = new Map();
 
 class LedgerStoreError extends Error {
   constructor(code, message, { retryable = false, cause, detail } = {}) {
@@ -1255,7 +1257,7 @@ class LedgerStore {
     }
     inspectDatabaseHeader(locations.databasePath);
     const db = openDatabase(locations.databasePath, { create: false, durability: config.durability });
-    OPEN_DATABASES.add(registryKey);
+    OPEN_DATABASES.set(registryKey, null);
     const witnesses = [];
     let store;
     try {
@@ -1292,6 +1294,7 @@ class LedgerStore {
         acceleratedRetentionMs: config.acceleratedRetentionMs,
         acceleratedPruneMaxBatches: config.acceleratedPruneMaxBatches, pruneBatchRows: config.pruneBatchRows });
       store.#registryKey = registryKey;
+      OPEN_DATABASES.set(registryKey, store);
       store.#quickCheck = quickCheck;
       store.#quickCheckTrigger = quickCheckTrigger;
       store.#resynchronizeWitnesses();
@@ -1878,6 +1881,44 @@ class LedgerStore {
     return Object.freeze({ pruned, batches, watermarks, complete });
   }
 
+  // A consistent copy of the ledger written to targetPath (absolute, must not exist) through this
+  // store's own connection, for a backup running in the process that holds it. VACUUM INTO reads
+  // one transaction, so the copy includes every committed step still only in the -wal, and no
+  // descriptor of the ledger file is opened (see OPEN_DATABASES). The copy is then switched to
+  // WAL, so it passes the header check and restores as a ledger, and flushed. It runs on the
+  // calling thread like every other store call, so it never falls between two statements of a
+  // transition. A failed copy leaves nothing at targetPath and throws LEDGER_SNAPSHOT_FAILED.
+  exportSnapshot(targetPath) {
+    this.#assertOpen();
+    const target = requireAbsolutePath(targetPath, 'snapshot');
+    if (Object.values(this.#locations).some((location) => pathIdentity(location) === pathIdentity(target))) {
+      throw invalid('The snapshot path must not be the ledger or one of its companion files.');
+    }
+    for (const suffix of ['', '-wal', '-shm', '-journal']) assertAbsent(`${target}${suffix}`, 'snapshot');
+    try {
+      this.#db.prepare('VACUUM INTO ?').run(target);
+      const copy = new DatabaseSync(target, { timeout: 0, enableDoubleQuotedStringLiterals: false, allowExtension: false });
+      try {
+        copy.exec('PRAGMA locking_mode = EXCLUSIVE');
+        const journal = copy.prepare('PRAGMA journal_mode = WAL').get();
+        if (String(journal?.journal_mode || '').toLowerCase() !== 'wal') throw new Error('WAL journaling is unavailable.');
+      } finally {
+        copy.close();
+      }
+      if (lstatOrNull(`${target}-wal`, 'snapshot')) throw new Error('The snapshot kept a WAL file.');
+      const descriptor = fs.openSync(target, 'r+');
+      try {
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
+    } catch (error) {
+      for (const suffix of ['', '-wal', '-shm', '-journal']) fs.rmSync(`${target}${suffix}`, { force: true });
+      throw storeError('LEDGER_SNAPSHOT_FAILED', 'The ledger snapshot could not be written.', { cause: error });
+    }
+    return Object.freeze({ path: target });
+  }
+
   close() {
     if (this.#closed) return;
     this.#closed = true;
@@ -1887,6 +1928,26 @@ class LedgerStore {
     try { this.#db.close(); } catch {}
     if (this.#registryKey) OPEN_DATABASES.delete(this.#registryKey);
   }
+}
+
+// For a backup running in this process: when this process holds the ledger at filePath open,
+// writes a snapshot of it to targetPath through the holding store (LedgerStore#exportSnapshot)
+// and returns { path }; otherwise returns null and touches nothing, and the caller may read the
+// file the way it reads any SQLite file this process does not hold. Only lstat is used to find
+// the store. A held ledger whose snapshot fails throws, so the caller never falls back to
+// reading its file (that would drop the lock, see OPEN_DATABASES).
+function snapshotOpenLedger(filePath, targetPath) {
+  const { databasePath } = storeLocations(filePath);
+  const stat = lstatOrNull(databasePath, 'database', { bigint: true });
+  if (!stat || !stat.isFile()) return null;
+  const registryKey = `${stat.dev}:${stat.ino}`;
+  if (!OPEN_DATABASES.has(registryKey)) return null;
+  const store = OPEN_DATABASES.get(registryKey);
+  if (!store) {
+    throw storeError('LEDGER_IN_USE', 'This process is still opening this ledger.',
+      { retryable: true, detail: { reason: 'same-process' } });
+  }
+  return store.exportSnapshot(targetPath);
 }
 
 function normalizeCommonOptions(options) {
@@ -2218,6 +2279,7 @@ module.exports = {
   openLedgerStore,
   readWitness,
   renameWithRetry,
+  snapshotOpenLedger,
   storeLocations,
   witnessIdentityDigest,
 };

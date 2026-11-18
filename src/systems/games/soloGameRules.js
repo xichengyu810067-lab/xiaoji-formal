@@ -1,6 +1,6 @@
 const { createHash } = require('node:crypto');
 const { GameError } = require('./soloGameError');
-const { MAX_TETRIS_SCORE } = require('../../services/gameRewardPolicy');
+const { MAX_TETRIS_SCORE } = require('./gameRewardPolicy');
 
 const MAX_ACTIONS = 500;
 

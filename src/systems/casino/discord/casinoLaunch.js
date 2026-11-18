@@ -12,8 +12,9 @@ const {
   playRoulette,
   playSlots,
   startBlackjack,
+  bindBlackjackMessage,
 } = require('../../../services/casinoService');
-const { formatChips } = require('../../../utils/coinPresentation');
+const { formatChips } = require('../../economy/coinPresentation');
 
 const diceChoiceLabels = {
   big: '大',
@@ -154,6 +155,11 @@ async function executeCasinoGame(interaction, gameKey) {
       : `${interaction.user} 的 21 點已結算，本局損益 ${formatSignedChips(result.session.netAmount)}。`;
     if (result.autoTopUpAmount > 0) payload.content += `\n${formatAutoTopUp(result)}`;
     await interaction.reply(payload);
+    // The hand plays only from this panel message (casinoService.getBlackjackSession).
+    if (result.session.status === BlackjackStatus.ACTIVE) {
+      const message = await interaction.fetchReply();
+      await bindBlackjackMessage(guildId, userId, result.session.id, { channelId: interaction.channelId, messageId: message.id });
+    }
   } else {
     throw new Error('Unknown casino game.');
   }

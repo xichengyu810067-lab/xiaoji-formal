@@ -27,7 +27,7 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const { legacySettlementPeriodKey } = require('../src/systems/work/jobCycle');
 const {
   configureWorkRewardCoordinator,

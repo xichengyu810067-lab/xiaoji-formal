@@ -20,8 +20,8 @@ const {
   validateCommandCatalog,
 } = require('../src/loadCommands');
 const { OWNER_DENIED_MESSAGE } = require('../src/utils/ownerOnly');
-const commandCatalog = require('../website/commandCatalog');
-const { LEGACY_GAME_STARTS } = require('../website/gameCatalog');
+const commandCatalog = require('../src/platform/catalogs/commandCatalog');
+const { LEGACY_GAME_STARTS } = require('../src/platform/catalogs/gameCatalog');
 
 const { COMMAND_ALIASES, COMMAND_AUDIENCES, COMMAND_CATALOG, COMMAND_GROUPS, REMOVED_COMMANDS } = commandCatalog;
 const COMMANDS_DIRECTORY = path.join(__dirname, '..', 'src', 'commands');
@@ -229,7 +229,7 @@ test('the catalog loads as a plain browser script without Node globals', () => {
   assert.equal(exposed.getSubcommandAudience(exposed.getCommand('work'), 'status-user'), 'admin');
   assert.equal(exposed.getSubcommandAudience(exposed.getCommand('work'), 'list'), 'public');
   assert.deepEqual([...exposed.listSubcommands(exposed.getCommand('shop'), 'admin')], ['purchases-user', 'purchases-all']);
-  assert.deepEqual([...exposed.listSubcommands(exposed.getCommand('coin-admin'), 'owner')], ['add', 'remove', 'set', 'reset-user']);
+  assert.deepEqual([...exposed.listSubcommands(exposed.getCommand('coin-admin'), 'owner')], ['add', 'remove', 'set', 'history', 'reset-user']);
 });
 
 test('subcommand audiences fall back to the command audience and read plain clones', () => {
@@ -270,8 +270,8 @@ test('the admin and owner-only subcommands are pinned to what the permission che
   });
   const coinAdmin = commandCatalog.getCommand('coin-admin');
   assert.equal(coinAdmin.audience, 'admin');
-  assert.deepEqual(subcommandsOf(coinAdmin, 'admin'), ['history', 'enable', 'disable']);
-  assert.deepEqual(subcommandsOf(coinAdmin, 'owner'), ['add', 'remove', 'set', 'reset-user']);
+  assert.deepEqual(subcommandsOf(coinAdmin, 'admin'), ['enable', 'disable']);
+  assert.deepEqual(subcommandsOf(coinAdmin, 'owner'), ['add', 'remove', 'set', 'history', 'reset-user']);
   // Commands with no marks keep one audience for every subcommand. /economy lost its member
   // subcommand when the leaderboard moved to /leaderboard, so all of it is admin.
   for (const name of ['word-chain', 'number-chain', 'daily-riddle', 'daily-discussion', 'release-announcements', 'economy']) {
@@ -553,9 +553,9 @@ test('/help puts member subcommands on one line, admin ones on a marked line, an
 
   // An admin command with owner-only subcommands shows only the ones an admin can use.
   const coinAdmin = linesFor('coin-admin');
-  assert.deepEqual(coinAdmin.map(({ usage }) => usage), ['/coin-admin history/enable/disable']);
+  assert.deepEqual(coinAdmin.map(({ usage }) => usage), ['/coin-admin enable/disable']);
   assert.ok(coinAdmin[0].text.endsWith('；需管理權限'));
-  assert.ok(coinAdmin[0].text.includes('history 指定 campaign-id 的活動對帳限小吉擁有者'));
+  assert.doesNotMatch(coinAdmin[0].text, /history/u);
 
   // Owner-only subcommands of member commands never appear in any line. (add, remove and set are
   // left out on purpose: /remind, /calendar and /chat-style legitimately have subcommands of those names.)
@@ -775,8 +775,8 @@ const driftCases = [
   },
   {
     name: 'a subcommand wider than its command',
-    catalog: (draft) => { entryOf(draft, 'coin-admin').subcommandAudiences.history = 'public'; },
-    expect: 'Catalog entry /coin-admin history is public, which is wider than its command (admin).',
+    catalog: (draft) => { entryOf(draft, 'coin-admin').subcommandAudiences.enable = 'public'; },
+    expect: 'Catalog entry /coin-admin enable is public, which is wider than its command (admin).',
   },
   {
     name: 'an owner-only command with a member subcommand',
@@ -793,7 +793,7 @@ const driftCases = [
   {
     name: 'an admin command whose subcommands are all owner-only',
     catalog: (draft) => {
-      for (const subcommand of ['history', 'enable', 'disable']) entryOf(draft, 'coin-admin').subcommandAudiences[subcommand] = 'owner';
+      for (const subcommand of ['enable', 'disable']) entryOf(draft, 'coin-admin').subcommandAudiences[subcommand] = 'owner';
     },
     expect: 'Catalog entry /coin-admin is admin, but its widest subcommand is owner.',
   },
@@ -841,7 +841,7 @@ const driftCases = [
   },
   {
     name: 'help that lists an owner-only subcommand',
-    helpText: realHelpText.replace('`/coin-admin history/enable/disable`', '`/coin-admin history/enable/disable/reset-user`'),
+    helpText: realHelpText.replace('`/coin-admin enable/disable`', '`/coin-admin enable/disable/reset-user`'),
     expect: 'Help usage for /coin-admin differs from the catalog subcommands.',
   },
   {
@@ -857,7 +857,7 @@ const driftCases = [
   },
   {
     name: 'help that mentions a removed subcommand on an admin line',
-    helpText: realHelpText.replace('`/coin-admin history/enable/disable`', '`/coin-admin history/enable/disable/campaign-preview`'),
+    helpText: realHelpText.replace('`/coin-admin enable/disable`', '`/coin-admin enable/disable/campaign-preview`'),
     expect: 'Help mentions removed path /coin-admin campaign-preview.',
     alsoExpect: 'Help usage for /coin-admin differs from the catalog subcommands.',
   },
@@ -1026,6 +1026,7 @@ test('npm run check fails when the catalog drifts', () => {
 
 test('the public export includes the catalog and this test', () => {
   const files = buildPublicExportPlan();
+  assert.ok(files.includes('src/platform/catalogs/commandCatalog.js'));
   assert.ok(files.includes('website/commandCatalog.js'));
   assert.ok(files.includes('test/commandCatalog.test.js'));
 });

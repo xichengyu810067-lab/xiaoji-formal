@@ -58,7 +58,7 @@ const IDLE_MS = 10 * 60 * 1000;
 const THREAD_NAME_PREFIX = '小吉好奇寶寶';
 const MAX_TOPIC_LENGTH = 100;
 const MAX_TRANSCRIPT_TURNS = 20;
-// The same length limit as a chat message (conversationModeService.js).
+// The same length limit as a chat message (conversationMode.js).
 const MAX_ANSWER_LENGTH = 1500;
 // Bot messages that are questions or round endings start with these; nothing else 小吉 posts is context.
 const QUESTION_MARK = '❓ ';

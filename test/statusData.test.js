@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createStatusLoader } = require('../website/statusData');
+const { createStatusLoader } = require('../src/platform/catalogs/statusData');
 
 function deferred() {
   let resolve;

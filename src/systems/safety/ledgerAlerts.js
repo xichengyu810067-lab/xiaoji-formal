@@ -36,7 +36,7 @@
 const crypto = require('node:crypto');
 const { Routes } = require('discord.js');
 const defaultLogger = require('../../utils/logger');
-const coinDatabase = require('../../services/coinDatabase');
+const coinDatabase = require('../economy/storage/coinDatabase');
 const { runWithBackgroundContext } = require('../../platform/hostOperationContext');
 const { installProtectedRest } = require('../../platform/protectedRest');
 const { createLedgerEscalations, formatLedgerEscalation } = require('./ledgerEscalation');

@@ -1,21 +1,19 @@
 const { Events } = require('discord.js');
 const { restoreActivePolls } = require('../services/pollService');
 const { restoreActiveReminders } = require('../services/reminderService');
-const { processDueJobs, processExpiredWorkTasks, processWorkPenaltyAnnouncements, processWorkReminders } = require('../services/workService');
-const { processBankInterest } = require('../services/bankService');
+const { processDueJobs, processExpiredWorkTasks, processWorkPenaltyAnnouncements, processWorkReminders } = require('../systems/work/workService');
+const { processBankInterest } = require('../systems/economy/bankService');
 const { processCasinoLoanInterest, processExpiredBlackjackSessions } = require('../services/casinoService');
 const { processExpiredVenueOrderItems } = require('../services/venueService');
-const { processWordChainReactionOutbox } = require('../services/wordChainService');
-const { processNumberChainReactionOutbox } = require('../services/numberChainService');
+const { processWordChainReactionOutbox } = require('../systems/community/chains/wordChainService');
+const { processNumberChainReactionOutbox } = require('../systems/community/chains/numberChainService');
 const { processSparkRelayClock } = require('../systems/community/sparkRelay/discord');
-const { startDailyRiddleScheduler } = require('../services/dailyRiddleService');
-const { startDailyDiscussionScheduler } = require('../services/dailyDiscussionService');
+const { startDailyRiddleScheduler } = require('../systems/community/daily/dailyRiddleService');
+const { startDailyDiscussionScheduler } = require('../systems/community/daily/dailyDiscussionService');
 const { startPublicStatusServer } = require('../services/publicStatusServer');
 const { startStatusSnapshotPublisher } = require('../services/statusSnapshotPublisher');
 const { createFeatureStatusWatcher } = require('../services/publicStatusService');
-const { startGameServer } = require('../services/gameServer');
 const { startReleaseAnnouncementScheduler } = require('../services/releaseAnnouncementService');
-const { resumePendingGameRewards } = require('../services/gameService');
 const {
   clearExpiredConversationHistory,
   startConversationHistoryCleanupScheduler,
@@ -101,8 +99,6 @@ module.exports = {
     await runStartupTask('AI 對話記憶過期清理', () => clearExpiredConversationHistory());
     await runStartupTask('AI 對話記憶清理排程啟動', () => startConversationHistoryCleanupScheduler());
     await runStartupTask('Discord 桌遊資料恢復', () => getBoardRuntime().startLifecycle());
-    await runStartupTask('遊戲獎勵恢復', () => resumePendingGameRewards());
-    await runStartupTask('遊戲服務啟動', withoutHostContext(() => startGameServer()));
     await runStartupTask('公開狀態服務啟動', withoutHostContext(() => startPublicStatusServer(client)));
     await runStartupTask('Cloudflare 公開狀態快照上傳啟動', () => startStatusSnapshotPublisher(client));
     await runStartupTask('每日猜謎排程啟動', () => startDailyRiddleScheduler(client));

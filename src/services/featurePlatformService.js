@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
-const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
-const { getWalletPlayerWithApi, mutateWalletWithApi } = require('./coinWalletService');
-const { ensureGuildEconomyRowWithApi, readGuildEconomyEnabledWithApi } = require('./coinService');
+const { withCoinDatabase, withCoinTransaction } = require('../systems/economy/storage/coinDatabase');
+const { getWalletPlayerWithApi, mutateWalletWithApi } = require('../systems/economy/coinWalletService');
+const { ensureGuildEconomyRowWithApi, readGuildEconomyEnabledWithApi } = require('../systems/economy/coinService');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
 const { featureRewardReason } = require('../systems/economy/transactionReasons');
 
@@ -349,15 +349,47 @@ function listLegacyRewardGrantsByUserWithApi(api, userId) {
   return api.all('SELECT * FROM reward_grants WHERE user_id = ? ORDER BY id', [userId]);
 }
 
+// Transaction-scoped ports for features that keep state of their own in their settings row (the chains keep the
+// reaction authority in config_json) or that schedule work from it (the daily events). They run on the caller's
+// api, so the read and the write commit or roll back together with the caller's own rows.
+
+// The stored row as it is, config_json not parsed (a chain reads it with its own parser), or nothing.
+function getGuildFeatureSettingRowWithApi(api, guildId, featureKey) {
+  return api.get('SELECT * FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?', [guildId, featureKey]);
+}
+
+// Inserts the row or, when it exists, replaces enabled, channel_id, config_json and updated_at; created_at is only
+// written by the insert, so an existing row keeps its own.
+function upsertGuildFeatureSettingWithApi(api, { guildId, featureKey, enabled, channelId, configJson, createdAt, updatedAt }) {
+  api.run(
+    `INSERT INTO feature_guild_settings
+      (guild_id, feature_key, enabled, channel_id, config_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(guild_id, feature_key) DO UPDATE SET
+       enabled = excluded.enabled,
+       channel_id = excluded.channel_id,
+       config_json = excluded.config_json,
+       updated_at = excluded.updated_at`,
+    [guildId, featureKey, enabled ? 1 : 0, channelId, configJson, createdAt, updatedAt]
+  );
+}
+
+// The guilds where the feature is enabled with a channel, by guild id; guildId narrows it to one guild.
+function listEnabledFeatureChannelsWithApi(api, featureKey, { guildId = null } = {}) {
+  return api.all(
+    `SELECT guild_id, channel_id, updated_at FROM feature_guild_settings
+     WHERE feature_key = ? AND enabled = 1 AND channel_id IS NOT NULL${guildId ? ' AND guild_id = ?' : ''}
+     ORDER BY guild_id`,
+    guildId ? [featureKey, guildId] : [featureKey]
+  );
+}
+
 async function getGuildFeatureSetting(guildId, featureKey) {
   const normalizedGuildId = requireText(guildId, 'guildId', 80);
   const normalizedFeatureKey = requireFeatureKey(featureKey);
 
   return withCoinDatabase((api) => {
-    const row = api.get('SELECT * FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?', [
-      normalizedGuildId,
-      normalizedFeatureKey,
-    ]);
+    const row = getGuildFeatureSettingRowWithApi(api, normalizedGuildId, normalizedFeatureKey);
     return mapGuildSetting(row, normalizedFeatureKey, normalizedGuildId);
   });
 }
@@ -381,10 +413,7 @@ async function setGuildFeatureSetting(guildId, featureKey, changes = {}) {
   const normalizedFeatureKey = requireFeatureKey(featureKey);
 
   const transactionResult = await withCoinTransaction((api) => {
-    const current = api.get('SELECT * FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?', [
-      normalizedGuildId,
-      normalizedFeatureKey,
-    ]);
+    const current = getGuildFeatureSettingRowWithApi(api, normalizedGuildId, normalizedFeatureKey);
     if (Object.prototype.hasOwnProperty.call(changes, 'enabled') && typeof changes.enabled !== 'boolean') {
       throw new FeaturePlatformError('INVALID_ARGUMENT', 'enabled must be a boolean.');
     }
@@ -466,24 +495,12 @@ async function setGuildFeatureSetting(guildId, featureKey, changes = {}) {
     const configJson = serializeJson(nextConfig, 'config');
     const timestamp = toIso(changes.now || new Date(), 'now');
 
-    api.run(
-      `INSERT INTO feature_guild_settings
-        (guild_id, feature_key, enabled, channel_id, config_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(guild_id, feature_key) DO UPDATE SET
-         enabled = excluded.enabled,
-         channel_id = excluded.channel_id,
-         config_json = excluded.config_json,
-         updated_at = excluded.updated_at`,
-      [normalizedGuildId, normalizedFeatureKey, effectiveEnabled ? 1 : 0, effectiveChannelId,
-        configJson, current?.created_at || timestamp, timestamp]
-    );
+    upsertGuildFeatureSettingWithApi(api, { guildId: normalizedGuildId, featureKey: normalizedFeatureKey,
+      enabled: effectiveEnabled, channelId: effectiveChannelId, configJson,
+      createdAt: current?.created_at || timestamp, updatedAt: timestamp });
 
     return { fenceOpenFailed, setting: mapGuildSetting(
-      api.get('SELECT * FROM feature_guild_settings WHERE guild_id = ? AND feature_key = ?', [
-        normalizedGuildId,
-        normalizedFeatureKey,
-      ])
+      getGuildFeatureSettingRowWithApi(api, normalizedGuildId, normalizedFeatureKey)
     ) };
   });
   if (transactionResult.fenceOpenFailed) {
@@ -1027,6 +1044,7 @@ module.exports = {
   enqueueFeatureOutboxWithApi,
   expireFeatureOutbox,
   getGuildFeatureSetting,
+  getGuildFeatureSettingRowWithApi,
   grantRewardOnce,
   grantRewardOnceV2,
   grantRewardOnceV2WithApi,
@@ -1042,6 +1060,7 @@ module.exports = {
   makeRewardKey,
   listFeatureHealth,
   listFeatureUsageForDate,
+  listEnabledFeatureChannelsWithApi,
   listGuildFeatureSettings,
   markFeatureOutboxDelivered,
   markFeatureOutboxDeliveredByDedupe,
@@ -1049,4 +1068,5 @@ module.exports = {
   retryFeatureOutbox,
   setFeatureHealth,
   setGuildFeatureSetting,
+  upsertGuildFeatureSettingWithApi,
 };

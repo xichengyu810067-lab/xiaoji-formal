@@ -20,15 +20,15 @@ const attack = require('./support/attackSession');
 
 const session = attack.createAttackSession({ prefix: 'xiaoji-attack-replay-' });
 
-const coinService = require('../src/services/coinService');
-const chipService = require('../src/services/chipService');
-const { withCoinDatabase } = require('../src/services/coinDatabase');
+const coinService = require('../src/systems/economy/coinService');
+const chipService = require('../src/systems/economy/chipService');
+const { withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
 const { parseBoardCustomId, buildBoardCustomId } = require('../src/systems/games/board/discord/boardCustomId');
 const { parseSoloCustomId, buildSoloCustomId } = require('../src/systems/games/soloCustomId');
 const { assertSessionBoundary } = require('../src/systems/games/board/discord/boardInteractionAdapter');
 const { BoardCoreError } = require('../src/systems/games/board/core/contracts');
 const { GameError } = require('../src/systems/games/soloGameError');
-const { CoinCampaignError } = require('../src/services/coinCampaignService');
+const { CoinCampaignError } = require('../src/systems/economy/coinCampaignService');
 const coinAdminCommand = require('../src/commands/coin-admin');
 const { previewPayloadHash } = require('../src/services/coinAdminAddService');
 
@@ -304,9 +304,7 @@ test('a blackjack hand answers its player only, and only in the guild it was dea
   }
 });
 
-test('a blackjack control is refused from a message or channel other than its own, like a board or personal game control', {
-  todo: 'a blackjack hand is bound to its guild and its player only (src/services/casinoService.js, getBlackjackSession): the player\'s own control ID plays the hand from any message or channel of the guild, and update() then rewrites that other message; the board and personal games also bind the channel and the message',
-}, async () => {
+test('a blackjack control is refused from a message or channel other than its own, like a board or personal game control', async () => {
   const channel = session.channel('replay-blackjack-2');
   const dealt = await session.run('board start', { as: 'owner', channel, options: { game: 'casino-blackjack', amount: 100 } });
   const panel = session.panelOf(dealt);
@@ -672,9 +670,7 @@ test('parseAddCustomId refuses hostile text with its own error and decodes only 
   }
 });
 
-test('parseAddCustomId keeps to the 100 characters of a custom ID and reads the expiry as a safe integer', {
-  todo: 'parseAddCustomId (src/commands/coin-admin.js) has no length limit and reads the expiry with Number(): a 400-digit expiry decodes as Infinity and a 400-character operation ID is accepted; the stored preview never matches such an ID (validateControl), so it is refused one step later',
-}, () => {
+test('parseAddCustomId keeps to the 100 characters of a custom ID and reads the expiry as a safe integer', () => {
   const { parseAddCustomId } = coinAdminCommand._test;
   const digest = 'a'.repeat(24);
   assert.throws(() => parseAddCustomId(`coin-admin|1|add|confirm|u|id|${'9'.repeat(400)}|${digest}`), { code: 'PREVIEW_CHANGED' });

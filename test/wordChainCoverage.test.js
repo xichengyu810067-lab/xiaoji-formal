@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 
-const { validateWord } = require('../src/services/wordChainService');
+const { validateWord } = require('../src/systems/community/chains/wordChainService');
 const {
   assertCorpusInvariant,
   corpusVersion,
@@ -17,7 +17,7 @@ const {
   variantForms,
   wordKey,
   words,
-} = require('../src/services/wordChainLexicon');
+} = require('../src/systems/community/chains/wordChainLexicon');
 
 const HAN_WORD = /^\p{Script=Han}{2,6}$/u;
 

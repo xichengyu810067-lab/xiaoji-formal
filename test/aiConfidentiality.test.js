@@ -54,10 +54,10 @@ const {
   rememberConversationTurn,
   resetConversationHistoryForTests,
 } = require('../src/services/conversationHistoryService');
-const { createJudgeProvider } = require('../src/games/turtleSoup/providerAdapter');
+const { createJudgeProvider } = require('../src/systems/games/board/turtleSoup/providerAdapter');
 const { resolveMemberFacts } = require('../src/systems/conversation/memberFacts');
 const { captureIngressVisibility } = require('../src/systems/conversation/publicVisibility');
-const { clearConversationStateForTests } = require('../src/services/conversationModeService');
+const { clearConversationStateForTests } = require('../src/systems/conversation/conversationMode');
 const { openArchive } = require('../src/systems/conversation/aiArchive');
 const {
   ARCHIVE_POLICY_VERSION,

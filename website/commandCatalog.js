@@ -1,3 +1,6 @@
+// Source of truth: src/platform/catalogs/commandCatalog.js, loaded by the bot with require(). website/commandCatalog.js is a byte-for-byte
+// copy that the status page loads with a <script> tag; `npm run site:render` writes it and `npm run check` refuses a stale
+// copy. Edit this file, never the copy.
 (function exposeCommandCatalog(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -115,8 +118,8 @@
       owner: ['rate-set-demand', 'rate-set-fixed'],
     },
     'casino-venue': { admin: ['delete-menu', 'reassign', 'reassign-waiter', 'cancel'] },
-    // history stays admin: only its campaign flow (history with campaign-id) needs the owner.
-    'coin-admin': { owner: ['add', 'remove', 'set', 'reset-user'] },
+    // history is owner only in both forms (member lookup and campaign reconciliation); enable and disable stay admin.
+    'coin-admin': { owner: ['add', 'remove', 'set', 'reset-user', 'history'] },
   };
 
   // Turns the written form into the flat map each entry carries: subcommand -> audience.

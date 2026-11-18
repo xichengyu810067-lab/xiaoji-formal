@@ -157,8 +157,8 @@ function createAttackSession({
   }
 
   function configureRuntimes(client) {
-    const { configureBoardRuntime } = require('../../src/games/boardRuntimeRegistry');
-    const { createBoardDiscordRuntime } = require('../../src/games/discord/boardDiscordRuntime');
+    const { configureBoardRuntime } = require('../../src/systems/games/board/core/boardRuntimeRegistry');
+    const { createBoardDiscordRuntime } = require('../../src/systems/games/board/discord/boardDiscordRuntime');
     const { configureSoloRuntime } = require('../../src/systems/games/soloRuntimeRegistry');
     const { createDefaultSoloDiscordRuntime } = require('../../src/systems/games/soloDiscordRuntime');
     const { createRuntimeRewardCoordinator } = require('../../src/coordinators/rewardRuntime');
@@ -408,7 +408,7 @@ function createAttackSession({
         if (publicSideEffects) await publicSideEffects.stop();
         require('../../src/systems/safety/chainReactionFence').configureChainReactionFence(null);
         require('../../src/platform/publicEffectAdapter').configurePublicEffectAdapter({});
-        await require('../../src/games/boardRuntimeRegistry').resetBoardRuntimeForTests();
+        await require('../../src/systems/games/board/core/boardRuntimeRegistry').resetBoardRuntimeForTests();
         sweep.closeSweepDatabase();
       } finally {
         restoreRejections();

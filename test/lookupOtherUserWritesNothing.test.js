@@ -25,13 +25,13 @@ require('../src/utils/moderation').ensureModerationAccess = async () => ({ ok: t
 const bankCommand = require('../src/commands/bank');
 const coinsCommand = require('../src/commands/coins');
 const economyCommand = require('../src/commands/economy');
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
 const {
   createShopItem,
   getLeaderboard,
   purchaseItem,
   setGuildEconomyEnabled,
-} = require('../src/services/coinService');
+} = require('../src/systems/economy/coinService');
 const { count, expectNoWrites, seedFixedDeposits, seedPlayer } = require('./support/coinDatabaseProbe');
 const { createGuild, createSlashInteraction } = require('./support/fakeSlashInteraction');
 

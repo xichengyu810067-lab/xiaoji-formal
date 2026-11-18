@@ -21,15 +21,15 @@ const {
   importOwnerCampaignHistory,
   previewOwnerCampaign,
   reviewOwnerCampaignHistory,
-} = require('../src/services/coinCampaignService');
+} = require('../src/systems/economy/coinCampaignService');
 const {
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const { setGuildEconomyEnabled } = require('../src/services/coinService');
-const { getWalletPlayerWithApi, mutateWalletWithApi, setDebtWithApi } = require('../src/services/coinWalletService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const { setGuildEconomyEnabled } = require('../src/systems/economy/coinService');
+const { getWalletPlayerWithApi, mutateWalletWithApi, setDebtWithApi } = require('../src/systems/economy/coinWalletService');
 const { grantRewardOnce } = require('../src/services/featurePlatformService');
 
 test.before(async () => {
@@ -637,7 +637,7 @@ function historyInteraction(guild, id, values) {
 test('/coin-admin history import replies with the receipt count and never pays again', async () => {
   const guild = { id: 'guild-command' };
   const campaignId = 'command-campaign';
-  const userId = 'command-user';
+  const userId = '760000000000000301';
   await previewOwnerCampaign({
     campaignId, sourceGuildId: guild.id, audienceType: 'member', actorUserId: OWNER,
     amount: 40, reason: 'synthetic command campaign', memberIds: [userId],

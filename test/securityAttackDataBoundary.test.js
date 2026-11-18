@@ -25,13 +25,13 @@ const bankCommand = require('../src/commands/bank');
 const coinsCommand = require('../src/commands/coins');
 const economyCommand = require('../src/commands/economy');
 const workCommand = require('../src/commands/work');
-const coin = require('../src/services/coinService');
-const bankService = require('../src/services/bankService');
+const coin = require('../src/systems/economy/coinService');
+const bankService = require('../src/systems/economy/bankService');
 const casinoService = require('../src/services/casinoService');
-const workService = require('../src/services/workService');
+const workService = require('../src/systems/work/workService');
 const { createRuntimeRewardCoordinator } = require('../src/coordinators/rewardRuntime');
 const { configureWorkRewardCoordinator } = require('../src/systems/work/workRewardPort');
-const { withCoinTransaction } = require('../src/services/coinDatabase');
+const { withCoinTransaction } = require('../src/systems/economy/storage/coinDatabase');
 const { createGuild, createSlashInteraction } = require('./support/fakeSlashInteraction');
 
 configureWorkRewardCoordinator(createRuntimeRewardCoordinator());

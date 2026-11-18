@@ -1,7 +1,7 @@
 'use strict';
 
 // Attack tests for the size of what the AI chat reads and sends, and for the work the checks do on it
-// (src/services/conversationModeService.js, src/systems/conversation/*).
+// (src/systems/conversation/conversationMode.js, src/systems/conversation/*).
 //
 // Nothing here uses the network, a model or Discord. The attacks are: a message over the length limit, a model
 // reply that is far too long, and large or adversarial text in every stage that reads it (the anti-spam gate, the
@@ -46,7 +46,7 @@ const {
   DEFAULT_MAX_MESSAGE_LENGTH,
   clearConversationStateForTests,
   validateChatInput,
-} = require('../src/services/conversationModeService');
+} = require('../src/systems/conversation/conversationMode');
 const { resetConversationHistoryForTests } = require('../src/services/conversationHistoryService');
 const { closeArchiveForTests } = require('../src/services/aiArchiveService');
 

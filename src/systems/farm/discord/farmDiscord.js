@@ -8,7 +8,7 @@ const farmService = require('../farmService');
 const { FARM_RULES, getCrop } = require('../farmCatalog');
 const { FarmError } = require('../farmRules');
 const { buildFarmPanel, formatDuration, parsePanelCustomId } = require('./farmPresenter');
-const { replyCoinError } = require('../../../utils/coinPresentation');
+const { replyCoinError } = require('../../economy/coinPresentation');
 const { replyEphemeral } = require('../../../utils/moderation');
 
 function plotList(indexes) {

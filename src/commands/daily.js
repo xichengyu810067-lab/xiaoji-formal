@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { dailyCheckin } = require('../services/coinService');
-const { formatCoins, replyCoinError } = require('../utils/coinPresentation');
+const { dailyCheckin } = require('../systems/economy/coinService');
+const { formatCoins, replyCoinError } = require('../systems/economy/coinPresentation');
 
 module.exports = {
   data: new SlashCommandBuilder().setName('daily').setDescription('每日簽到領取吉幣'),

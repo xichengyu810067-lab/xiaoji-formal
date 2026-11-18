@@ -673,11 +673,10 @@ function stopRecorder({ failing = null } = {}) {
     publicSideEffectRuntime: {},
     welcomeSideEffectRuntime: {},
     ownerSafetyNotifier: {},
-    coinDatabaseEscalations: {},
+    coinDatabaseEscalations: { closeCoinDatabase: step('closeCoinDatabase') },
     boardRuntime: { stopLifecycle: step('boardRuntime.stopLifecycle') },
     stopReleaseAnnouncementScheduler: step('stopReleaseAnnouncementScheduler'),
     extensionHost: { runHook: step('extensionHost.shutdown') },
-    stopGameServer: async () => { events.push('stopGameServer'); },
     stopPublicStatusServer: async () => { events.push('stopPublicStatusServer'); },
     stopStatusSnapshotPublisher() { events.push('stopStatusSnapshotPublisher'); },
     client: { destroy() { events.push('client.destroy'); } },
@@ -703,6 +702,9 @@ test('the stop writes both records first and again at the end, so a failing step
   assert.ok(flushes[1] > clean.events.indexOf('client.destroy'));
   assert.ok(flushes[1] < clean.events.lastIndexOf('settle'));
   assert.deepEqual(clean.events.filter((event) => event === 'flush:leaves').length, 2);
+  // The coin database is closed after the late flush, right before the last report.
+  assert.ok(clean.events.indexOf('closeCoinDatabase') > flushes[1]);
+  assert.ok(clean.events.indexOf('closeCoinDatabase') < clean.events.lastIndexOf('settle'));
   assert.equal(clean.events.at(-1), 'exit:undefined');
 
   // A step that throws (the private shutdown hook, the board lifecycle) is logged and the stop goes on;
@@ -713,6 +715,7 @@ test('the stop writes both records first and again at the end, so a failing step
     const late = run.events.lastIndexOf('flush:welcomed');
     assert.ok(late > run.events.indexOf(failing), failing);
     assert.ok(late < run.events.lastIndexOf('settle'), failing);
+    assert.ok(run.events.indexOf('closeCoinDatabase') > late, failing);
     assert.equal(run.events.at(-1), 'exit:1', failing);
     assert.equal(run.events.filter((event) => event === 'flush:leaves').length, 2, failing);
   }

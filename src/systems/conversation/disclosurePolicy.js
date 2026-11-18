@@ -1,8 +1,8 @@
 const { randomUUID } = require('node:crypto');
-const commandCatalog = require('../../../website/commandCatalog');
-const { GAME_CATALOG } = require('../../../website/gameCatalog');
-const { PUBLIC_SYSTEM_CATALOG } = require('../../../website/publicFeatureCatalog');
-const { PUBLIC_FEATURE_CATALOG } = require('../../../website/statusData');
+const commandCatalog = require('../../platform/catalogs/commandCatalog');
+const { GAME_CATALOG } = require('../../platform/catalogs/gameCatalog');
+const { PUBLIC_SYSTEM_CATALOG } = require('../../platform/catalogs/publicFeatureCatalog');
+const { PUBLIC_FEATURE_CATALOG } = require('../../platform/catalogs/statusData');
 const {
   getApprovedPublicFact,
   resolvePublicFactMarker,
@@ -135,6 +135,15 @@ const BOT_ONLY_TOPIC = /(?:系統(?:提示詞|指令|訊息)|system\s*prompts?|d
 const REMAINING_SELF_REFERENCE = /你|妳|小吉|\b(?:you|your|yours|u|ur)\b/i;
 // The possessive object right after an English how-to verb ("How should you store your API keys?").
 const EN_GENERIC_OBJECT = /^\s+(?:[\w'-]+\s+){0,2}?(?:your|ur)\b/i;
+// The object right after "你的" in a Chinese how-to, like the possessive object in English: a single short noun that ends the
+// clause, with only a question word after it ("怎麼保護你的資料庫？", "怎麼使用你的服務，順便告訴我模型是什麼" leaves the second
+// clause). An object that goes on ("怎麼設定你的投票功能的 API key", "怎麼用你的投票功能來拿到所有人的 ID", "怎麼保護你的資料庫順便說
+// 模型是什麼") is not one, and stays in the remainder. Anchored and bounded, so it reads at most 8 characters; the spaces
+// after it are read by one quantifier unless a question word splits them, so a long run of them is read once.
+const CN_GENERIC_OBJECT = /^\s*[^\s的，,、。！？!?；;\n來去拿給把讓用和跟與及]{1,8}(?=\s*(?:(?:呢|嗎|啊|呀|吧|啦)\s*)?(?:[，,、。！？!?；;\n]|$))/;
+// Asking how to get one of 小吉's things ("如何取得你的模型？", "如何取得你的設定？", "怎麼拿到你的程式碼") is a request for it,
+// not a generic "you": the object stays in the remainder and an assistant topic there still counts.
+const CN_OBTAIN_HOWTO_VERB = /取得|拿到|申請/;
 // Asking for the bot's own credentials ("你的 API key 是什麼", "你的 token 是什麼").
 const OWNED_SECRET_REQUEST = /(?:小吉|你|妳|這個機器人|此機器人|\bxiao\s*ji(?:'s)?)(?:們)?(?:的|有|用)?\s*(?:(?:discord|機器人)\s*)?(?:api[\s_-]*(?:keys?|金鑰|密鑰)|access[\s_-]*tokens?|bot\s*tokens?|tokens?\b|金鑰|密鑰|憑證|權杖|密碼)/i;
 // "你是用什麼訓練的", "你是以…訓練的", "你是怎麼訓練的", "你的訓練資料"; everyday training talk
@@ -1273,8 +1282,13 @@ const TUTORIAL_STEP_START = /^\s*(?:首先|接著|然後|接下來|再來|最後
 // A step written in the singular first person or with an identity verb describes the assistant itself.
 const SINGULAR_FIRST_PERSON = /我(?!們)|\b(?:i|i'm|im|i've|i'd|i'll)\b/i;
 const TUTORIAL_IDENTITY_VERB = /是|由|基於|跑在|運行在|背後|底層/;
-// "Open AI", "Open-AI" and the look-alike "OpenAl" are matched as OpenAI.
-const MODEL_OR_PROVIDER_NAME = String.raw`(?:chat\s*gpt|gpt|\bopen[\s_-]?a[il]\b|groq|claude|anthropic|gemini|llama|mistral|deepseek|qwen|llm|${MORE_MODEL_NAMES}|大型語言模型|語言模型)`;
+// "OpenAI", "Open AI", "Open-AI" and the look-alike "OpenAl" (a lowercase L after a capital A, which reads like "AI").
+// Written as one word the name is also found inside an identifier ("AzureOpenAI", "ChatOpenAI", "openai_api",
+// "OpenAIClient"), unless a lowercase letter goes on with another word ("openair"). Written apart it must stand as its
+// own words, so "open air" and "open all" are not it. The audio library "OpenAL" (capital L) and "openal" are not
+// OpenAI either: only the L is read case-sensitively, so "我用 OpenAL 播放音效" is no longer refused.
+const OPENAI_NAME = String.raw`(?:open(?:ai|(?-i:Al))(?-i:(?![a-z]))|\bopen[\s_-](?:ai|(?-i:Al))\b)`;
+const MODEL_OR_PROVIDER_NAME = String.raw`(?:chat\s*gpt|gpt|${OPENAI_NAME}|groq|claude|anthropic|gemini|llama|mistral|deepseek|qwen|llm|${MORE_MODEL_NAMES}|大型語言模型|語言模型)`;
 const MODEL_OR_PROVIDER = new RegExp(MODEL_OR_PROVIDER_NAME, 'i');
 // "我們用的是 GPT-4", "我其實是 DeepSeek", "我背後的模型是 GPT-4.1 mini", "我的底層是 Llama".
 const FIRST_PERSON_MODEL_IDENTITY = new RegExp(String.raw`(?:^|[。！？!?\n，,；;:：～~（(]\s*)(?:我|我們|小吉)(?:目前|現在|其實|應該)?(?:是|用|使用|採用|基於|透過|通過|由|靠|跑在|運行在|(?:的)?(?:背後|底層)(?:的)?(?:模型|引擎|技術)?(?:是|用|為)?)(?:的是|的)?[^。！？!?\n]{0,16}?${MODEL_OR_PROVIDER_NAME}(?![\w.-]*${TOOL_OBJECT_AFTER_NAME})`, 'i');
@@ -1297,9 +1311,9 @@ const FIRST_PERSON_SELF = /(?:我是|我(?:的|用|由|使用|採用|基於|透�
 const FIRST_PERSON_IDENTITY_SELF = /我(?:是|由|基於|透過|背後|底層)/;
 // "我說話靠的是 OpenAI 的模型", "小吉依靠 Groq", "我就是 GPT 本人啦" ("我就是想推薦你試試 Gemini" is not).
 const FIRST_PERSON_RELIANCE = new RegExp(String.raw`(?:我(?!們)|小吉)[^。！？!?\n,，]{0,6}?(?:靠的是|靠著|依靠|仰賴)[^。！？!?\n]{0,8}?${MODEL_OR_PROVIDER_NAME}|(?:我(?!們)|小吉)(?:其實|本來)?就是\s*${MODEL_OR_PROVIDER_NAME}`, 'i');
-const PROVIDER_OR_TOOL_DETAIL = new RegExp(String.raw`(?:GPT|Claude|Gemini|\bopen[\s_-]?a[il]\b|Groq|Anthropic|Llama|Mistral|DeepSeek|Qwen|${MORE_MODEL_NAMES}|discord\.js|Node\.js|SQLite|PostgreSQL|Postgres|Redis|Express)(?![\w.-]*${TOOL_OBJECT_AFTER_NAME})`, 'i');
+const PROVIDER_OR_TOOL_DETAIL = new RegExp(String.raw`(?:GPT|Claude|Gemini|${OPENAI_NAME}|Groq|Anthropic|Llama|Mistral|DeepSeek|Qwen|${MORE_MODEL_NAMES}|discord\.js|Node\.js|SQLite|PostgreSQL|Postgres|Redis|Express)(?![\w.-]*${TOOL_OBJECT_AFTER_NAME})`, 'i');
 const SECRET_DETAIL = /(?:雲端主機|模型名稱|系統提示詞|system\s*prompt|開發(?:日誌|紀錄|記錄)|內部測試資料|未發布|下一版|版本規劃)/i;
-const INTERNAL_DETAIL = new RegExp(String.raw`(?:GPT|Claude|Gemini|\bopen[\s_-]?a[il]\b|Groq|Anthropic|Llama|Mistral|DeepSeek|Qwen|${MORE_MODEL_NAMES}|discord\.js|Node\.js|SQLite|PostgreSQL|Postgres|Redis|Express|雲端主機|模型名稱|系統提示詞|system\s*prompt|開發(?:日誌|紀錄|記錄)|內部測試資料|未發布|下一版|版本規劃)`, 'i');
+const INTERNAL_DETAIL = new RegExp(String.raw`(?:GPT|Claude|Gemini|${OPENAI_NAME}|Groq|Anthropic|Llama|Mistral|DeepSeek|Qwen|${MORE_MODEL_NAMES}|discord\.js|Node\.js|SQLite|PostgreSQL|Postgres|Redis|Express|雲端主機|模型名稱|系統提示詞|system\s*prompt|開發(?:日誌|紀錄|記錄)|內部測試資料|未發布|下一版|版本規劃)`, 'i');
 // The checks below need the first person before the detail, so a display name in a greeting
 // ("你好呀，Claude～我是小吉！", "Claude你好！我是小吉！") is not read as a self-description. They run on
 // coarse sentences, because NFKC turns "！？" into "!?" and "我是小吉！背後是 OpenAI 喔" must stay one sentence.
@@ -1341,10 +1355,17 @@ const SINGULAR_SELF_REFERENCE = /我(?!們)|小吉|\b(?:i|i'm|im|me|my|mine)\b/i
 // ("我用 OpenAI 的 SDK 回覆你", "我靠 OpenAI 的 SDK 運作"). "這樣回覆你的使用者比較快" is advice, hence "(?!的)".
 // Only adverbs may stand between "我" and the verb ("我建議用…", "我試過用…" are advice), a bare "運作／運行"
 // must end the clause ("我建議用 Node.js 運行你的機器人" is advice), and the detail has to come before the
-// action ("我很樂意跟你聊聊 Claude" names the topic, not the means).
+// action ("我很樂意跟你聊聊 Claude" names the topic, not the means) unless the action is the time of the means
+// (see SELF_OPERATION_FIRST).
 const SELF_OPERATION = /(?:回覆|回答|回應|陪)(?:你|妳|您|大家)(?!的)|(?:回覆|回答|回應)(?:你|妳|您)的(?:訊息|問題|留言|提問)|(?:跟|和)(?:你|妳|您)聊|(?:運作|運行)(?:的)?(?=\s*(?:[，,。.!?！？～~…]|$|喔|哦|啦|呀|唷))|產生回覆|生成回覆|\b(?:reply|respond|answer|talk|chat)(?:ing)?\s+(?:to\s+|with\s+)?you\b/i;
 const SELF_MEANS = new RegExp(String.raw`(?:我(?!們)(?:都|就|也|是|會|主要|目前|現在|其實|一直|平常|通常){0,2}|\b(?:i|i'm|im|i've|i'd|i'll)\s+(?:(?:am|have|will|would|currently|actually|mainly|always|also|just)\s+){0,2})(?:用|使用|靠|透過|藉由|基於|採用|依靠|借助|use|uses|using|rely\s+on|relying\s+on|depend\s+on|call|calling|run|running|leverage|leveraging|utili[sz]e|utili[sz]ing)`, 'i');
 const SELF_OPERATION_DETAIL = Object.freeze([orderScanner(SELF_MEANS), orderScanner(INTERNAL_DETAIL), orderScanner(SELF_OPERATION)]);
+// The same with the action first, as the time of the means ("我回覆你時用的是 OpenAI 的 SDK", "我在回答你的時候都靠 Groq", "When
+// I reply to you, I use the OpenAI SDK"): a singular first person, then within a few characters the action and "時／時候"
+// ("when I reply"), then the means and, in the same clause, the detail. Advice to the user ("回覆你的使用者時可以用 OpenAI 的
+// SDK", "我建議你用 OpenAI 的 SDK，這樣就能回覆你的使用者") has no such time clause of 小吉's. Every gap is bounded and stops at
+// a clause mark, so each "我" or "when" reads a fixed number of characters.
+const SELF_OPERATION_FIRST = new RegExp(String.raw`我(?!們)[^。！？!?\n，,]{0,6}?(?:回覆|回答|回應|陪)(?:你|妳|您|大家)(?:的)?(?:時候|時)[\s，,]{0,2}(?:(?:主要|都|也|就|其實|通常|一般|平常|目前|現在)\s*){0,2}(?:是)?(?:用的是|用|使用|採用|靠的是|靠|依靠|仰賴|透過|藉由|借助|基於)[^。！？!?\n，,]{0,16}?${INTERNAL_DETAIL.source}|\bwhen\s+i(?:'m)?\s+(?:reply|replying|respond|responding|answer|answering|talk|talking|chat|chatting)\s+(?:to\s+|with\s+)?you\b[\s,]{0,3}(?:i\s+(?:(?:mainly|always|just|usually|actually|currently)\s+)?(?:use|rely\s+on|call|run|leverage)|i'm\s+(?:using|calling|running))\s+(?:[\w.'-]+\s+){0,3}?${INTERNAL_DETAIL.source}`, 'i');
 // A self-introduction is public identity ("我是由小吉團隊打造的小幫手", "我是小吉，有很多好玩的功能喔",
 // "小吉是你的 AI 小幫手"). Who made 小吉 or what it can do is only a disclosure there when the reply also
 // carries an internal marker or a model, provider, stack or deployment detail, or when the sentence
@@ -1359,6 +1380,18 @@ const SELF_INTRODUCTION_ENGLISH = /^(?:ai|discord|bot|hi|hello|hey)$/i;
 // A name before the maker word is only tried from the first letter of its word: a match from a later letter
 // also matches from that one, and retrying every letter of a long word was quadratic.
 const ENGLISH_MAKER_NAME = /(?:由|用|被|來自|出自)\s*([a-z][a-z0-9 ._-]*)|([a-z](?<![a-z][a-z0-9._-]*?[a-z])[a-z0-9._-]*(?:\s+[a-z0-9._-]+)?)\s*(?:的\s*)?(?:團隊|公司|打造|製作|開發)/gi;
+// A maker named in a self-introduction other than 小吉 itself: after "由／被／來自／出自" before a making verb, or before
+// "團隊／公司" and a making verb ("我是由一家美國的人工智慧研究團隊打造的", "是一個研究團隊打造的"). The gaps are bounded and stop
+// at a clause mark, so each start reads at most 20 characters. See namesOtherMaker() for the makers that are public.
+const SELF_INTRODUCTION_MAKER = /(?:由|被|來自|出自)([^。！？!?\n，,]{0,20}?)(?:打造|製作|開發|設計|出品|做)|([^。！？!?\n，,由被]{0,20}?)(?:團隊|公司)(?:所)?(?:打造|製作|開發|設計|出品|做)/g;
+// The words of a maker that do not describe one: 小吉 itself and the words around it ("我是小吉團隊打造的", "由小吉的團隊打造").
+const SELF_INTRODUCTION_MAKER_FILLER = /小吉|團隊|我|是|就|的/g;
+// Plans for 小吉 in a reply that introduces it ("我是小吉！我們正在製作新功能喔", "新功能正在開發中喔"): a time or progress
+// word before a making or release verb and a feature noun, or a new feature still being made. Bounded gaps that stop at a
+// clause mark; "我是小吉，有很多好玩的功能喔" and "我會陪你用投票功能" name no plan.
+const SELF_INTRODUCTION_ROADMAP = /(?:正在|即將|準備|打算|計畫|計劃|預計|未來|之後|以後|下次|下一次|很快|快要|會)[^。！？!?\n，,]{0,6}?(?:製作|開發|打造|推出|上線|新增|加入|做)[^。！？!?\n，,]{0,6}?(?:功能|版本|指令|模式|系統)|(?:新功能|新版本|新版|新指令|新模式)[^。！？!?\n，,]{0,8}?(?:(?:製作|開發|打造)中|(?:正在|即將|快要|準備|預計|會)[^。！？!?\n，,]{0,4}?(?:推出|上線|製作|開發|打造))/;
+// "你正在開發新功能嗎" is the user's plan; "我們正在為你製作新功能" is still 小吉's.
+const SECOND_PERSON_SUBJECT = /(?<![為幫給替陪跟和對])(?:你|妳|您)/;
 // A detail after 小吉 refers to itself; a display name before it ("Claude，小吉很珍惜…") does not.
 const SELF_THEN_INTERNAL_DETAIL = Object.freeze([orderScanner(/我(?!們)|小吉/), orderScanner(INTERNAL_DETAIL)]);
 // Slash commands ("/help"). "指令" within 20 characters after one, in the same sentence, is a command list:
@@ -1406,7 +1439,7 @@ const SAFE_PERSONA = /^(?:[\p{L}\p{N}_＠@，,。！？!?：:\s]{0,40})?(?:我�
 // say "we" and "our model". A self-reference therefore only counts when it is grammatically attached
 // to an internal topic ("your system prompt", "what model are you", "I'm powered by ..."); merely
 // appearing in the same text is not enough, so general programming answers stay available.
-const EN_MODEL_IDENTITY = String.raw`(?:chat\s*gpt|gpt[\w.-]*|open[\s_-]?a[il]|groq|anthropic|claude|gemini|bard|llama[\w.-]*|mistral|mixtral|deepseek|qwen|copilot|${MORE_MODEL_NAMES_LATIN}|llms?|(?:large\s+)?language\s+models?|ai\s+models?|foundation\s+models?)`;
+const EN_MODEL_IDENTITY = String.raw`(?:chat\s*gpt|gpt[\w.-]*|open[\s_-]?(?:ai|(?-i:Al))|groq|anthropic|claude|gemini|bard|llama[\w.-]*|mistral|mixtral|deepseek|qwen|copilot|${MORE_MODEL_NAMES_LATIN}|llms?|(?:large\s+)?language\s+models?|ai\s+models?|foundation\s+models?)`;
 const EN_HOSTING_IDENTITY = String.raw`(?:aws|amazon\s+web\s+services|azure|gcp|google\s+cloud|cloudflare|vercel|heroku|railway|render|fly\.io|replit|digitalocean|linode|oracle\s+cloud|raspberry\s+pi|vps|vms?|virtual\s+machines?|(?:cloud|home|dedicated|hosting|backend|linux|windows|production)\s+(?:servers?|instances?|vms?)|servers?|clouds?|containers?|docker|kubernetes)`;
 // Up to 60 characters of the same sentence; dotted names such as discord.js do not end it.
 const EN_SAME_SENTENCE = String.raw`(?:(?![.!?](?:\s|$))[^\n]){0,60}?`;
@@ -1790,23 +1823,28 @@ function occursInOrder(text, scanners) {
   return true;
 }
 
-// The sentence without its how-to fragment (and, in English, the possessive object right after the verb).
-function genericHowToRemainder(sentence, pattern, { withObject = false } = {}) {
+// The sentence without its how-to fragment and the object right after it (see EN_GENERIC_OBJECT and
+// CN_GENERIC_OBJECT). A Chinese how-to that asks how to get something keeps its object (see CN_OBTAIN_HOWTO_VERB).
+function genericHowToRemainder(sentence, pattern, objectPattern = null) {
   const match = sentence.match(pattern);
   if (!match) return null;
   let end = match.index + match[0].length;
-  if (withObject) end += sentence.slice(end).match(EN_GENERIC_OBJECT)?.[0].length || 0;
+  if (objectPattern && !(objectPattern === CN_GENERIC_OBJECT && CN_OBTAIN_HOWTO_VERB.test(match[0]))) {
+    end += sentence.slice(end).match(objectPattern)?.[0].length || 0;
+  }
   return sentence.slice(0, match.index) + sentence.slice(end);
 }
 
 // A how-to sentence uses a generic "you" only when nothing else in it points at 小吉: no further
-// reference to the bot once the how-to fragment is removed, and no topic that only 小吉 has. In Chinese
-// the rest must also be free of assistant topics ("如何取得你的模型？", "怎麼用你的指令，還有用的是什麼模型").
+// reference to the bot once the how-to fragment and its object are removed, and no topic that only 小吉 has.
+// The object is read as the generic "you"'s in Chinese as in English ("怎麼保護你的資料庫？" like "How should you
+// protect your database?"); the rest of a Chinese sentence must also be free of assistant topics ("怎麼用你的指令，還有用的
+// 是什麼模型"), and so must the object of a how-to that asks how to get it ("如何取得你的模型？").
 function isGenericHowTo(sentence) {
   if (BOT_ONLY_TOPIC.test(sentence)) return false;
-  const chinese = genericHowToRemainder(sentence, CN_GENERIC_HOWTO);
+  const chinese = genericHowToRemainder(sentence, CN_GENERIC_HOWTO, CN_GENERIC_OBJECT);
   if (chinese !== null && !REMAINING_SELF_REFERENCE.test(chinese) && !ASSISTANT_FACT_TOPIC.test(chinese)) return true;
-  const english = genericHowToRemainder(sentence, EN_GENERIC_HOWTO, { withObject: true });
+  const english = genericHowToRemainder(sentence, EN_GENERIC_HOWTO, EN_GENERIC_OBJECT);
   return english !== null && !REMAINING_SELF_REFERENCE.test(english);
 }
 
@@ -2107,6 +2145,7 @@ function statesAssistantInternalsPlain(text) {
         FIRST_PERSON_RULE_STATEMENT.test(sentence) || FIRST_PERSON_RELIANCE.test(sentence) ||
         MODEL_DRIVES_SELF.test(sentence) || MODEL_BEFORE_SELF.test(sentence) || CN_SUBJECTLESS_SELF.test(sentence) ||
         CN_NAMED_SELF.test(sentence) || CN_THIRD_PERSON_SELF.test(sentence) || occursInOrder(sentence, SELF_OPERATION_DETAIL) ||
+        SELF_OPERATION_FIRST.test(sentence) ||
         (FIRST_PERSON_SELF.test(sentence) && SECRET_DETAIL.test(sentence))) return true;
     if (introduced && CN_SELF_CONTINUATION.test(sentence)) return true;
     if (SELF_IDENTITY_MENTION.test(sentence)) introduced = true;
@@ -2598,8 +2637,8 @@ function asksDirectRestrictedMaterial(value) {
 }
 
 // 小吉's public features by name, for questions on how to use them ("怎麼用你的投票功能", "你的天氣功能可以查哪些城市", "小吉的
-// 提醒功能怎麼設定"). The names are those of the public feature and game catalogs (website/publicFeatureCatalog.js,
-// website/gameCatalog.js, website/statusData.js) without "小吉" or a bracket, with the everyday words for a public slash
+// 提醒功能怎麼設定"). The names are those of the public feature and game catalogs (src/platform/catalogs/publicFeatureCatalog.js,
+// src/platform/catalogs/gameCatalog.js, src/platform/catalogs/statusData.js) without "小吉" or a bracket, with the everyday words for a public slash
 // command or the chat, each kept only while that command or feature is public (see listPublicCommandNames). Owner-only,
 // removed and private commands are never named.
 const PUBLIC_COMMAND_FEATURE_WORDS = Object.freeze({
@@ -2730,10 +2769,23 @@ function namesSomethingInEnglish(sentence) {
     ((match[1] || match[2] || '').match(/[a-z]{2,}/gi) || []).some((word) => !SELF_INTRODUCTION_ENGLISH.test(word)));
 }
 
+// A maker other than 小吉 named in a sentence (see SELF_INTRODUCTION_MAKER): Chinese words besides 小吉 and the words around it
+// ("一家美國的人工智慧研究"), or letters that make a name once spaces and digits are left out ("O p e n A I"). A greeting, a
+// single letter ("3d") and AI, Discord or bot are not makers, as in namesSomethingInEnglish().
+function namesOtherMaker(sentence) {
+  return [...sentence.matchAll(SELF_INTRODUCTION_MAKER)].some((match) => {
+    const words = (match[1] ?? match[2] ?? '').replace(SELF_INTRODUCTION_MAKER_FILLER, '');
+    const letters = words.replace(/[^a-z]/gi, '');
+    return /\p{Script=Han}/u.test(words) || (letters.length >= 2 && !SELF_INTRODUCTION_ENGLISH.test(letters));
+  });
+}
+
 // Public words are not read as development or feature claims: "指令" right after a slash command is the
 // public command list, and when one sentence introduces 小吉 and the whole reply has no internal marker
 // and no model, provider, stack or deployment detail after 小吉 speaks (a display name in front is only a
-// name), "團隊", "打造", "製作" and "功能" are dropped from it ("你好！我是小吉！我有很多好玩的功能喔～").
+// name), "團隊", "打造", "製作" and "功能" are dropped from it ("你好！我是小吉！我有很多好玩的功能喔～"). A sentence
+// that names another maker keeps them, in English or not ("我是小吉！我是由一家美國的人工智慧研究團隊打造的"): the
+// introduction only makes 小吉 itself public as the maker.
 function withoutPublicSelfDescriptionWords(text) {
   const publicText = text.replace(COMMAND_WORD_AFTER_SLASH_COMMAND, '$1');
   const sentences = publicText.split(/(?<=[。！？!?\n])/);
@@ -2741,9 +2793,17 @@ function withoutPublicSelfDescriptionWords(text) {
       SELF_INTRODUCTION_INTERNAL.test(publicText) || occursInOrder(publicText, SELF_THEN_INTERNAL_DETAIL)) {
     return publicText;
   }
-  return sentences.map((sentence) => (namesSomethingInEnglish(sentence)
+  return sentences.map((sentence) => (namesSomethingInEnglish(sentence) || namesOtherMaker(sentence)
     ? sentence
     : sentence.replace(SELF_INTRODUCTION_PUBLIC_WORDS, ''))).join('');
+}
+
+// A reply that introduces 小吉 and tells its plans ("我是小吉！我們正在製作新功能喔"): the introduction makes the speaker
+// 小吉, so the plan is its roadmap. A clause whose subject is the user ("聽說你正在開發新功能") is the user's plan.
+function tellsRoadmapAfterIntroduction(text) {
+  if (!text.split(/(?<=[。！？!?\n])/).some((sentence) => SELF_INTRODUCTION.test(sentence))) return false;
+  return text.split(/[。！？!?\n，,；;]/).some((clause) =>
+    SELF_INTRODUCTION_ROADMAP.test(clause) && !SECOND_PERSON_SUBJECT.test(clause));
 }
 
 // The assistant saying it cannot go online or look things up ("小吉目前沒有連網查詢的功能", "我沒辦法即時搜尋") tells
@@ -2772,9 +2832,10 @@ function hasUnauthorizedAssistantFactPlain(value, {
   secondPersonIsUser = false,
   waiveSoft = null,
 } = {}) {
-  const text = withoutPublicSelfDescriptionWords(normalizePolicyText(value));
+  const normalized = normalizePolicyText(value);
+  const text = withoutPublicSelfDescriptionWords(normalized);
   if (!text) return false;
-  if (asksDirectRestrictedMaterial(text) || containsInternalDisclosure(text)) return true;
+  if (asksDirectRestrictedMaterial(text) || containsInternalDisclosure(text) || tellsRoadmapAfterIntroduction(normalized)) return true;
   const attributed = secondPersonIsUser
     ? withoutCapabilityNegation(withoutPublicCommandNames(withSecondPersonAsUser(text))) : text;
   // Blank lines before "我" are matched from the last line break only (linear on long runs of them).

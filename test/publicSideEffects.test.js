@@ -9,7 +9,7 @@ const { makeRealTempDir } = require('./support/realTempDir');
 const root = makeRealTempDir('xiaoji-public-effects-');
 process.env.COIN_DB_PATH = path.join(root, 'synthetic.sqlite');
 
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase, withCoinTransaction } = require('../src/services/coinDatabase');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase, withCoinTransaction } = require('../src/systems/economy/storage/coinDatabase');
 const { createPublicEffectAuthority } = require('../src/platform/publicEffectGrant');
 const { configurePublicEffectAdapter } = require('../src/platform/publicEffectAdapter');
 const { runWithHostOperationContext } = require('../src/platform/hostOperationContext');
@@ -21,10 +21,10 @@ const {
   buildWorkPenaltyAnnouncementBody,
   proveWorkPenaltySourceWithApi,
 } = require('../src/systems/safety/workPenaltySource');
-const { dispatchImmediateChainReaction } = require('../src/services/chainReactionDelivery');
+const { dispatchImmediateChainReaction } = require('../src/systems/community/chains/chainReactionDelivery');
 const { setGuildFeatureSetting } = require('../src/services/featurePlatformService');
-const { startWordChain, acceptWordChainMessage, stopWordChain } = require('../src/services/wordChainService');
-const { startNumberChain, acceptNumberChainMessage, processNumberChainReactionOutbox, stopNumberChain, MAX_TARGET } = require('../src/services/numberChainService');
+const { startWordChain, acceptWordChainMessage, stopWordChain } = require('../src/systems/community/chains/wordChainService');
+const { startNumberChain, acceptNumberChainMessage, processNumberChainReactionOutbox, stopNumberChain, MAX_TARGET } = require('../src/systems/community/chains/numberChainService');
 
 const DISCORD_EPOCH = 1_420_070_400_000n;
 const BOT_ID = '10000000000000001';

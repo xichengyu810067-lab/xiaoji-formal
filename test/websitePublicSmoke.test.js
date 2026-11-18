@@ -2,8 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { PUBLIC_FEATURE_CATALOG, createStatusLoader } = require('../website/statusData');
-const { PUBLIC_SYSTEM_CATALOG } = require('../website/publicFeatureCatalog');
+const { PUBLIC_FEATURE_CATALOG, createStatusLoader } = require('../src/platform/catalogs/statusData');
+const { PUBLIC_SYSTEM_CATALOG } = require('../src/platform/catalogs/publicFeatureCatalog');
 
 test('official pages link to the public release and retain the feature list', () => {
   const homepage = fs.readFileSync(path.join(__dirname, '../website/index.html'), 'utf8');

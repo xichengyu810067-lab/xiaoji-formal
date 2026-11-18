@@ -6,8 +6,8 @@ const path = require('node:path');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-riddle-alias-'));
 process.env.COIN_DB_PATH = path.join(tempRoot, 'synthetic.sqlite');
-const { riddles } = require('../src/services/dailyRiddleCorpus');
-const { isCorrectDailyRiddleAnswer } = require('../src/services/dailyRiddleService');
+const { riddles } = require('../src/systems/community/daily/dailyRiddleCorpus');
+const { isCorrectDailyRiddleAnswer } = require('../src/systems/community/daily/dailyRiddleService');
 
 test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
 

@@ -251,7 +251,7 @@ function removeSweepEnvironment(environment) {
 
 // Opens a brand-new coin database at the sweep's path.
 async function openSweepDatabase(environment) {
-  const database = require('../../src/services/coinDatabase');
+  const database = require('../../src/systems/economy/storage/coinDatabase');
   database.resetCoinDatabaseForTests();
   const databasePath = database.getCoinDatabasePath();
   assertInside(environment.root, databasePath, 'the coin database');
@@ -260,7 +260,7 @@ async function openSweepDatabase(environment) {
 }
 
 function closeSweepDatabase() {
-  require('../../src/services/coinDatabase').resetCoinDatabaseForTests();
+  require('../../src/systems/economy/storage/coinDatabase').resetCoinDatabaseForTests();
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -273,8 +273,8 @@ function closeSweepDatabase() {
 // counters: a trigger on every table counts each row inserted, updated or deleted in sweep_write_counts, one row per
 // table, so a write that is rolled back leaves no trace, a run's writes are known table by table, and the database
 // does not grow with the sweep. An update counts even when it leaves every value as it was: a refused run has no
-// business writing at all (and a WHEN clause comparing every column would double the schema sql.js parses again after
-// every export). The triggers change nothing the bot reads back: changes() counts only the statement's own rows, and
+// business writing at all (and a WHEN clause comparing every column would double the trigger text SQLite parses with
+// the schema). The triggers change nothing the bot reads back: changes() counts only the statement's own rows, and
 // last_insert_rowid() is the statement's own row again once a trigger ends. A change of the schema (a table made,
 // dropped or altered) shows in SQLite's schema version. Files are compared by content whenever their size, times or
 // identity change. The fake Discord's own record of sent, edited and deleted messages, reactions, threads and REST
@@ -298,8 +298,9 @@ function listFiles(root) {
 }
 
 function createStateTracker({ roots, ignoredFiles = [] }) {
-  const database = require('../../src/services/coinDatabase');
-  const ignored = new Set(ignoredFiles.map((file) => path.resolve(file)));
+  const database = require('../../src/systems/economy/storage/coinDatabase');
+  // An ignored database file takes its -wal with it: the open coin database writes there first.
+  const ignored = new Set(ignoredFiles.flatMap((file) => [path.resolve(file), `${path.resolve(file)}-wal`]));
   const fileCache = new Map();
   // The schema version every table had a trigger at.
   let watchedSchemaVersion = null;
