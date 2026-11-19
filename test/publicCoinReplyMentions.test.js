@@ -19,8 +19,8 @@ process.env.COIN_TIMEZONE = 'Asia/Taipei';
 
 const dailyCommand = require('../src/commands/daily');
 const leaderboardCommand = require('../src/commands/leaderboard');
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
-const { adjustPlayerBalance } = require('../src/services/coinService');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance } = require('../src/systems/economy/coinService');
 const { installEgressGuard } = require('../src/platform/egressGuard');
 const { createEgressLimiter } = require('../src/platform/egressLimiter');
 const { createSyntheticRest } = require('./fixtures/syntheticRest');

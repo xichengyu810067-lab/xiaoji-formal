@@ -20,7 +20,7 @@ process.env.BOT_OWNER_ID = 'player';
 process.env.XIAOJI_AUDIT_DATA_PATH = path.join(root, 'guildAudit.json');
 process.env.XIAOJI_INVITER_WHITELIST_PATH = path.join(root, 'inviterWhitelist.json');
 
-const { GAME_CATALOG } = require('../website/gameCatalog');
+const { GAME_CATALOG } = require('../src/platform/catalogs/gameCatalog');
 const boardCommand = require('../src/commands/board');
 const casinoCommand = require('../src/commands/casino');
 const duelCommand = require('../src/commands/duel-tower');
@@ -41,10 +41,10 @@ const {
 const gameLaunchCoordinator = require('../src/coordinators/gameLaunchCoordinator');
 const { SUPPORTED_START_LAUNCHERS } = require('../src/systems/games/unifiedGameRuntime');
 const { catalogStatus, showUnifiedGameStatus } = require('../src/systems/games/unifiedGameRuntime');
-const { configureBoardRuntime, resetBoardRuntimeForTests } = require('../src/games/boardRuntimeRegistry');
+const { configureBoardRuntime, resetBoardRuntimeForTests } = require('../src/systems/games/board/core/boardRuntimeRegistry');
 const { configureSoloRuntime } = require('../src/systems/games/soloRuntimeRegistry');
 const { createSoloDiscordRuntime } = require('../src/systems/games/soloDiscordRuntime');
-const { createBoardDiscordRuntime } = require('../src/games/discord/boardDiscordRuntime');
+const { createBoardDiscordRuntime } = require('../src/systems/games/board/discord/boardDiscordRuntime');
 const { configureChainReactionFence } = require('../src/systems/safety/chainReactionFence');
 const { InMemoryBoardStore } = require('./support/inMemoryBoardStore');
 const { applyGameLaunchOnce } = require('../src/systems/games/gameLaunchReceipt');
@@ -59,19 +59,19 @@ const {
   startBlackjack,
 } = require('../src/services/casinoService');
 const { enterDuelTower } = require('../src/services/casinoFacilityService');
-const { DEFAULT_SEED } = require('../src/services/wordChainService');
-const { DEFAULT_TARGET } = require('../src/services/numberChainService');
-const { adjustPlayerBalance } = require('../src/services/coinService');
-const { buyChips } = require('../src/services/chipService');
+const { DEFAULT_SEED } = require('../src/systems/community/chains/wordChainService');
+const { DEFAULT_TARGET } = require('../src/systems/community/chains/numberChainService');
+const { adjustPlayerBalance } = require('../src/systems/economy/coinService');
+const { buyChips } = require('../src/systems/economy/chipService');
 const {
   initializeCoinDatabase,
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const { setGuildFeatureSetting } = require('../src/services/featurePlatformService');
-const { openOrGetDailyRiddle } = require('../src/services/dailyRiddleService');
+const { openOrGetDailyRiddle } = require('../src/systems/community/daily/dailyRiddleService');
 const logger = require('../src/utils/logger');
 
 const WORD_CHANNEL_ID = '71000000000000001';

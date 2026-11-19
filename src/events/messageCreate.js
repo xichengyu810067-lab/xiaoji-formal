@@ -1,9 +1,9 @@
 const { Events } = require('discord.js');
-const { handleMentionMessage, isPublicPersistenceSuppressed } = require('../services/mentionService');
-const { routeMessageFeatures } = require('../services/messageFeatureRouter');
+const { handleMentionMessage, isPublicPersistenceSuppressed } = require('../systems/conversation/chatFlow');
+const { routeMessageFeatures } = require('../systems/community/messageFeatureRouter');
 const { handleStudentMessage } = require('../systems/conversation/student');
 const { recordMemberMessage } = require('../systems/conversation/channelMemory');
-const { recordPublicMessage } = require('../services/memoryService');
+const { recordPublicMessage } = require('../systems/conversation/projection');
 const { recordPublicInteraction } = require('../services/publicStatusService');
 const logger = require('../utils/logger');
 const { getClientExtensionHost } = require('../extensions/extensionHost');

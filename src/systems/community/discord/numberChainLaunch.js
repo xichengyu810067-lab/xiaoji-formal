@@ -2,7 +2,7 @@
 // action, the start itself and the failure replies moved here from src/commands/number-chain.js. The command runs
 // the same functions for its own stop and status, so a refusal reads the same whichever way in the person came.
 const { PermissionFlagsBits } = require('discord.js');
-const { DEFAULT_TARGET, startNumberChain } = require('../../../services/numberChainService');
+const { DEFAULT_TARGET, startNumberChain } = require('../chains/numberChainService');
 const logger = require('../../../utils/logger');
 const { ensureModerationAccess, handleCommandError, replyEphemeral } = require('../../../utils/moderation');
 

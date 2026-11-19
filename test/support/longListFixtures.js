@@ -228,18 +228,19 @@ const SITES = Object.freeze([
 
 // The functions each command reads from the services, by the service file: they are replaced by the test with
 // functions that answer from the fixture of the run.
+// Keyed by the module path below src.
 const SERVICE_FUNCTIONS = Object.freeze({
-  coinService: ['listShopItems', 'getPurchaseHistory', 'getAllPurchaseHistory', 'getAllTransactions', 'getAllInventory',
+  'systems/economy/coinService': ['listShopItems', 'getPurchaseHistory', 'getAllPurchaseHistory', 'getAllTransactions', 'getAllInventory',
     'readInventory', 'getInventory', 'getTransactions', 'readCoinDatabaseStats'],
-  luxuryService: ['listLuxuryItems', 'getLuxuryPurchaseHistory', 'listPawnRecords'],
-  reminderService: ['listUserReminders', 'deleteUserReminder', 'createReminder', 'addReminder', 'parseReminderDuration'],
-  bankService: ['getAllBalanceSummaries', 'readBalanceSummary', 'listFixedDeposits', 'getRateHistory'],
-  workService: ['getWorkStatus', 'getAllWorkStatuses', 'listWorkTasks', 'listPendingWorkSubmissions', 'previewPayroll',
+  'systems/economy/luxuryService': ['listLuxuryItems', 'getLuxuryPurchaseHistory', 'listPawnRecords'],
+  'services/reminderService': ['listUserReminders', 'deleteUserReminder', 'createReminder', 'addReminder', 'parseReminderDuration'],
+  'systems/economy/bankService': ['getAllBalanceSummaries', 'readBalanceSummary', 'listFixedDeposits', 'getRateHistory'],
+  'systems/work/workService': ['getWorkStatus', 'getAllWorkStatuses', 'listWorkTasks', 'listPendingWorkSubmissions', 'previewPayroll',
     'getPayrollHistory', 'getPrimaryPayrollHistory', 'listWorkPenalties', 'listPrimaryPenalties'],
-  chipService: ['getChipHistory'],
-  casinoService: ['listCasinoHistory'],
-  casinoFacilityService: ['listOwnedBattleWeapons', 'getDuelTowerHistory'],
-  venueService: ['listVenueMenu', 'listVenueHistory', 'addVenueMenuItem', 'getVenueRecipe', 'completeVenueOrderItem'],
+  'systems/economy/chipService': ['getChipHistory'],
+  'services/casinoService': ['listCasinoHistory'],
+  'services/casinoFacilityService': ['listOwnedBattleWeapons', 'getDuelTowerHistory'],
+  'services/venueService': ['listVenueMenu', 'listVenueHistory', 'addVenueMenuItem', 'getVenueRecipe', 'completeVenueOrderItem'],
 });
 
 // An interaction of a member who may do everything (administrator and owner of the bot), in a guild of three members.

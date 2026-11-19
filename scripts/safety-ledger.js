@@ -78,7 +78,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { getCoinDatabasePath, inspectSafetyRegistrationsFromFile, probeDirectorySync } = require('../src/services/coinDatabase');
+const { getCoinDatabasePath, inspectSafetyRegistrationsFromFile, probeDirectorySync } = require('../src/systems/economy/storage/coinDatabase');
 const { TEST_DATA_ROOT_MARKER } = require('../src/platform/testControlPolicy');
 const { inspectLedgerStore } = require('../src/systems/safety/ledgerStore');
 const { describePurposeFiles } = require('../src/systems/safety/ledgerBootstrap');

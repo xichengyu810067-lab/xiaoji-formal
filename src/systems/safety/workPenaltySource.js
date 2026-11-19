@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { normalizeWorkReminderTimestamp, readActiveWorkPenaltySource } = require('../../services/coinDatabase');
+const { normalizeWorkReminderTimestamp, readActiveWorkPenaltySource } = require('../economy/storage/coinDatabase');
 const { createLinkApproval, rewriteLinks } = require('../../platform/linkPolicy');
 const { version } = require('../../../package.json');
 

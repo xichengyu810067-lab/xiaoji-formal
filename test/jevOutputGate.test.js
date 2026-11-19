@@ -27,7 +27,7 @@ const { VERDICTS, resolveProviderOutput } = require('../src/systems/conversation
 const { parseJevConfig } = require('../src/systems/conversation/jevClient');
 const { clearMemoryForTests } = require('../src/systems/conversation/projection');
 const { resetConversationHistoryForTests } = require('../src/services/conversationHistoryService');
-const { clearConversationStateForTests } = require('../src/services/conversationModeService');
+const { clearConversationStateForTests } = require('../src/systems/conversation/conversationMode');
 const { openArchive } = require('../src/systems/conversation/aiArchive');
 const {
   ARCHIVE_POLICY_VERSION,

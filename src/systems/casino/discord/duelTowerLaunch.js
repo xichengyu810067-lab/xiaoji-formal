@@ -2,7 +2,7 @@
 // These functions moved here from src/commands/duel-tower.js, which still exports executeDuelTowerGame
 // under the same name, so the systems layer no longer has to load a command file.
 const { enterDuelTower } = require('../../../services/casinoFacilityService');
-const { formatChips } = require('../../../utils/coinPresentation');
+const { formatChips } = require('../../economy/coinPresentation');
 
 function formatSignedChips(amount) {
   const numeric = Number(amount || 0);

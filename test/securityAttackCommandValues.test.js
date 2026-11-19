@@ -19,11 +19,11 @@ const attack = require('./support/attackSession');
 
 const session = attack.createAttackSession({ prefix: 'xiaoji-attack-values-' });
 
-const coinService = require('../src/services/coinService');
-const chipService = require('../src/services/chipService');
-const bankService = require('../src/services/bankService');
-const { withCoinDatabase } = require('../src/services/coinDatabase');
-const { COMMAND_CATALOG, getSubcommandAudience } = require('../website/commandCatalog');
+const coinService = require('../src/systems/economy/coinService');
+const chipService = require('../src/systems/economy/chipService');
+const bankService = require('../src/systems/economy/bankService');
+const { withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
+const { COMMAND_CATALOG, getSubcommandAudience } = require('../src/platform/catalogs/commandCatalog');
 
 const { IDS } = session;
 const HOME = IDS.approvedGuild;
@@ -192,9 +192,7 @@ test('a resolved user with a malformed ID is answered, and no other account is t
   for (const row of untouched) assert.deepEqual(realAfter.find((after) => after.user_id === row.user_id), row);
 });
 
-test('the owner commands refuse a user ID that is not a snowflake instead of making an account for it', {
-  todo: 'coin-admin add/remove/set/reset-user and the services behind them (coinService.adjustPlayerBalance, resetPlayerData, coinAdminAddService.createAddConfirmation) take any text as a user ID: 16, 21 and 25 digits, a mention, a sign, a SQL fragment or __proto__ each get a wallet or a stored preview; Discord only ever sends real IDs, so this is reached only by a caller that does not come from a slash command',
-}, () => {
+test('the owner commands refuse a user ID that is not a snowflake instead of making an account for it', () => {
   assert.deepEqual(malformedFindings.kept, []);
 });
 
@@ -317,9 +315,7 @@ test('a number outside what an option declares is refused by the handler, whoeve
   assert.deepEqual(totals.bank, before.bank, 'no bank account moved');
 });
 
-test('a refused number is told to the user as a refusal and not as a failure of the system', {
-  todo: '/bank balance-all, /bank fixed-all and /bank rate-history take limit=1.5 as it is (the limit is not made a whole number), and the query fails with the generic "system cannot handle" answer and an error log; Discord only sends whole numbers for an integer option',
-}, () => {
+test('a refused number is told to the user as a refusal and not as a failure of the system', () => {
   assert.deepEqual(numberFindings.generic, []);
 });
 
@@ -386,7 +382,7 @@ test('text of any shape given to a string option of the five commands is answere
         const written = session.changesBeyondTheCount(outcome);
         if (written.length) {
           const entry = `${label}: wrote ${written.join(', ')}`;
-          // /bank fixed-create reads a source that is not "bank" as the wallet (the todo below).
+          // /bank fixed-create once read a source that is not "bank" as the wallet; kept apart for the test below.
           if (key === 'bank fixed-create' && option.name === 'source') choiceFindings.kept.push(entry);
           else problems.push(entry);
         }
@@ -407,8 +403,6 @@ test('text of any shape given to a string option of the five commands is answere
   }
 });
 
-test('a source that is neither the wallet nor the bank is refused by /bank fixed-create instead of read as the wallet', {
-  todo: '/bank fixed-create reads any source value other than "bank" as the wallet and makes the deposit from it (an empty text, a typo or "Bank" included), so a hand-made request that mistypes the source spends the wallet instead of being refused; Discord only offers the two choices',
-}, () => {
+test('a source that is neither the wallet nor the bank is refused by /bank fixed-create instead of read as the wallet', () => {
   assert.deepEqual(choiceFindings.kept, []);
 });

@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { getCoinDatabasePath, initializeCoinDatabase } = require('../services/coinDatabase');
+const { getCoinDatabasePath, initializeCoinDatabase } = require('../systems/economy/storage/coinDatabase');
 const { getAdmissionDataConfiguration, readAdmissionDataFile } = require('../services/admissionDataContract');
 const { readReminders } = require('../services/reminderService');
 const { readCalendarEvents } = require('../services/calendarService');

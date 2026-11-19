@@ -29,7 +29,7 @@ const {
   selectCleanupTargets,
 } = require('../src/platform/commandRegistryAudit');
 const { loadTestControlPolicy } = require('../src/platform/testControlPolicy');
-const commandCatalog = require('../website/commandCatalog');
+const commandCatalog = require('../src/platform/catalogs/commandCatalog');
 const { IDS, createFixture } = require('./testControlSupport');
 
 const APP = '123456789012345678';
@@ -1017,7 +1017,7 @@ Client.prototype.login = async function blockedLogin() {
   process.stdout.write('XIAOJI_TEST_LOGIN\n');
   throw new Error('XIAOJI_TEST_LOGIN_BLOCKED');
 };
-const catalogPath = require.resolve(path.join(root, 'website', 'commandCatalog.js'));
+const catalogPath = require.resolve(path.join(root, 'src', 'platform', 'catalogs', 'commandCatalog.js'));
 const catalog = require(catalogPath);
 require.cache[catalogPath].exports = Object.freeze({
   ...catalog,

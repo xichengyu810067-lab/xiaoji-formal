@@ -35,7 +35,7 @@ const {
   silenceConversation,
   startConversation,
   validateChatInput,
-} = require('../../services/conversationModeService');
+} = require('./conversationMode');
 const { answerMemoryQuery, recordPrivateInteraction } = require('./projection');
 const { resolveMemberFacts } = require('./memberFacts');
 const { loadMemoryContext, rememberPreferences } = require('./preferenceMemory');
@@ -235,6 +235,18 @@ function getMentionFallbackReply(
   return finalizeFallback('generic', { safeUserText });
 }
 
+// The program text placed before a memory or weather reply: the style's informational opener ("小明～小吉幫你整理好啦 ✨"),
+// after the romance-mode opener when romance mode is on. It is fixed text with the display name, so the checks leave it
+// out and read only the content; with it, a topic word quoted in the user's own memory or in the weather data was read
+// beside "小吉" ("小吉幫你整理好啦 ✨" and "你之前提到：明天要部署網站") and refused.
+function getInformationalReplyPrefix(chatStyle = DEFAULT_CHAT_STYLE, romanceEnabled = false, displayName = 'Discord 使用者') {
+  return renderRomanceFallback(renderChatStyleInformationalReply(chatStyle, '', { displayName }), {
+    enabled: romanceEnabled,
+    chatStyle,
+    displayName,
+  });
+}
+
 function finalizeConversationalInformationReply(
   content,
   displayName = 'Discord 使用者',
@@ -249,8 +261,13 @@ function finalizeConversationalInformationReply(
     displayName,
   });
   // Memory and weather replies quote stored user text or service data, not the assistant describing
-  // itself, so first-person self-description rules do not apply to them.
-  return finalizeAssistantReply(romanticReply, userId, { assistantVoice: false, displayNames: [displayName] });
+  // itself, so first-person self-description rules do not apply to them. The opener is program text: only the
+  // content is checked, and a disclosure in it is still refused.
+  return finalizeAssistantReply(romanticReply, userId, {
+    assistantVoice: false,
+    displayNames: [displayName],
+    templatePrefix: getInformationalReplyPrefix(chatStyle, romanceEnabled, displayName),
+  });
 }
 
 // The romance-mode opener placed before a generated reply ("小明～小吉很喜歡和你這樣甜甜地聊聊 ♡"), or '' when
@@ -440,6 +457,12 @@ function admitPreflightReply(message, userText) {
     logger.info(`[CHAT_COOLDOWN] ${scope} preflight=true`);
     return false;
   }
+  return admitPerUserReply(message, userText, 'CHAT_PREFLIGHT_GUARD');
+}
+
+// The per-user provider guard budget (providerGuard.js admit: the per-user rate limit and the duplicate check of model
+// replies), spent by a reply that does not call the model. A blocked attempt is only logged under the given tag.
+function admitPerUserReply(message, userText, logTag) {
   try {
     providerCallGuard.admit({
       userId: message.author.id,
@@ -449,7 +472,7 @@ function admitPreflightReply(message, userText) {
     return true;
   } catch (error) {
     if (!isLocalProviderGuardError(error)) throw error;
-    logger.info(`[CHAT_PREFLIGHT_GUARD] ${scope} reason=${error.reason}`);
+    logger.info(`[${logTag}] guild=${message.guildId || 'dm'} channel=${message.channelId} user=${message.author.id} reason=${error.reason}`);
     return false;
   }
 }
@@ -799,7 +822,14 @@ async function handleMentionMessage(message, {
       : { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
   };
 
+  // A public fact needs no model call, but it is a reply all the same: besides the chat cooldown above it spends the
+  // per-user provider guard budget, like the replies before the main flow, so asking for it again and again is held
+  // to the same per-user rate limit as the model's replies. A blocked attempt is dropped silently.
   if (ingressDecision.kind === 'public_fact') {
+    if (!admitPerUserReply(message, requestText, 'CHAT_PUBLIC_FACT_GUARD')) {
+      unanswered();
+      return { outcome: MENTION_OUTCOME.SUPPRESS_PUBLIC_PERSISTENCE };
+    }
     return sendDecision(decideAssistantOutput({
       ingressDecision,
       rawCandidate: ingressDecision.publicFact.text,
@@ -831,6 +861,7 @@ async function handleMentionMessage(message, {
       styledCandidate: finalMemoryReply,
       source: 'memory',
       displayNames: [displayName],
+      templatePrefix: getInformationalReplyPrefix(chatPreference.style, romancePreference.enabled, displayName),
     }));
   }
 
@@ -851,6 +882,7 @@ async function handleMentionMessage(message, {
       styledCandidate: finalWeatherReply,
       source: 'weather',
       displayNames: [displayName],
+      templatePrefix: getInformationalReplyPrefix(chatPreference.style, romancePreference.enabled, displayName),
     }));
   }
 
@@ -1038,6 +1070,7 @@ module.exports = {
   evaluateProviderReply,
   finalizeGeneratedConversationalReply,
   getRomanceReplyPrefix,
+  getInformationalReplyPrefix,
   finalizeConversationalInformationReply,
   getConversationDisplayName,
   getMentionFallbackReply,

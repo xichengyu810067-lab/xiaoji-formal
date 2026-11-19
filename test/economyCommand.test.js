@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 
 const commandPath = path.join(__dirname, '..', 'src', 'commands', 'economy.js');
 const moderationPath = path.join(__dirname, '..', 'src', 'utils', 'moderation.js');
-const coinServicePath = path.join(__dirname, '..', 'src', 'services', 'coinService.js');
-const bankServicePath = path.join(__dirname, '..', 'src', 'services', 'bankService.js');
-const workServicePath = path.join(__dirname, '..', 'src', 'services', 'workService.js');
+const coinServicePath = path.join(__dirname, '..', 'src', 'systems', 'economy', 'coinService.js');
+const bankServicePath = path.join(__dirname, '..', 'src', 'systems', 'economy', 'bankService.js');
+const workServicePath = path.join(__dirname, '..', 'src', 'systems', 'work', 'workService.js');
 
 function createInteraction({ guildId = 'guild-1', targetUser }) {
   let lastReply;

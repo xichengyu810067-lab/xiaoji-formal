@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const initSqlJs = require('sql.js');
+const { DatabaseSync } = require('node:sqlite');
+const { getRow, getRows, runSql } = require('../src/systems/economy/storage/sqlHelpers');
 const { BoardCoreError, BoardRuleError } = require('../src/systems/games/board/core/contracts');
 const { BoardEngineRegistry } = require('../src/systems/games/board/core/engineRegistry');
 const { BoardSessionService } = require('../src/systems/games/board/core/boardSessionService');
@@ -372,20 +373,12 @@ test('the private menu shows only what the viewer may do, with the phase in each
 });
 
 test('an existing board database is rebuilt once to accept werewolf, keeping every row and link', async () => {
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
-  db.run('PRAGMA foreign_keys = ON');
+  // An in-memory database with foreign keys on, run through the coin database's statement helpers.
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
   const api = {
-    run: (sql, params) => (params ? db.run(sql, params) : db.run(sql)),
-    get: (sql, params = []) => {
-      const statement = db.prepare(sql);
-      try {
-        statement.bind(params);
-        return statement.step() ? statement.getAsObject() : null;
-      } finally {
-        statement.free();
-      }
-    },
+    run: (sql, params) => runSql(db, sql, params),
+    get: (sql, params = []) => getRow(db, sql, params),
   };
   api.run(BOARD_SCHEMA_SQL.replace(", 'werewolf'", ''));
   const insertSession = (id, gameKey) => api.run(
@@ -403,11 +396,11 @@ test('an existing board database is rebuilt once to accept werewolf, keeping eve
   insertSession('new-werewolf', 'werewolf');
   assert.equal(api.get('SELECT COUNT(*) AS count FROM board_actions').count, 1);
   assert.equal(api.get('SELECT COUNT(*) AS count FROM board_interactions').count, 1);
-  const indexes = db.exec("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_board_%' ORDER BY name")[0].values.flat();
+  const indexes = getRows(db, "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_board_%' ORDER BY name").map((row) => row.name);
   assert.deepEqual(indexes, [
     'idx_board_actions_interaction', 'idx_board_interactions_session', 'idx_board_sessions_active_channel', 'idx_board_sessions_recovery',
   ]);
-  assert.equal(db.exec("SELECT name FROM sqlite_master WHERE name LIKE '%_rebuild'").length, 0);
+  assert.equal(getRows(db, "SELECT name FROM sqlite_master WHERE name LIKE '%_rebuild'").length, 0);
   api.run("DELETE FROM board_sessions WHERE id = 'old-chess'");
   assert.equal(api.get('SELECT COUNT(*) AS count FROM board_actions').count, 0);
   assert.equal(api.get('SELECT COUNT(*) AS count FROM board_interactions').count, 0);

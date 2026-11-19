@@ -38,7 +38,7 @@ const rewardReasons = Object.freeze({
   'owner-campaign:campaign': '活動發幣',
 });
 
-// Rewards paid by the daily features and the game server, by reward kind.
+// Rewards paid by the daily features and the games, by reward kind.
 const featureRewardReasons = Object.freeze({
   participation: '參與獎勵',
   correct_answer: '答對獎勵',

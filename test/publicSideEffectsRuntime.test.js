@@ -21,7 +21,7 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const { createPublicEffectAuthority } = require('../src/platform/publicEffectGrant');
 const { createEgressLimiter } = require('../src/platform/egressLimiter');
 const {
@@ -76,7 +76,7 @@ const {
   buildReactionEffect,
   dispatchChainReaction,
   dispatchImmediateChainReaction,
-} = require('../src/services/chainReactionDelivery');
+} = require('../src/systems/community/chains/chainReactionDelivery');
 const {
   acceptWordChainMessage,
   describeWordChainStatus,
@@ -84,14 +84,14 @@ const {
   processWordChainReactionOutbox,
   startWordChain,
   stopWordChain,
-} = require('../src/services/wordChainService');
+} = require('../src/systems/community/chains/wordChainService');
 const {
   acceptNumberChainMessage,
   describeNumberChainStatus,
   getNumberChainStatus,
   startNumberChain,
-} = require('../src/services/numberChainService');
-const { corpusVersion } = require('../src/services/wordChainLexicon');
+} = require('../src/systems/community/chains/numberChainService');
+const { corpusVersion } = require('../src/systems/community/chains/wordChainLexicon');
 
 const DISCORD_EPOCH = 1_420_070_400_000n;
 const CUTOVER = 1_700_000_000_000;
@@ -957,8 +957,11 @@ test('the shutdown exit code is recorded at once and keeps a failure that was al
   const last = shutdown.lastIndexOf('settleLedgerShutdown({');
   assert.ok(last > shutdown.indexOf('await boardRuntime.stopLifecycle();'), shutdown);
   assert.match(shutdown.slice(last), /^settleLedgerShutdown\(\{ sources: \[coinDatabaseEscalations\], logger, processRef: process \}\);/u);
-  // (The records of who was welcomed and of the leave notices are written first thing in that finally.)
-  assert.match(shutdown, new RegExp('\\} finally \\{\\s*flushMemberRecords\\(\\);\\s*(?://[^\\n]*\\s*)*try \\{\\s*settleLedgerShutdown\\(\\{ sources: ' +
+  // (The records of who was welcomed and of the leave notices are written first thing in that finally, then the coin
+  // database is closed.)
+  assert.match(shutdown, new RegExp('\\} finally \\{\\s*flushMemberRecords\\(\\);\\s*(?://[^\\n]*\\s*)*' +
+    'try \\{\\s*await coinDatabaseEscalations\\.closeCoinDatabase\\(\\);\\s*\\} catch \\{[^}]*\\}\\s*(?://[^\\n]*\\s*)*' +
+    'try \\{\\s*settleLedgerShutdown\\(\\{ sources: ' +
     '\\[coinDatabaseEscalations\\], logger, processRef: process \\}\\);\\s*\\} finally \\{\\s*' +
     'if \\(stepFailed && !process\\.exitCode\\) process\\.exitCode = 1;\\s*process\\.exit\\(process\\.exitCode\\);' +
     '\\s*\\}\\s*\\}\\s*$', 'u'));

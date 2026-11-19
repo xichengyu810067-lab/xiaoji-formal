@@ -42,14 +42,14 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const memoryService = require('../src/services/memoryService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const memoryService = require('../src/systems/conversation/projection');
 const { createPublicEffectAuthority } = require('../src/platform/publicEffectGrant');
 const { configurePublicEffectAdapter } = require('../src/platform/publicEffectAdapter');
 const { captureDiscordEventContext, runWithHostOperationContext } = require('../src/platform/hostOperationContext');
 const { createWelcomedMembers, setWelcomedMembersForTests } = require('../src/systems/community/welcomedMembers');
 const { AI_SPAM_PRESENCE_REPLY } = require('../src/systems/conversation/aiSpamGuard');
-const { clearConversationStateForTests } = require('../src/services/conversationModeService');
+const { clearConversationStateForTests } = require('../src/systems/conversation/conversationMode');
 const logger = require('../src/utils/logger');
 
 const BOT_ID = '10000000000000001';
@@ -302,7 +302,7 @@ test('the work penalty announcement is sent, whatever the guild was recorded as'
 });
 
 test('the word chain reaction is sent from the outbox, whatever the guild was recorded as', async () => {
-  const { acceptWordChainMessage, processWordChainReactionOutbox, startWordChain } = require('../src/services/wordChainService');
+  const { acceptWordChainMessage, processWordChainReactionOutbox, startWordChain } = require('../src/systems/community/chains/wordChainService');
   let number = 0;
   for (const [label, record] of STATES) {
     number += 1;
@@ -364,7 +364,7 @@ function boardInteraction({ id, subcommand = 'start', values = {}, userId, guild
 
 test('/board starts a board game and a personal game for a member who is not an administrator, whatever the guild was recorded as', async () => {
   const boardCommand = require('../src/commands/board');
-  const { configureBoardRuntime, resetBoardRuntimeForTests } = require('../src/games/boardRuntimeRegistry');
+  const { configureBoardRuntime, resetBoardRuntimeForTests } = require('../src/systems/games/board/core/boardRuntimeRegistry');
   const { configureSoloRuntime } = require('../src/systems/games/soloRuntimeRegistry');
   const { createSoloDiscordRuntime } = require('../src/systems/games/soloDiscordRuntime');
   const { createSoloSessionService } = require('../src/systems/games/soloSessionService');
@@ -526,7 +526,7 @@ test('an administrator of another server, who is not the Owner, reads and change
   const economy = require('../src/commands/economy');
   const coinAdmin = require('../src/commands/coin-admin');
   const { OWNER_DENIED_MESSAGE } = require('../src/utils/ownerOnly');
-  const { adjustPlayerBalance, setGuildEconomyEnabled } = require('../src/services/coinService');
+  const { adjustPlayerBalance, setGuildEconomyEnabled } = require('../src/systems/economy/coinService');
   const HOME_MEMBER = snowflake(1, '2');
   const AWAY_ADMIN = snowflake(2, '2');
   const NOT_A_MEMBER = '只能查詢目前在此伺服器的成員。';
@@ -607,7 +607,7 @@ let nextBoardInteraction = 0;
 
 // A button or a submitted input window on the board message of a game, with the replies kept.
 function boardComponent({ sessionId, revision, verb, actorId, messageId, input = '', modal = false }) {
-  const { buildBoardCustomId } = require('../src/games/discord/boardCustomId');
+  const { buildBoardCustomId } = require('../src/systems/games/board/discord/boardCustomId');
   const output = { edits: [], replies: [], followUps: [], modals: [], updates: 0 };
   return {
     id: `sweep-board-component-${nextBoardInteraction += 1}`,
@@ -632,7 +632,7 @@ function boardComponent({ sessionId, revision, verb, actorId, messageId, input =
 }
 
 test('the real board runtime serves the start, the buttons and the input window of a board, whatever the guild was recorded as', async () => {
-  const { createBoardDiscordRuntime } = require('../src/games/discord/boardDiscordRuntime');
+  const { createBoardDiscordRuntime } = require('../src/systems/games/board/discord/boardDiscordRuntime');
   const { InMemoryBoardStore } = require('./support/inMemoryBoardStore');
   let number = 0;
   for (const [label, record] of STATES) {

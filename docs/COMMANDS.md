@@ -1,6 +1,6 @@
 # 公開指令
 
-<!-- 此檔由 scripts/render-command-docs.js 依 website/commandCatalog.js 產生；請修改目錄後執行 node scripts/render-command-docs.js，不要直接編輯。 -->
+<!-- 此檔由 scripts/render-command-docs.js 依 src/platform/catalogs/commandCatalog.js 產生；請修改目錄後執行 node scripts/render-command-docs.js，不要直接編輯。 -->
 
 公開指令以 global commands 部署，小吉所在的每個伺服器都能執行。
 
@@ -55,7 +55,7 @@
 - `/farm view/shop/plant/water/harvest/sell/fertilize/expand/reclaim` - 小吉農場：播種、澆水、收成與出售作物；個人農場，跨伺服器共用；作物與料理每天合計最多賣 500 吉幣；也能從 /board start 打開
 - `/kitchen recipes/cook/pantry/eat/gift/sell/collection` - 小吉廚房：用農場作物做料理、出售、品嚐或送人；每天最多送出 5 道料理，收到的料理只能吃
 - `/economy overview/user/audit` - 吉幣經濟總覽與紀錄查詢；需管理權限
-- `/coin-admin history/enable/disable` - 管理吉幣系統（全域錢包變更限小吉擁有者）；history 指定 campaign-id 的活動對帳限小吉擁有者；需管理權限
+- `/coin-admin enable/disable` - 管理吉幣系統（全域錢包變更限小吉擁有者）；需管理權限
 
 具設定能力的子指令仍會檢查其既有 owner 或伺服器權限。工作資料可在所有伺服器運作；額外 Discord role 副作用由可選擴充決定。
 

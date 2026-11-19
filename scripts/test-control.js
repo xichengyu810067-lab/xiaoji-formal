@@ -137,7 +137,6 @@ function buildChildEnvironment({ parentEnv = process.env, config, trust }) {
   child.AUTO_DEPLOY_COMMANDS = 'false';
   child.XIAOJI_RELEASE_DISPATCH_ENABLED = 'false';
   child.PUBLIC_STATUS_ENABLED = 'false';
-  child.GAME_SERVER_ENABLED = 'false';
   delete child.STATUS_SNAPSHOT_PUBLISHER_URL;
   delete child.STATUS_SNAPSHOT_PUBLISHER_KEY_ID;
   delete child.STATUS_SNAPSHOT_PUBLISHER_SECRET;

@@ -5,20 +5,20 @@ const {
   getAllTransactions,
   getCoinDatabaseStats,
   readInventory,
-} = require('../services/coinService');
+} = require('../systems/economy/coinService');
 const {
   getAllBalanceSummaries,
   getBankRates,
   getRateHistory,
   listFixedDeposits,
   readBalanceSummary,
-} = require('../services/bankService');
+} = require('../systems/economy/bankService');
 const {
   getAllWorkStatuses,
   getPayrollHistory,
   getWorkStatus,
   listWorkTasks,
-} = require('../services/workService');
+} = require('../systems/work/workService');
 const {
   formatCoins,
   formatFixedDepositStatus,
@@ -33,7 +33,7 @@ const {
   isForeignPrimaryJob,
   isPrimaryPayrollVisibleTo,
   replyCoinError,
-} = require('../utils/coinPresentation');
+} = require('../systems/economy/coinPresentation');
 const { ensureModerationAccess } = require('../utils/moderation');
 const { reportInteractionSecurityAlert } = require('../utils/securityAlert');
 const { clipText, fitListText, fitReplyText, listRows, omittedLine } = require('../utils/replyLengthGuard');

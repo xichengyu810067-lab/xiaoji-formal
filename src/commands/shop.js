@@ -4,14 +4,14 @@ const {
   getPurchaseHistory,
   listShopItems,
   purchaseItem,
-} = require('../services/coinService');
+} = require('../systems/economy/coinService');
 const {
   formatCoins,
   formatItemType,
   formatShopItemLine,
   formatUser,
   replyCoinError,
-} = require('../utils/coinPresentation');
+} = require('../systems/economy/coinPresentation');
 const { ensureModerationAccess } = require('../utils/moderation');
 const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 

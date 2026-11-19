@@ -19,7 +19,7 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const logger = require('../src/utils/logger');
 const workCommand = require('../src/commands/work');
 const { createPublicEffectAuthority } = require('../src/platform/publicEffectGrant');

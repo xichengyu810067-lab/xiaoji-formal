@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-public-sudoku-'));
 process.env.COIN_DB_PATH = path.join(root, 'synthetic.sqlite');
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase, withCoinTransaction } = require('../src/services/coinDatabase');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase, withCoinTransaction } = require('../src/systems/economy/storage/coinDatabase');
 const { applySudokuAction, buildSudoku, publicState } = require('../src/systems/games/soloGameRules');
 const { createSoloSessionService } = require('../src/systems/games/soloSessionService');
 const { parseMove } = require('../src/systems/games/soloDiscordRuntime');

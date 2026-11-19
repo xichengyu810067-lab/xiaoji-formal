@@ -41,9 +41,9 @@ const {
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const { createRuntimeRewardCoordinator } = require('../src/coordinators/rewardRuntime');
-const { JOB_TYPES } = require('../src/services/workService');
+const { JOB_TYPES } = require('../src/systems/work/workService');
 const jobCycle = require('../src/systems/work/jobCycle');
 const payroll = require('../src/systems/work/payroll');
 const venueOrders = require('../src/systems/casino/venueOrders');
@@ -1020,7 +1020,7 @@ test('the venue-sweep ports share one order condition: escrowed, unserved, with 
 // The scheduler opens its own transactions, so this case commits its rows.  It stays the last case
 // of the file; the temporary database is removed after it.
 test('processDuePrimaryCycles waits while a maker item of the cycle is pending, then marks its bonus paid once', async (t) => {
-  const { processDuePrimaryCycles } = require('../src/services/workService');
+  const { processDuePrimaryCycles } = require('../src/systems/work/workService');
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse(CYCLE_END) });
   const seeded = await withCoinTransaction((api) => {
     insertPrimaryCycle(api, { userId: CHEF_ID, jobName: '廚師', cycleId: 'cycle-due-chef' });

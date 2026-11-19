@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const path = require('node:path');
-const coinDatabase = require('../src/services/coinDatabase');
+const coinDatabase = require('../src/systems/economy/storage/coinDatabase');
 const { settleLedgerShutdown } = require('../src/systems/safety/ledgerEscalation');
 
 const { getCoinDatabasePath, initializeNewCoinDatabase } = coinDatabase;
@@ -16,6 +16,8 @@ async function main() {
   }
   const result = await initializeNewCoinDatabase({ expectedPath: requestedPath });
   process.stdout.write(`吉幣資料庫已初次建立：${result.path}（schema v${result.schemaVersion}）\n`);
+  // Closed cleanly, so no -wal is left beside the new file.
+  await coinDatabase.closeCoinDatabase();
   // The database exists now, but a directory sync that failed after it was created leaves
   // it unconfirmed on disk: reported like at the bot's stop, one line per escalation, and the
   // run ends with the escalation exit code instead of 0.

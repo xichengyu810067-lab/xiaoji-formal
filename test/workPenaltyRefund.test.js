@@ -23,7 +23,7 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const {
   configureWorkRewardCoordinator,
   resetWorkRewardCoordinatorForTests,

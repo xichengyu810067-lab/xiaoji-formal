@@ -1,6 +1,5 @@
 if (process.env.XIAOJI_RUNTIME_MODE !== 'test-control') require('dotenv').config({ quiet: true });
 
-const OpenAI = require('openai');
 const AnthropicSdk = require('@anthropic-ai/sdk');
 const logger = require('../../utils/logger');
 const { recordServiceOutcome, registerServiceConfiguration } = require('../../platform/serviceHealth');
@@ -45,11 +44,17 @@ const { observe } = require('../../platform/testControlObservation');
 const { createFixedCodeLog } = require('./fixedCodeLog');
 const { PREFERENCE_CATEGORIES } = require('./preferenceMemory');
 const { IMAGE_QUOTA_UNITS, imageFingerprint } = require('./imageInput');
+const {
+  DEFAULT_GROQ_BASE_URL,
+  DEFAULT_GROQ_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  createOpenAICompatibleClient,
+  getConfiguredOpenAIModel,
+  isProviderRateLimitResponse,
+  selectOpenAICompatibleProvider,
+} = require('./providerSelection');
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4.1-mini';
-const DEFAULT_GROQ_MODEL = 'openai/gpt-oss-120b';
-const DEFAULT_GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
-// Claude is used whenever ANTHROPIC_API_KEY is set; Groq, then OpenAI, otherwise.
+// Claude is used whenever ANTHROPIC_API_KEY is set; Groq, then OpenAI, otherwise (providerSelection.js).
 const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5';
 // On a policy decline the API re-runs the same request on a fallback model inside the same call.
 const ANTHROPIC_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
@@ -94,15 +99,6 @@ function consumeGuildAiQuota(guildId, amount = 1) {
     `[AI_QUOTA] code=AI_GUILD_QUOTA_EXHAUSTED guild=${/^\d{17,20}$/u.test(String(guildId)) ? guildId : 'unknown'}`);
   throw new GuildQuotaExhaustedError();
 }
-
-const PROVIDER_RATE_LIMIT_MARKERS = new Set([
-  'rate_limit',
-  'rate_limit_error',
-  'rate_limit_exceeded',
-  'model_rate_limit_exceeded',
-  'insufficient_quota',
-  'quota_exceeded',
-]);
 
 const OWNER_BACKGROUND = '';
 
@@ -222,11 +218,7 @@ function getOpenAIClient() {
   }
 
   if (!openaiClient) {
-    openaiClient = new OpenAI({
-      apiKey,
-      maxRetries: 1,
-      timeout: 15000,
-    });
+    openaiClient = createOpenAICompatibleClient({ apiKey });
   }
 
   return openaiClient;
@@ -240,19 +232,19 @@ function getGroqClient() {
   }
 
   if (!groqClient) {
-    groqClient = new OpenAI({
-      apiKey,
-      baseURL: getGroqBaseUrl(),
-      maxRetries: 1,
-      timeout: 15000,
-    });
+    groqClient = createOpenAICompatibleClient({ apiKey, baseURL: getGroqBaseUrl() });
   }
 
   return groqClient;
 }
 
 function getOpenAIModel() {
-  return process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+  return getConfiguredOpenAIModel();
+}
+
+// Without Claude, Groq answers when it has a key, otherwise OpenAI (providerSelection.js).
+function usesGroq() {
+  return selectOpenAICompatibleProvider()?.provider === 'groq';
 }
 
 function getGroqModel() {
@@ -467,29 +459,6 @@ function getBriefError(error) {
 
 function logProviderError(provider, error, loggerImpl = logger) {
   loggerImpl.warn(`[API_ERROR] [${provider}] AI reply failed; using keyword fallback. ${getBriefError(error)}`);
-}
-
-function getProviderErrorValues(error) {
-  const details = [
-    error,
-    error?.error,
-    error?.rawError,
-    error?.response?.data?.error,
-  ];
-
-  return details.flatMap((detail) => [detail?.code, detail?.type]);
-}
-
-function isProviderRateLimitResponse(error) {
-  const statuses = [error?.status, error?.statusCode, error?.response?.status]
-    .map((value) => Number(value));
-
-  if (statuses.includes(429)) {
-    return true;
-  }
-
-  return getProviderErrorValues(error)
-    .some((value) => PROVIDER_RATE_LIMIT_MARKERS.has(String(value || '').trim().toLowerCase()));
 }
 
 function isProviderRateLimitError(error) {
@@ -793,7 +762,7 @@ async function completeWithProvider({ system, input, memoryEnabled = false, imag
       return null;
     }
   }
-  const useGroq = groqOverride !== undefined ? Boolean(groqOverride) : Boolean(process.env.GROQ_API_KEY);
+  const useGroq = groqOverride !== undefined ? Boolean(groqOverride) : usesGroq();
   const client = useGroq
     ? (groqOverride === undefined ? getGroqClient() : groqOverride)
     : (openaiOverride === undefined ? getOpenAIClient() : openaiOverride);
@@ -907,7 +876,7 @@ async function generateChatReply({
       : result.text;
   }
 
-  const useGroq = Boolean(process.env.GROQ_API_KEY);
+  const useGroq = usesGroq();
   const selectedClient = useGroq
     ? (groqClient === undefined ? getGroqClient() : groqClient)
     : (openaiClient === undefined ? getOpenAIClient() : openaiClient);

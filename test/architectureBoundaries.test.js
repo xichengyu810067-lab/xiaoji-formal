@@ -112,32 +112,31 @@ test('npm run check runs the boundary check and fails with its findings', (t) =>
 // R1 to R5: dependency direction
 // -------------------------------------------------------------------------------------------
 
-test('R1 refuses entry code that loads a storage engine, also through the legacy board path', (t) => {
+test('R1 refuses entry code that loads a storage engine', (t) => {
   const root = makeProject(t, {
-    'src/services/coinDatabase.js': STUB,
+    'src/systems/economy/storage/coinDatabase.js': STUB,
     'src/systems/safety/sideEffectLedger.js': STUB,
     'src/systems/games/board/storage/sqliteBoardStore.js': STUB,
-    'src/games/storage/sqliteBoardStore.js': forward('../../systems/games/board/storage/sqliteBoardStore'),
     'src/utils/guildConfig.js': STUB,
-    'src/commands/a.js': `const db = ${load('../services/coinDatabase')};\n`,
+    'src/commands/a.js': `const db = ${load('../systems/economy/storage/coinDatabase')};\n`,
     'src/events/b.js': `const config = ${load('../utils/guildConfig')};\n`,
     'src/handlers/c.js': `const ledger = ${load('../systems/safety/sideEffectLedger')};\n`,
-    'src/index.js': `const store = ${load('./games/storage/sqliteBoardStore')};\n`,
-    'deploy-commands.js': loads('./src/services/coinDatabase'),
+    'src/index.js': `const store = ${load('./systems/games/board/storage/sqliteBoardStore')};\n`,
+    'deploy-commands.js': loads('./src/systems/economy/storage/coinDatabase'),
     'src/loadCommands.js': loads('./systems/games/board/storage/sqliteBoardStore'),
     // Below the entry layer the same modules are fine.
-    'src/services/ok.js': loads('./coinDatabase'),
-    'src/systems/ok.js': loads('../services/coinDatabase'),
+    'src/services/ok.js': loads('../systems/economy/storage/coinDatabase'),
+    'src/systems/ok.js': loads('./economy/storage/coinDatabase'),
   });
   assert.deepEqual(found(root, 'R1'), [
-    'deploy-commands.js -> src/services/coinDatabase.js',
-    'src/commands/a.js -> src/services/coinDatabase.js',
+    'deploy-commands.js -> src/systems/economy/storage/coinDatabase.js',
+    'src/commands/a.js -> src/systems/economy/storage/coinDatabase.js',
     'src/events/b.js -> src/utils/guildConfig.js',
     'src/handlers/c.js -> src/systems/safety/sideEffectLedger.js',
-    'src/index.js -> src/games/storage/sqliteBoardStore.js',
+    'src/index.js -> src/systems/games/board/storage/sqliteBoardStore.js',
     'src/loadCommands.js -> src/systems/games/board/storage/sqliteBoardStore.js',
   ]);
-  assertBlocks(root, 'R1', /R1 new violation: src\/commands\/a\.js:1 loads the storage engine src\/services\/coinDatabase\.js/u);
+  assertBlocks(root, 'R1', /R1 new violation: src\/commands\/a\.js:1 loads the storage engine src\/systems\/economy\/storage\/coinDatabase\.js/u);
 });
 
 test('R1 passes when entry code only calls systems and services', (t) => {
@@ -194,53 +193,51 @@ test('R3 refuses systems and services that load a coordinator and coordinators t
 });
 
 // A module that moved into src/coordinators leaves an adapter at its old path for outside callers. The
-// registered adapters (ADAPTER_FILES) stand in for it: src/services/workService.js and
-// src/systems/community/calendarSystem.js are registered, src/services/unregistered.js is not.
+// registered adapters (ADAPTER_FILES) stand in for it: src/systems/games/unifiedGameRuntime.js,
+// src/systems/community/calendarSystem.js and src/systems/reminders/reminderSystem.js are registered,
+// src/services/unregistered.js is not.
 test('R3 lets a registered one-line adapter forward to a coordinator, and exempts nothing else', (t) => {
   const root = makeProject(t, {
     'src/coordinators/launch.js': STUB,
     'src/coordinators/other.js': STUB,
     // Exempt: registered, and a one-line forward (in both forms R8 accepts).
-    'src/services/workService.js': forward('../coordinators/launch'),
+    'src/systems/games/unifiedGameRuntime.js': forward('../../coordinators/launch'),
     'src/systems/community/calendarSystem.js': cliForward('../../coordinators/launch'),
     // Not exempt: the same file when it is not registered, and any other file that loads a coordinator.
     'src/services/unregistered.js': forward('../coordinators/launch'),
     'src/systems/work/w.js': loads('../../coordinators/launch'),
     // Not exempt: a registered adapter that is more than a one-line forward loses the exemption for
     // every load it has, the forward included. R8 reports its format.
-    'src/services/chipService.js': `${forward('../coordinators/launch')}${loads('../coordinators/other')}`,
-    // A registered adapter that forwards to something that is not a coordinator is not an R3 matter.
-    'src/systems/economy/coinService.js': STUB,
-    'src/services/coinService.js': forward('../systems/economy/coinService'),
+    'src/systems/reminders/reminderSystem.js': `${forward('../../coordinators/launch')}${loads('../../coordinators/other')}`,
   });
   assert.deepEqual(found(root, 'R3'), [
-    'src/services/chipService.js -> src/coordinators/launch.js',
-    'src/services/chipService.js -> src/coordinators/other.js',
     'src/services/unregistered.js -> src/coordinators/launch.js',
+    'src/systems/reminders/reminderSystem.js -> src/coordinators/launch.js',
+    'src/systems/reminders/reminderSystem.js -> src/coordinators/other.js',
     'src/systems/work/w.js -> src/coordinators/launch.js',
   ]);
-  assert.deepEqual(found(root, 'R8'), ['src/services/chipService.js -> format']);
+  assert.deepEqual(found(root, 'R8'), ['src/systems/reminders/reminderSystem.js -> format']);
   assertBlocks(root, 'R3', /R3 new violation: src\/services\/unregistered\.js:1 loads the coordinator src\/coordinators\/launch\.js/u);
-  assertBlocks(root, 'R8', /R8 new violation: src\/services\/chipService\.js:1 is a registered adapter but is not a one-line forward/u);
+  assertBlocks(root, 'R8', /R8 new violation: src\/systems\/reminders\/reminderSystem\.js:1 is a registered adapter but is not a one-line forward/u);
 });
 
 test('R8 keeps production code from loading an adapter that forwards to a coordinator', (t) => {
   const root = makeProject(t, {
     'src/coordinators/launch.js': STUB,
-    'src/services/workService.js': forward('../coordinators/launch'),
+    'src/systems/games/unifiedGameRuntime.js': forward('../../coordinators/launch'),
     'src/systems/economy/coinService.js': STUB,
-    'src/services/coinService.js': forward('../systems/economy/coinService'),
+    'src/systems/reminders/reminderSystem.js': forward('../economy/coinService'),
     // Entry code and a system alike must load the coordinator itself.
-    'src/commands/board.js': loads('../services/workService', '../services/coinService'),
-    'src/systems/games/runtime.js': loads('../../services/workService'),
+    'src/commands/board.js': loads('../systems/games/unifiedGameRuntime', '../systems/reminders/reminderSystem'),
+    'src/systems/work/runtime.js': loads('../games/unifiedGameRuntime'),
     // Tests may use the old path, and the adapter of a module that is not a coordinator may be loaded.
-    'test/uses.test.js': loads('../src/services/workService'),
+    'test/uses.test.js': loads('../src/systems/games/unifiedGameRuntime'),
   });
   assert.deepEqual(found(root, 'R8'), [
-    'src/commands/board.js -> src/services/workService.js',
-    'src/systems/games/runtime.js -> src/services/workService.js',
+    'src/commands/board.js -> src/systems/games/unifiedGameRuntime.js',
+    'src/systems/work/runtime.js -> src/systems/games/unifiedGameRuntime.js',
   ]);
-  assertBlocks(root, 'R8', /R8 new violation: src\/commands\/board\.js:1 loads the adapter src\/services\/workService\.js, which only forwards to a coordinator/u);
+  assertBlocks(root, 'R8', /R8 new violation: src\/commands\/board\.js:1 loads the adapter src\/systems\/games\/unifiedGameRuntime\.js, which only forwards to a coordinator/u);
   // The adapter itself is not an R3 violation, and so loading it is not an R3 violation either.
   assert.deepEqual(found(root, 'R3'), []);
 });
@@ -259,12 +256,13 @@ test('R4 refuses the economy loading casino, work, games, community or conversat
     'src/systems/economy/own.js': STUB,
     'src/systems/economy/ledger.js': loads('../work/w', '../casino/c', '../games/g', '../community/m', '../conversation/v'),
     // A service file of the economy counts as economy code.
-    'src/services/coinService.js': loads('./workService'),
+    'src/services/casinoService.js': STUB,
+    'src/services/coinAdminAddService.js': loads('./casinoService'),
     // Allowed: its own system, utils, the reward ledger and modules that belong to no listed system.
     'src/systems/economy/fine.js': loads('./own', '../../utils/u', '../../services/featurePlatformService', '../../services/auditService'),
   });
   assert.deepEqual(found(root, 'R4'), [
-    'src/services/coinService.js -> src/services/workService.js',
+    'src/services/coinAdminAddService.js -> src/services/casinoService.js',
     'src/systems/economy/ledger.js -> src/systems/casino/c.js',
     'src/systems/economy/ledger.js -> src/systems/community/m.js',
     'src/systems/economy/ledger.js -> src/systems/conversation/v.js',
@@ -304,14 +302,14 @@ test('R5 refuses platform and utils that load systems, services or coordinators,
 
 test('loads are found on every line, once per place, and comments are not loads', (t) => {
   const root = makeProject(t, {
-    'src/services/coinDatabase.js': STUB,
+    'src/systems/economy/storage/coinDatabase.js': STUB,
     'src/commands/a.js': [
-      `// const db = ${load('../services/coinDatabase')};`,
+      `// const db = ${load('../systems/economy/storage/coinDatabase')};`,
       '/*',
-      ` * ${load('../services/coinDatabase')};`,
+      ` * ${load('../systems/economy/storage/coinDatabase')};`,
       ' */',
-      `const first = ${load('../services/coinDatabase')};`,
-      `const second = () => ${load('../services/coinDatabase', '"')};`,
+      `const first = ${load('../systems/economy/storage/coinDatabase')};`,
+      `const second = () => ${load('../systems/economy/storage/coinDatabase', '"')};`,
       '',
     ].join('\n'),
   });
@@ -327,7 +325,7 @@ const call = (name, open, argument, close = ')') => `${name}${open}${argument}${
 const quoted = (text, quote) => `${quote}${text}${quote}`;
 
 test('loads are read in every spelling the language allows, and only in code', (t) => {
-  const engine = '../services/coinDatabase';
+  const engine = '../systems/economy/storage/coinDatabase';
   const spellings = {
     'src/commands/backtick.js': `${call('require', '(', quoted(engine, '`'))};\n`,
     'src/commands/spaced.js': `${call('require', '  (  ', quoted(engine, '"'), '  )')};\n`,
@@ -341,13 +339,13 @@ test('loads are read in every spelling the language allows, and only in code', (
     'src/commands/block.js': `/* ${call('require', '(', quoted(engine, "'"))} */ const x = 1;\n`,
     'src/commands/string.js': `const text = "${call('require', '(', quoted(engine, "'"))}";\n`,
     'src/commands/template.js': `const text = \`${call('require', '(', quoted(engine, "'"))}\`;\n`,
-    'src/commands/regex.js': "const pattern = /require\\('\\.\\.\\/services\\/coinDatabase'\\)/;\n",
+    'src/commands/regex.js': "const pattern = /require\\('\\.\\.\\/systems\\/economy\\/storage\\/coinDatabase'\\)/;\n",
     'src/commands/computed.js': `${call('require', '(', `"../services/" + name`)};\n`,
     'src/commands/computed-template.js': `${call('require', '(', '`../services/${name}`')};\n`,
     'src/commands/package.js': `${call('require', '(', quoted('discord.js', "'"))};\n`,
   };
-  const root = makeProject(t, { 'src/services/coinDatabase.js': STUB, ...spellings, ...notLoads });
-  assert.deepEqual(found(root, 'R1'), Object.keys(spellings).sort().map((file) => `${file} -> src/services/coinDatabase.js`));
+  const root = makeProject(t, { 'src/systems/economy/storage/coinDatabase.js': STUB, ...spellings, ...notLoads });
+  assert.deepEqual(found(root, 'R1'), Object.keys(spellings).sort().map((file) => `${file} -> src/systems/economy/storage/coinDatabase.js`));
 });
 
 test('the scanner tells code from comments, strings, templates and regular expressions', () => {
@@ -426,7 +424,7 @@ test('the scanner reports what it cannot close instead of guessing', (t) => {
 });
 
 test('a line comment ends at the first line terminator, \\n, \\r, U+2028 or U+2029, and what follows is code', (t) => {
-  const engine = '../services/coinDatabase';
+  const engine = '../systems/economy/storage/coinDatabase';
   for (const [label, end] of [
     ['a line feed', '\n'],
     ['a carriage return', '\r'],
@@ -440,8 +438,8 @@ test('a line comment ends at the first line terminator, \\n, \\r, U+2028 or U+20
     assert.equal(scan.code.length, source.length, label);
     assert.equal(scan.code.includes('hidden'), false, label);
     assert.deepEqual(loadsIn(scan).map(({ request }) => request), [engine], label);
-    const root = makeProject(t, { 'src/services/coinDatabase.js': STUB, 'src/commands/a.js': source });
-    assert.deepEqual(found(root, 'R1'), ['src/commands/a.js -> src/services/coinDatabase.js'], label);
+    const root = makeProject(t, { 'src/systems/economy/storage/coinDatabase.js': STUB, 'src/commands/a.js': source });
+    assert.deepEqual(found(root, 'R1'), ['src/commands/a.js -> src/systems/economy/storage/coinDatabase.js'], label);
   }
   // Every comment ends at its own terminator; a comment at the end of the text has none.
   const mixed = [
@@ -497,7 +495,7 @@ test('the scanner reads a slash after ++, -- or a keyword used as a property nam
 });
 
 test('a slash that opens no regular expression closing on its line is read as a division, not reported', () => {
-  const engine = '../services/coinDatabase';
+  const engine = '../systems/economy/storage/coinDatabase';
   for (const [label, end] of [['a line feed', '\n'], ['a carriage return', '\r']]) {
     const source = `function f() { return /never closed${end}const engine = ${load(engine)}; }\n`;
     const scan = scanSource(source);
@@ -524,7 +522,7 @@ const SCHEMA = [
 
 test('R6 refuses a file that names a table another system owns, for every SQL verb that names a table', (t) => {
   const root = makeProject(t, {
-    'src/services/coinDatabase.js': SCHEMA,
+    'src/systems/economy/storage/coinDatabase.js': SCHEMA,
     // Owners: the feature platform for its own table, work for its own table, the economy for its own.
     'src/services/featurePlatformService.js': "api.get('SELECT * FROM feature_guild_settings');\n",
     'src/systems/work/own.js': "api.get('SELECT * FROM coin_jobs');\n",
@@ -562,7 +560,7 @@ test('R6 refuses a file that names a table another system owns, for every SQL ve
 
 test('R6 does not see comments, lower-case SQL words or table names built at run time', (t) => {
   const root = makeProject(t, {
-    'src/services/coinDatabase.js': SCHEMA,
+    'src/systems/economy/storage/coinDatabase.js': SCHEMA,
     'src/systems/economy/blind.js': [
       '// SELECT * FROM coin_jobs',
       '/*',
@@ -600,7 +598,7 @@ test('R6 does not see the spellings its notes list as blind spots', (t) => {
     ['a line continuation for the space', "'SELECT * FROM \\\ncoin_jobs'"],
   ]) {
     const root = makeProject(t, {
-      'src/services/coinDatabase.js': SCHEMA,
+      'src/systems/economy/storage/coinDatabase.js': SCHEMA,
       'src/systems/economy/e.js': `const query = ${literal};\n`,
     });
     assert.deepEqual(found(root, 'R6'), [], label);
@@ -649,14 +647,14 @@ const R6_SPELLINGS = [
 test('R6 reads a table name however SQL spells it: quoted, prefixed, listed, capitalised or changed by DDL', (t) => {
   for (const [label, literal] of R6_SPELLINGS) {
     const root = makeProject(t, {
-      'src/services/coinDatabase.js': SCHEMA,
+      'src/systems/economy/storage/coinDatabase.js': SCHEMA,
       'src/systems/economy/e.js': `const query = ${literal};\n`,
     });
     assert.deepEqual(found(root, 'R6'), ['src/systems/economy/e.js -> coin_jobs'], label);
   }
   // The owner may use every one of them.
   const own = makeProject(t, {
-    'src/services/coinDatabase.js': SCHEMA,
+    'src/systems/economy/storage/coinDatabase.js': SCHEMA,
     'src/systems/work/w.js': `${R6_SPELLINGS.filter(([, literal]) => !literal.includes('coin_wallets'))
       .map(([, literal]) => `const query = ${literal};`).join('\n')}\n`,
   });
@@ -665,7 +663,7 @@ test('R6 reads a table name however SQL spells it: quoted, prefixed, listed, cap
 
 test('R6 refuses a file that creates a table of another family, and lets a family create its own', (t) => {
   const root = makeProject(t, {
-    'src/services/coinDatabase.js': SCHEMA,
+    'src/systems/economy/storage/coinDatabase.js': SCHEMA,
     'src/systems/work/w.js': "const query = 'CREATE TABLE IF NOT EXISTS coin_wallets_extra (id INTEGER)';\n",
     'src/systems/work/virtual.js': "const query = 'CREATE VIRTUAL TABLE coin_search USING fts5(text)';\n",
     'src/systems/work/own.js': "const query = 'CREATE TABLE IF NOT EXISTS coin_work_extra (id INTEGER)';\n",
@@ -679,10 +677,20 @@ test('R6 refuses a file that creates a table of another family, and lets a famil
 
 test('R6 asks for an owner when a table is created that no family claims', (t) => {
   const root = makeProject(t, {
-    'src/services/coinDatabase.js': `${SCHEMA}const extra = 'CREATE TABLE mystery_things (id INTEGER)';\n`,
+    'src/systems/economy/storage/coinDatabase.js': `${SCHEMA}const extra = 'CREATE TABLE mystery_things (id INTEGER)';\n`,
   });
-  assert.deepEqual(found(root, 'R6'), ['src/services/coinDatabase.js -> no-owner:mystery_things']);
-  assertBlocks(root, 'R6', /R6 new violation: src\/services\/coinDatabase\.js creates table mystery_things, which has no declared owner/u);
+  assert.deepEqual(found(root, 'R6'), ['src/systems/economy/storage/coinDatabase.js -> no-owner:mystery_things']);
+  assertBlocks(root, 'R6', /R6 new violation: src\/systems\/economy\/storage\/coinDatabase\.js creates table mystery_things, which has no declared owner/u);
+});
+
+test('R6 lets every file of the coin database storage name any table, and no file outside it', (t) => {
+  const root = makeProject(t, {
+    'src/systems/economy/storage/coinDatabase.js': SCHEMA,
+    'src/systems/economy/storage/migrations/m.js': "api.run('UPDATE coin_jobs SET id = 1; DELETE FROM feature_guild_settings');\n",
+    'src/systems/economy/storage/schema/s.js': "const s = 'CREATE INDEX IF NOT EXISTS idx_x ON casino_games (id)';\n",
+    'src/systems/economy/storageless.js': "api.get('SELECT * FROM coin_jobs');\n",
+  });
+  assert.deepEqual(found(root, 'R6'), ['src/systems/economy/storageless.js -> coin_jobs']);
 });
 
 // -------------------------------------------------------------------------------------------
@@ -779,10 +787,10 @@ test('R8 refuses a registered adapter that is more than a one-line forward and p
     'src/games/contracts.js': forward(CONTRACTS),
     'src/games/cli.js': cliForward(CONTRACTS),
     'src/games/crlf.js': forward(CONTRACTS, '\r\n'),
-    // Refused: more than a forward, a target that is gone, extra code in a registered services adapter.
+    // Refused: more than a forward, a target that is gone, extra code in a registered adapter.
     'src/games/bad.js': `const x = ${load(CONTRACTS)};\nmodule.exports = x;\n`,
     'src/games/dangling.js': forward('../systems/games/board/core/gone'),
-    'src/services/coinService.js': `${forward('../systems/economy/coinService')}console.log('extra');\n`,
+    'src/systems/reminders/reminderSystem.js': `${forward('../economy/coinService')}console.log('extra');\n`,
     // Production code must load the implementation, not the legacy path.
     'src/systems/games/board/engines/go.js': loads('../../../../games/contracts'),
     'src/index.js': loads('./games/contracts'),
@@ -795,8 +803,8 @@ test('R8 refuses a registered adapter that is more than a one-line forward and p
     'src/games/bad.js -> format',
     'src/games/dangling.js -> missing-target',
     'src/index.js -> src/games/contracts.js',
-    'src/services/coinService.js -> format',
     'src/systems/games/board/engines/go.js -> src/games/contracts.js',
+    'src/systems/reminders/reminderSystem.js -> format',
   ]);
   assertBlocks(root, 'R8', /R8 new violation: src\/games\/bad\.js:1 is a registered adapter but is not a one-line forward/u);
   assertBlocks(root, 'R8', /R8 new violation: src\/index\.js:1 loads the legacy adapter src\/games\/contracts\.js/u);
@@ -840,13 +848,13 @@ test('R10 refuses src and test files outside the public export and paths the exp
       'src/commands',
       'test/ok.test.js',
       'src/systems/games/board/storage/sqliteBoardStore.js',
-      'src/games/storage/boardSchema.js',
+      'src/systems/games/board/storage/boardSchema.js',
     ]),
     'src/commands/a.js': STUB,
     'test/ok.test.js': STUB,
     // The board storage sources keep their exception to the "storage" rule.
     'src/systems/games/board/storage/sqliteBoardStore.js': STUB,
-    'src/games/storage/boardSchema.js': STUB,
+    'src/systems/games/board/storage/boardSchema.js': STUB,
     // Not exported, or a path the export refuses.
     'test/forgotten.test.js': STUB,
     'src/utils/forgotten.js': STUB,
@@ -1108,42 +1116,42 @@ test('R10 reports a public export plan that cannot be built instead of passing',
 // The ratchet
 // -------------------------------------------------------------------------------------------
 
-const ONCE = loads('../services/coinDatabase');
-const TWICE = loads('../services/coinDatabase', '../services/coinDatabase');
+const ONCE = loads('../systems/economy/storage/coinDatabase');
+const TWICE = loads('../systems/economy/storage/coinDatabase', '../systems/economy/storage/coinDatabase');
 
 function ratchetProject(t, source, entries) {
   return makeProject(t, {
     'scripts/boundary-baseline.json': baselineJson(entries),
-    'src/services/coinDatabase.js': STUB,
+    'src/systems/economy/storage/coinDatabase.js': STUB,
     'src/commands/a.js': source,
   });
 }
 
 test('a recorded violation passes, an unrecorded one fails', (t) => {
-  const recorded = entry('R1-001', 'src/commands/a.js', 'src/services/coinDatabase.js', { disposition: 'cleanup' });
+  const recorded = entry('R1-001', 'src/commands/a.js', 'src/systems/economy/storage/coinDatabase.js', { disposition: 'cleanup' });
   assert.deepEqual(failuresOf(ratchetProject(t, ONCE, [recorded]), 'R1'), []);
   const failures = failuresOf(ratchetProject(t, ONCE, []), 'R1');
   assert.equal(failures.length, 1);
-  assert.match(failures[0], /^R1 new violation: src\/commands\/a\.js:1 loads the storage engine src\/services\/coinDatabase\.js \(1 time\)\. Fix the code; the baseline only shrinks\.$/u);
+  assert.match(failures[0], /^R1 new violation: src\/commands\/a\.js:1 loads the storage engine src\/systems\/economy\/storage\/coinDatabase\.js \(1 time\)\. Fix the code; the baseline only shrinks\.$/u);
 });
 
 test('a stale baseline entry fails once its violation is gone', (t) => {
-  const recorded = entry('R1-001', 'src/commands/a.js', 'src/services/coinDatabase.js', { disposition: 'cleanup' });
+  const recorded = entry('R1-001', 'src/commands/a.js', 'src/systems/economy/storage/coinDatabase.js', { disposition: 'cleanup' });
   const failures = failuresOf(ratchetProject(t, STUB, [recorded]), 'R1');
   assert.deepEqual(failures, [
-    'R1 R1-001 is stale: src/commands/a.js -> src/services/coinDatabase.js no longer violates the rule. Delete the entry from scripts/boundary-baseline.json.',
+    'R1 R1-001 is stale: src/commands/a.js -> src/systems/economy/storage/coinDatabase.js no longer violates the rule. Delete the entry from scripts/boundary-baseline.json.',
   ]);
 });
 
 test('a recorded violation that occurs more often than recorded fails, and so does one that occurs less often', (t) => {
-  const once = entry('R1-001', 'src/commands/a.js', 'src/services/coinDatabase.js');
+  const once = entry('R1-001', 'src/commands/a.js', 'src/systems/economy/storage/coinDatabase.js');
   const grew = failuresOf(ratchetProject(t, TWICE, [once]), 'R1');
   assert.equal(grew.length, 1);
-  assert.match(grew[0], /^R1 R1-001 grew: src\/commands\/a\.js:1,2 loads the storage engine src\/services\/coinDatabase\.js \(2 times; the baseline records 1\)\. Fix the new use\.$/u);
-  const twice = entry('R1-001', 'src/commands/a.js', 'src/services/coinDatabase.js', { count: 2 });
+  assert.match(grew[0], /^R1 R1-001 grew: src\/commands\/a\.js:1,2 loads the storage engine src\/systems\/economy\/storage\/coinDatabase\.js \(2 times; the baseline records 1\)\. Fix the new use\.$/u);
+  const twice = entry('R1-001', 'src/commands/a.js', 'src/systems/economy/storage/coinDatabase.js', { count: 2 });
   const shrank = failuresOf(ratchetProject(t, ONCE, [twice]), 'R1');
   assert.equal(shrank.length, 1);
-  assert.match(shrank[0], /^R1 R1-001 shrank: src\/commands\/a\.js -> src\/services\/coinDatabase\.js occurs 1 time; the baseline records 2\. Lower its count in scripts\/boundary-baseline\.json\.$/u);
+  assert.match(shrank[0], /^R1 R1-001 shrank: src\/commands\/a\.js -> src\/systems\/economy\/storage\/coinDatabase\.js occurs 1 time; the baseline records 2\. Lower its count in scripts\/boundary-baseline\.json\.$/u);
   assert.deepEqual(failuresOf(ratchetProject(t, TWICE, [twice]), 'R1'), []);
 });
 
@@ -1155,10 +1163,10 @@ test('only the rules that run are compared with the baseline', (t) => {
 });
 
 test('the baseline is checked before it is trusted', (t) => {
-  const good = entry('R1-001', 'src/commands/a.js', 'src/services/coinDatabase.js');
+  const good = entry('R1-001', 'src/commands/a.js', 'src/systems/economy/storage/coinDatabase.js');
   const cases = [
     ['an id that appears twice', [good, { ...good, target: 'other' }], /the id R1-001 appears twice/u],
-    ['a violation recorded twice', [good, { ...good, id: 'R1-002' }], /R1-002 repeats R1 src\/commands\/a\.js -> src\/services\/coinDatabase\.js/u],
+    ['a violation recorded twice', [good, { ...good, id: 'R1-002' }], /R1-002 repeats R1 src\/commands\/a\.js -> src\/systems\/economy\/storage\/coinDatabase\.js/u],
     ['an unknown rule', [{ ...good, rule: 'R11' }], /has an unknown rule/u],
     ['an id that does not start with its rule', [{ ...good, id: 'R2-001' }], /needs an id like R6-001 that starts with its rule/u],
     ['an id without three digits', [{ ...good, id: 'R1-1' }], /needs an id like R6-001/u],
@@ -1220,7 +1228,7 @@ test('the command line passes on the real project and prints the report on reque
 
 test('the command line fails on a project with a new violation and on bad options', (t) => {
   const root = makeProject(t, {
-    'src/services/coinDatabase.js': STUB,
+    'src/systems/economy/storage/coinDatabase.js': STUB,
     'src/commands/a.js': ONCE,
   });
   const failed = runChecker(['--root', root, '--rule', 'R1']);
@@ -1230,7 +1238,7 @@ test('the command line fails on a project with a new violation and on bad option
   assert.equal(onlyOtherRule.status, 0, onlyOtherRule.stderr);
   assert.match(onlyOtherRule.stdout, /Boundary check passed: 1 rule, 0 recorded exceptions\./u);
   const elsewhere = path.join(root, 'elsewhere.json');
-  fs.writeFileSync(elsewhere, baselineJson([entry('R1-001', 'src/commands/a.js', 'src/services/coinDatabase.js')]));
+  fs.writeFileSync(elsewhere, baselineJson([entry('R1-001', 'src/commands/a.js', 'src/systems/economy/storage/coinDatabase.js')]));
   assert.equal(runChecker(['--root', root, '--rule', 'R1', '--baseline', elsewhere]).status, 0);
   const unreadable = runChecker(['--root', root, '--rule', 'R1', '--baseline', path.join(root, 'missing.json'), '--report']);
   assert.equal(unreadable.status, 1);

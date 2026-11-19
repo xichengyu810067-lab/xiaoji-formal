@@ -16,15 +16,15 @@ const harness = require('./support/securityAttackHarness');
 
 const root = harness.createAttackEnvironment('xiaoji-attack-inputs-');
 
-const coin = require('../src/services/coinService');
-const bankService = require('../src/services/bankService');
-const chipService = require('../src/services/chipService');
-const luxuryService = require('../src/services/luxuryService');
+const coin = require('../src/systems/economy/coinService');
+const bankService = require('../src/systems/economy/bankService');
+const chipService = require('../src/systems/economy/chipService');
+const luxuryService = require('../src/systems/economy/luxuryService');
 const casinoService = require('../src/services/casinoService');
 const casinoFacility = require('../src/services/casinoFacilityService');
-const workService = require('../src/services/workService');
+const workService = require('../src/systems/work/workService');
 const featurePlatform = require('../src/services/featurePlatformService');
-const campaignService = require('../src/services/coinCampaignService');
+const campaignService = require('../src/systems/economy/coinCampaignService');
 
 const GUILD = '810000000000000001';
 const USER = '810000000000000011';
@@ -333,7 +333,7 @@ test('price times quantity cannot overflow the cap, in the shop and in the luxur
 
 test('a wallet next to the safe-integer limit refuses a credit that would cross it', async () => {
   await seedEconomy();
-  const { withCoinTransaction } = require('../src/services/coinDatabase');
+  const { withCoinTransaction } = require('../src/systems/economy/storage/coinDatabase');
   await withCoinTransaction((api) => api.run(
     'UPDATE coin_wallets SET balance = ?, total_earned = ? WHERE user_id = ?',
     [Number.MAX_SAFE_INTEGER - 5, Number.MAX_SAFE_INTEGER - 5, USER]

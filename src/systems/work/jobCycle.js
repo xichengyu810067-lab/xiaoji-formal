@@ -1,6 +1,6 @@
 const { GLOBAL_RULE_VERSION, BASIC_RATIO } = require('./workRules');
 const crypto = require('node:crypto');
-const { CoinServiceError, ensureGuildSettings, ensurePlayer } = require('../../services/coinService');
+const { CoinServiceError, ensureGuildSettings, ensurePlayer } = require('../economy/coinService');
 const {
   findEscrowedLegacyWaiterOrderWithApi,
   findPendingLegacyMakerItemWithApi,

@@ -1,4 +1,4 @@
-const { PUBLIC_FEATURE_CATALOG } = require('../../../website/statusData');
+const { PUBLIC_FEATURE_CATALOG } = require('../../platform/catalogs/statusData');
 
 const PUBLIC_FACT_MARKER = /^\[\[PUBLIC_FACT:([a-z0-9_.-]+)\]\]$/;
 const ANY_PUBLIC_FACT_MARKER = /\[\[PUBLIC_FACT:[^\]]+\]\]/i;
@@ -24,12 +24,12 @@ const facts = new Map([
   ['feature.catalog', Object.freeze({
     id: 'feature.catalog',
     text: `小吉目前公開功能包含：${featureNames.join('、')}。`,
-    source: 'website/statusData.js:PUBLIC_FEATURE_CATALOG; docs/USER_GUIDE.md',
+    source: 'src/platform/catalogs/statusData.js:PUBLIC_FEATURE_CATALOG; docs/USER_GUIDE.md',
   })],
   ['feature.weather', Object.freeze({
     id: 'feature.weather',
     text: '可以，請使用 /weather city:<城市> 查詢天氣。',
-    source: 'website/statusData.js:weather',
+    source: 'src/platform/catalogs/statusData.js:weather',
   })],
   ['feature.commands', Object.freeze({
     id: 'feature.commands',

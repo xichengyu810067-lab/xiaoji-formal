@@ -38,7 +38,7 @@ const { INTERNAL_REPLY } = require('../src/systems/conversation/disclosurePolicy
 const { providerCallGuard } = require('../src/systems/conversation/providerGuard');
 const { MEMORY_NOT_FOUND_REPLY, clearMemoryForTests } = require('../src/systems/conversation/projection');
 const { resetConversationHistoryForTests } = require('../src/services/conversationHistoryService');
-const { clearConversationStateForTests } = require('../src/services/conversationModeService');
+const { clearConversationStateForTests } = require('../src/systems/conversation/conversationMode');
 const { openArchive } = require('../src/systems/conversation/aiArchive');
 const { ARCHIVE_POLICY_VERSION, closeArchiveForTests, configureArchivePathResolver } =
   require('../src/services/aiArchiveService');

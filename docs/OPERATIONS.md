@@ -30,11 +30,16 @@ XIAOJI_INVITER_WHITELIST_PATH=<專案外的另一個絕對路徑>/inviter-whitel
 ```
 
 - `COIN_DB_PATH` 必須是程式資料夾外的絕對路徑。小吉會在同一個資料夾自動建立安全帳本（見「受保護的副作用與安全帳本」），所以這個資料夾必須在本機磁碟上，不能是網路磁碟、junction 或同步資料夾。
-- 吉幣資料庫的每一次寫入都是耐久寫入：先把整份資料庫寫進同一個資料夾的 `xiaoji.sqlite.tmp` 並強制寫入磁碟（fsync），再用改名取代原檔，最後對資料夾做 fsync，讓改名本身也寫進磁碟。Windows 不能對資料夾做 fsync，改為把取代後的檔案再寫入磁碟一次，屬於盡力而為。記憶體的內容和上一次成功寫入的內容相同時，不會寫檔。
-- 斷電或系統當機時，磁碟上只會留下某次寫入前或寫入後的完整檔案，不會留下寫到一半的檔案；已經回覆成功的吉幣操作，重新開機後仍然存在。前提是磁碟確實照 fsync 寫入，這也是資料夾必須在本機磁碟上的原因。唯一的例外是第一次初始化：新檔直接建立（確保絕不覆蓋既有資料庫），建立途中斷電可能留下不完整的新檔，下次啟動會拒絕載入，這時檔案裡還沒有任何資料。以下情況，重新開機後可能退回上一次寫入的版本：
-  - 改名後對資料夾的 fsync 失敗：這筆操作仍算成功（檔案已經包含它），log 會記 `[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_FAILED` 與 `[COIN_DB] code=COIN_DB_ESCALATION`，下一次寫入會再做一次 fsync。停止時還會記一行 `[SIDE_EFFECT_LEDGER] code=LEDGER_ESCALATION purpose=coin-database cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=open|runtime`，並以結束碼 3 結束（見「通知、狀態頁與結束碼」）。
-  - 檔案系統不支援對資料夾做 fsync（回應 `EINVAL` 之類）：寫入照常完成，只記一次 `[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_UNSUPPORTED`。安全帳本的登記寫入也照這個規則處理，這是登記寫入原本行為的變更：以前在這種檔案系統上，登記會寫入失敗，相關用途因而停用（`LEDGER_REGISTRATION_WRITE_FAILED`）。遇到真正的 I/O 錯誤時，登記寫入仍照原本的規則失敗並停用。不過安全帳本本身需要資料夾 fsync，在這種檔案系統上受保護的副作用仍會在啟動時全部停用，所以不能用來正式執行（status 會以 `DIRECTORY_SYNC_UNSUPPORTED`、結束碼 2 提醒）。
-  - Windows 上取代後那次寫入磁碟失敗：不會通報。
+- 吉幣資料庫由小吉用 Node 內建的 SQLite（`node:sqlite`）獨占開啟：`locking_mode=EXCLUSIVE`、`journal_mode=WAL`、`synchronous=FULL`。每筆交易在 `COMMIT` 時寫入磁碟，只寫它改到的部分，成本不隨資料庫大小增加。開著的期間，資料庫旁邊會有一個 `xiaoji.sqlite-wal`；正常停止時它會併回主檔並刪除。同一個檔案不能被第二個行程開啟：另一個小吉或資料庫工具去開它，會被拒絕（小吉啟動時顯示「吉幣資料庫正由另一個行程或連線使用」並停止）。
+- 斷電或系統當機時，已經回覆成功的吉幣操作，重新開機後仍然存在；寫到一半的交易不會留下。下次啟動時，SQLite 會用旁邊留下的 `-wal` 自動補回已提交的部分。前提是磁碟確實照 fsync 寫入，這也是資料夾必須在本機磁碟上的原因。第一次初始化時，新庫先在記憶體建好，再以獨佔建立的方式寫成新檔（確保絕不覆蓋既有資料庫），接著對資料夾做 fsync；建立途中斷電可能留下不完整的新檔，下次啟動會拒絕載入，這時檔案裡還沒有任何資料。
+  - 新檔建立後對資料夾的 fsync 失敗：資料庫仍算已建立，log 會記 `[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_FAILED` 與 `[COIN_DB] code=COIN_DB_ESCALATION`。停止時還會記一行 `[SIDE_EFFECT_LEDGER] code=LEDGER_ESCALATION purpose=coin-database cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=open`，並以結束碼 3 結束（見「通知、狀態頁與結束碼」）。
+  - 檔案系統不支援對資料夾做 fsync（回應 `EINVAL` 之類）：只記一次 `[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_UNSUPPORTED`，照常進行。不過安全帳本本身需要資料夾 fsync，在這種檔案系統上受保護的副作用仍會在啟動時全部停用，所以不能用來正式執行（status 會以 `DIRECTORY_SYNC_UNSUPPORTED`、結束碼 2 提醒）。
+  - Windows 不能對資料夾做 fsync，改為把新檔再寫入磁碟一次，屬於盡力而為；失敗時不會通報。
+- 吉幣資料庫的 schema 版本落後、需要升級時，小吉會先備份、再直接升級原檔：
+  - 備份檔放在同一個資料夾，名稱是 `xiaoji.sqlite.pre-v<舊版本>-<UTC 時間>.bak`。寫法和新檔相同（暫存檔、fsync、改名、資料夾 fsync），寫完會讀回來比對 SHA-256。這種備份檔只保留最新 3 份。備份寫不進去時，原檔完全不動，停止啟動。
+  - 升級或升級後的檢查失敗時，小吉會刪掉 `-wal`，從備份檔把原檔還原回去，確認雜湊和升級前相同，然後停止啟動。連還原也失敗時，以 `COIN_DB_MIGRATION_RESTORE_FAILED` 停止，訊息會寫出備份檔名；請先停下來，用那個備份檔手動還原。
+  - 資料庫旁邊還有 `-wal` 或 `-journal`（上次沒有正常停止，或升級中途停止）又需要升級時，不會升級，直接停止，檔案都不動。先用能開它的版本啟動再正常停止，或從最新的 `.bak` 還原。
+  - 第一次用這個版本開啟舊版寫出的資料庫時，只會把檔頭改成 WAL 模式（SQLite 自己的原子寫入，資料不動），不算升級，不另做備份。正常停止後的檔案，舊版仍讀得出來；要退回舊版，照下方「第一次部署這個版本與退回舊版」做。
 - 開發時的測試在 Windows 上執行；Linux 等 POSIX 系統上的寫入順序與錯誤處理，由模擬檔案系統的測試涵蓋。
 - `XIAOJI_REMINDERS_PATH` 與 `XIAOJI_CALENDAR_PATH` 是兩個不同、位於專案外的絕對路徑。`XIAOJI_AUDIT_DATA_PATH` 與 `XIAOJI_INVITER_WHITELIST_PATH` 也必須是不同、位於專案外的絕對路徑，且不能與其他執行期資料重疊。這兩份是舊版的伺服器審核紀錄與邀請者白名單：小吉不再審核伺服器，檔案裡的內容（核准、拒絕、未知）全部視同可用，只保留供查閱，不會被改寫，也不再影響任何功能。
 - `XIAOJI_DATA_ROOT` 會同時改變個人提醒、個人行事曆與安全帳本的位置。已經在使用中的小吉不要新設這個變數，原因見「升級與資料位置」。
@@ -233,7 +238,7 @@ Discord Developer Portal 需開啟 Server Members Intent 與 Message Content Int
   - `npm run safety:ledger -- status` 會把 `owner-safety` 標為 `anomaly`，附 `owner-dm-preparation-unknown` 或 `owner-dm-preparation-rejected`，結束碼 2。
   - 恢復步驟：(1) 停止小吉。(2) 執行 `npm run safety:ledger -- status`，確認上述異常並記下 `owner-safety` 的 8 碼確認碼。(3) 若是 `rejected`，先確認 `.env` 的 `BOT_OWNER_ID` 正確、Owner 仍能收到小吉的私訊；`unknown` 通常是當時的網路或 Discord 問題。(4) 執行 `npm run safety:ledger -- reinit --purpose owner-safety --bot-stopped --confirm owner-safety=<8 碼>`。(5) 啟動小吉：會建立新的 Owner 帳本，下一則 Owner 通知會重新開啟私訊頻道。Owner 安全通知沒有 cutover，舊帳本裡的通知不會補送；新帳本也從頭計算 Owner 通知的每日預算。
 - **狀態頁**：新人歡迎、文字接龍與數字接龍三張功能卡跟著對應的用途。總開關為 `off` 時顯示維護中；用途停用（啟動檢查失敗、執行中停用、登入身分不符）時顯示故障，整體狀態是 degraded，不會變成 outage。其他用途沒有公開功能卡，改由私訊與結束碼通報。
-- **狀態頁的斜線指令**：官網狀態頁另外列出每個公開斜線指令與子指令（`website/commandCatalog.js` 的公開指令，不含擁有者專用的子指令與私有擴充的指令）。每個指令取下列最差的一項：小吉離線（維護中）、指令沒有載入（異常）、最近連續 3 次執行時丟出例外且最後一次在 15 分鐘內（異常，一次成功就恢復）、所屬功能卡異常或維護中、依賴的外部服務（Claude、記憶庫、天氣、`/stock` 的行情來源）異常或未設定、讀不到資料庫（維護中）；指令有一個子指令異常時，整個指令顯示異常，任何指令異常會讓整體狀態變成 degraded。只公開狀態與一個原因代碼，不公開執行時間、次數、使用者或錯誤內容。指令自己接住錯誤、只回覆失敗訊息的情況，以及開局後的按鈕操作，都不算在執行結果裡。依賴關係寫在 `src/platform/publicCommandStatus.js` 的 `COMMAND_DEPENDENCIES`。快照多了 `commands` 欄位：**先部署狀態 Worker，再更新小吉**；舊的 Worker 會拒收含 `commands` 的快照，新的 Worker 仍接受不含 `commands` 的舊快照（指令顯示未知）。完全拿不到即時指令狀態時（狀態服務連不上，或運作中的小吉還沒回報指令），指令仍顯示未知，旁邊附上上次版本的離線健檢結果：發版前在本機跑健檢後，執行 `node scripts/build-status-health-check.js` 把 `data/health/public-commands.json` 寫進 `website/statusHealthCheck.js`，隨該版本一起匯出；只會寫入公開指令路徑的通過或未通過，沒有原因文字。
+- **狀態頁的斜線指令**：官網狀態頁另外列出每個公開斜線指令與子指令（`src/platform/catalogs/commandCatalog.js` 的公開指令，不含擁有者專用的子指令與私有擴充的指令）。每個指令取下列最差的一項：小吉離線（維護中）、指令沒有載入（異常）、最近連續 3 次執行時丟出例外且最後一次在 15 分鐘內（異常，一次成功就恢復）、所屬功能卡異常或維護中、依賴的外部服務（Claude、記憶庫、天氣、`/stock` 的行情來源）異常或未設定、讀不到資料庫（維護中）；指令有一個子指令異常時，整個指令顯示異常，任何指令異常會讓整體狀態變成 degraded。只公開狀態與一個原因代碼，不公開執行時間、次數、使用者或錯誤內容。指令自己接住錯誤、只回覆失敗訊息的情況，以及開局後的按鈕操作，都不算在執行結果裡。依賴關係寫在 `src/platform/publicCommandStatus.js` 的 `COMMAND_DEPENDENCIES`。快照多了 `commands` 欄位：**先部署狀態 Worker，再更新小吉**；舊的 Worker 會拒收含 `commands` 的快照，新的 Worker 仍接受不含 `commands` 的舊快照（指令顯示未知）。完全拿不到即時指令狀態時（狀態服務連不上，或運作中的小吉還沒回報指令），指令仍顯示未知，旁邊附上上次版本的離線健檢結果：發版前在本機跑健檢後，執行 `node scripts/build-status-health-check.js` 把 `data/health/public-commands.json` 寫進 `website/statusHealthCheck.js`，隨該版本一起匯出；只會寫入公開指令路徑的通過或未通過，沒有原因文字。
 - **結束碼 3**：下列情況會在停止時以結束碼 3 結束；原本就以其他非零結束碼結束時，維持原結束碼。
   - 啟動檢查發現異常而停用某個用途（總開關、test-control 的政策停用，以及上述 `stopping` 的情況都不算）；
   - 登入身分不符；
@@ -242,7 +247,7 @@ Discord Developer Portal 需開啟 Server Members Intent 與 Message Content Int
   - 緊急私訊的戳記無法讀取、格式不對或寫不進去；
   - 執行中隔離標記與戳記都寫不進去（`SIDE_EFFECT_QUARANTINE_PERSIST_FAILED`），或停止時三個隔離位置都沒有寫成（`LEDGER_QUARANTINE_UNPERSISTED`）；
   - Owner 安全通知拒收啟動時交付的 Owner 帳本（`OWNER_SAFETY_LEDGER_UNAVAILABLE`）；
-  - 吉幣資料庫取代檔案之後，對資料夾的 fsync 失敗（`COIN_DB_DIRECTORY_SYNC_FAILED`，`purpose=coin-database`）。
+  - 吉幣資料庫建立新檔之後，對資料夾的 fsync 失敗（`COIN_DB_DIRECTORY_SYNC_FAILED`，`purpose=coin-database`）。
 
   功能本身拒收已交付的帳本，不會讓結束碼變成 3，只透過私訊與狀態頁通報；Owner 帳本是唯一的例外。其他通知都要經過 Owner 帳本，它被拒收時只剩每 6 小時最多一則的緊急私訊能告訴 Owner，所以另外列入升級通報；拒收的原因都出在 Owner 帳本本身（已故障或被隔離、綁定的身分不符、與其他資料共用路徑，或保存的私訊頻道證明驗證不過）。
 
@@ -257,10 +262,26 @@ Discord Developer Portal 需開啟 Server Members Intent 與 Message Content Int
 
 - 停止時，小吉先停止接收新事件，並等進行中的送出完成（每筆最多 15 秒），再把每份帳本目前的位置（lastSeen）寫回吉幣資料庫的登記並等隔離旗標寫完，這段最多 5 秒（test-control 為 3 秒），最後關閉帳本。這段逾時或寫不進去都以結束碼 3 通報。執行中每小時也會寫一次 lastSeen。下次啟動時，帳本若落後於 lastSeen，就判定為被還原成舊版（`LEDGER_ROLLBACK`）。
 - 帳本開啟期間由小吉獨占。執行中不可直接複製帳本檔案，也不可用任何資料庫工具開啟。
-- 執行中不可替換、還原或編輯吉幣資料庫檔案，必須先停止小吉。小吉把整個吉幣資料庫放在記憶體，只在記憶體和上一次成功寫入的內容不同時才寫檔：執行中被換掉或改過的檔案不會被察覺，之後的寫入也會用記憶體的內容把它整個蓋掉。
-- 備份前必須先停止小吉，再把吉幣資料庫、`safety/` 與 `safety-witness/` 整組一起複製；帳本旁若有 `-wal` 檔，也要一起複製。
+- 執行中不可替換、還原或編輯吉幣資料庫檔案，必須先停止小吉。執行中小吉獨占開著這個檔案，最新的已提交交易可能還在旁邊的 `-wal` 裡，只複製或替換主檔都會出錯。
+- 備份前必須先停止小吉，再把吉幣資料庫、`safety/` 與 `safety-witness/` 整組一起複製。正常停止後吉幣資料庫旁邊不會有 `-wal`；吉幣資料庫或帳本旁若有 `-wal` 檔（上次沒有正常停止），也要一起複製。
 - 只還原其中一部分（例如只還原吉幣資料庫，或少了 `safety-witness/`）會被偵測到，並停用對應的用途。三者一起還原到同一份舊備份則**偵測不到**：還原後的帳本已經忘了備份之後送出的事件，直接啟動可能重送。所以還原整個資料夾的備份之後、啟動之前，必須先跑 status，再對所有用途 reinit；新的 cutover 之前的事件不補送。
 - status 回報某份帳本的 integrity 不是 `ok` 時，不得直接啟動；先保留完整複本並查明原因。
+
+### 第一次部署這個版本與退回舊版
+
+這個版本起，吉幣資料庫由 Node 內建的 SQLite（`node:sqlite`）以 WAL 模式開啟；之前的版本用 sql.js，只讀得懂單一個 rollback-journal 檔。資料表結構不變。
+
+部署：
+
+1. 正常停止舊版小吉（不要強制終止），照上面先把吉幣資料庫、`safety/` 與 `safety-witness/` 一起備份。
+2. 部署新版並啟動。第一次啟動只把吉幣資料庫的檔頭切換成 WAL 模式，資料不動；schema 版本落後時，會先在同一個資料夾寫一份 `xiaoji.sqlite.pre-v<舊版本>-<UTC 時間>.bak` 再升級（這種備份檔只保留最新 3 份）。執行期間資料庫旁邊會有 `xiaoji.sqlite-wal`。
+3. 正常停止時 `-wal` 會併回主檔並刪除；停止後旁邊不會有 `-wal`、`-shm` 或 `-journal`。
+
+退回之前的版本（sql.js）：
+
+1. 正常停止小吉。
+2. 執行 `node scripts/coin-db-checkpoint.js`。它讀 `.env` 的 `COIN_DB_PATH`，也可以用 `--coin-db <絕對路徑>` 指定。它把 `-wal` 併回主檔（包括當機留下的）、把檔案改回 rollback-journal 模式（`journal_mode=DELETE`），前後各做一次完整性檢查，最後確認旁邊沒有 `-wal`、`-shm`、`-journal`，並印出摘要；資料不變。小吉還開著資料庫時，它以 `database is locked` 拒絕，什麼都不改；資料庫不存在時不會建立新檔。結束碼 0 表示完成，1 表示指令有誤或被拒絕。
+3. 部署舊版並啟動。舊版不接受比它新的 schema 版本；要退回到更舊的 schema，只能用升級前留下的 `.bak`，升級之後的交易不在裡面。
 
 ### 突發停運恢復後的通知
 
@@ -432,7 +453,7 @@ npm run safety:ledger -- reset-start-failures --bot-stopped
   - 防洗頻之後，原有的限制照常生效：同一頻道同一人 3 秒內只回一次，以及 AI 呼叫本身的每人頻率（20 秒 4 次）、重複內容（15 秒）、同時呼叫數與逾時上限。
 - 社群：`/word-chain`、`/number-chain`、`/daily-riddle`、`/daily-discussion`、`/spark-relay`
 - 吉幣與商店：`/coins`、`/daily`、`/leaderboard`、`/shop`、`/inventory`、`/luxury`、`/pawn`、`/bank`、`/exchange`、`/work`、`/farm`、`/kitchen`、`/economy`、`/coin-admin`。每日簽到依台灣日期計算，每人每天一次；吉幣帳務、商店／背包、銀行帳務與籌碼依帳號在可使用小吉的伺服器間共用。工作每人同一時間只有一個全域主職；目前不開放辭職，`/work cancel` 只會顯示這項說明，工作會在選定的天數期滿後自動結算。`/leaderboard` 以 `type` 選擇吉幣餘額（預設）或總資產排行榜，總資產只顯示前 25 名；購買商品只有 `/shop buy` 一個入口。`/economy` 與 `/coin-admin` 是管理指令，全域錢包變更限小吉擁有者。
-- 遊戲：在 Discord 使用 `/board start` 從統一目錄開始個人、接龍、每日猜謎、決鬥塔台、賭場、棋盤或推理遊戲；使用 `/board status` 查看目錄與自己可見的現存遊戲。多人棋盤與推理遊戲仍可使用 `/board join/leave/stop`。賭場借款與紀錄使用 `/casino`，賭場大廳、場館與決鬥塔台的資料使用 `/casino-lobby`、`/casino-venue` 與 `/duel-tower`。不為新使用者建立網頁遊戲局。
+- 遊戲：在 Discord 使用 `/board start` 從統一目錄開始個人、接龍、每日猜謎、決鬥塔台、賭場、棋盤或推理遊戲；使用 `/board status` 查看目錄與自己可見的現存遊戲。多人棋盤與推理遊戲仍可使用 `/board join/leave/stop`。賭場借款與紀錄使用 `/casino`，賭場大廳、場館與決鬥塔台的資料使用 `/casino-lobby`、`/casino-venue` 與 `/duel-tower`。
   - **狼人殺**（6–12 人）：`/board start` 選狼人殺後，房主在等候室按鈕調整節奏、勝利條件（屠邊／屠城）、出局是否公開身分與角色數量。開局後小吉在面板訊息下建立公開討論串並在裡面主持，機器人需要「建立公開討論串」與「在討論串中傳送訊息」權限；沒有權限時主持訊息改發在原頻道，並先發一則說明。各階段由計時器推進，計時器沒觸發時（例如重新啟動）由棋盤每分鐘的檢查補上；重新啟動前超過兩分鐘的主持訊息不會重發。身分、刀口、查驗與用藥結果只出現在玩家本人看得到的回覆，不寫進 log。存活玩家連續兩次該行動或投票時沒回應會被判定離席出局；房主可用 `/board stop` 結束（記為平手）。沒有吉幣獎勵。
   - 棋盤資料表第一次載入這版時，會自動重建一次讓 `board_sessions` 接受新的遊戲種類（只改遊戲種類的 CHECK 限制，三張棋盤表的筆數不變，失敗會整筆回滾）；之後再加遊戲也會用同樣方式自動處理。
 - 農場與廚房：`/farm` 是每人一塊、跨伺服器共用的個人農場（起始 4 格，可花吉幣擴充到 8 格）：買種子播種、一鍵替整塊田澆水（成長中的每批作物第一次澆水，剩餘時間少 10%）、收成，再把作物賣給小吉；`/board start` 選「小吉農場」也會打開同一個面板。作物超過 14 天沒澆水會枯死，那格地休耕 14 天；化肥（500 吉幣）可解除休耕或讓成長中的作物立刻成熟，每格最多 5 包，用滿後那格下一次收割就荒廢，重新開墾要 3000 吉幣。`/kitchen` 用作物做料理，料理可以賣、吃掉得到只作用在農場的加成（成長加速或收成多 1 個），或每天送別人最多 5 道；收到的料理只能吃、不能賣或再送。作物與料理每人每天（台灣日期）合計最多賣 500 吉幣。資料存在吉幣資料庫自己的資料表（`farm_states` 每人一列、`farm_gift_log` 送禮紀錄），第一次使用時自動建立，不改吉幣資料庫的 schema 版本；帳務類型為 `farm_purchase`（種子、擴充、化肥、開墾）與 `farm_sale`（出售，入帳時先抵還欠款）。伺服器停用吉幣時，農場仍可澆水、收成、下廚、吃與送禮，但不能買賣。

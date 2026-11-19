@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const defaultCatalog = require('../website/commandCatalog');
+const defaultCatalog = require('../src/platform/catalogs/commandCatalog');
 const { ADMIN_MARKER, buildHelpSections } = require('../src/commands/help');
 
 const COMMAND_DOCS_PATH = path.resolve(__dirname, '..', 'docs', 'COMMANDS.md');
@@ -17,7 +17,7 @@ function renderCommandDocs(catalog = defaultCatalog) {
   const lines = [
     '# 公開指令',
     '',
-    '<!-- 此檔由 scripts/render-command-docs.js 依 website/commandCatalog.js 產生；請修改目錄後執行 node scripts/render-command-docs.js，不要直接編輯。 -->',
+    '<!-- 此檔由 scripts/render-command-docs.js 依 src/platform/catalogs/commandCatalog.js 產生；請修改目錄後執行 node scripts/render-command-docs.js，不要直接編輯。 -->',
     '',
     '公開指令以 global commands 部署，小吉所在的每個伺服器都能執行。',
     '',

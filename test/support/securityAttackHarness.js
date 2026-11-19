@@ -81,7 +81,7 @@ function assertInsideRoot(root, filePath, label) {
 // Opens a brand-new, empty coin database inside `root`. Each call starts from nothing, so a test never inherits
 // another test's rows.
 async function openAttackDatabase(root) {
-  const database = require('../../src/services/coinDatabase');
+  const database = require('../../src/systems/economy/storage/coinDatabase');
   database.resetCoinDatabaseForTests();
   const databasePath = database.getCoinDatabasePath();
   assertInsideRoot(root, databasePath, 'the coin database');
@@ -92,12 +92,12 @@ async function openAttackDatabase(root) {
 }
 
 function closeAttackDatabase(root) {
-  require('../../src/services/coinDatabase').resetCoinDatabaseForTests();
+  require('../../src/systems/economy/storage/coinDatabase').resetCoinDatabaseForTests();
   fs.rmSync(root, { recursive: true, force: true });
 }
 
 async function readRows(sql, params = []) {
-  const { withCoinDatabase } = require('../../src/services/coinDatabase');
+  const { withCoinDatabase } = require('../../src/systems/economy/storage/coinDatabase');
   return withCoinDatabase((api) => api.all(sql, params));
 }
 
@@ -108,7 +108,7 @@ async function readRow(sql, params = []) {
 // Every row of every table. "The ledger did not move" is only meaningful when no table, however unrelated it
 // looks, changed.
 async function snapshotAllTables() {
-  const { withCoinDatabase } = require('../../src/services/coinDatabase');
+  const { withCoinDatabase } = require('../../src/systems/economy/storage/coinDatabase');
   return withCoinDatabase((api) => {
     const snapshot = {};
     const tables = api.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
@@ -180,7 +180,7 @@ async function readBankBalance(userId) {
 // error, in the middle of the service's own transaction, so what the test sees is the service's real unwinding
 // and not a stand-in. `when` is a SQL condition on NEW; the returned function removes the trigger.
 async function armFault({ name, table, when = '1', event = 'INSERT' }) {
-  const { withCoinTransaction } = require('../../src/services/coinDatabase');
+  const { withCoinTransaction } = require('../../src/systems/economy/storage/coinDatabase');
   assert.match(name, /^[a-z0-9_]+$/u, 'fault names are plain identifiers');
   assert.match(table, /^[a-z0-9_]+$/u, 'fault tables are plain identifiers');
   await withCoinTransaction((api) => api.run(

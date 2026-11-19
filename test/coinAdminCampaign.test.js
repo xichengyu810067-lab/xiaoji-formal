@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 const { Collection, MessagePayload, Options, Routes } = require('discord.js');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-coin-admin-'));
@@ -19,17 +20,16 @@ const {
   getOwnerCampaignHistoryReviewPlan,
   previewOwnerCampaign,
   reviewOwnerCampaignHistory,
-} = require('../src/services/coinCampaignService');
+} = require('../src/systems/economy/coinCampaignService');
 const {
   initializeCoinDatabase,
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
-  setCoinDatabaseDurabilityForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const { setGuildEconomyEnabled } = require('../src/services/coinService');
-const { getWalletPlayerWithApi, setDebtWithApi } = require('../src/services/coinWalletService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const { setGuildEconomyEnabled } = require('../src/systems/economy/coinService');
+const { getWalletPlayerWithApi, setDebtWithApi } = require('../src/systems/economy/coinWalletService');
 const { grantRewardOnceV2WithApi } = require('../src/services/featurePlatformService');
 const { installEgressGuard } = require('../src/platform/egressGuard');
 const { createEgressLimiter } = require('../src/platform/egressLimiter');
@@ -268,6 +268,18 @@ async function roleCampaignSetup(guildId, roleId, userIds) {
   return { role, guild };
 }
 
+
+// Whether a connection's file is the given one. SQLite reports the path it resolved (macOS reaches its temp
+// folder through the /var -> /private/var link, Windows may shorten names), so both sides are resolved first.
+function isSameDatabaseFile(location, target) {
+  if (!location) return false;
+  try {
+    return fs.realpathSync.native(String(location)) === fs.realpathSync.native(target);
+  } catch (_error) {
+    return path.resolve(String(location)) === path.resolve(target);
+  }
+}
+
 test('正式 Slash 只保留 add/history，add 的 user 與 role 均為選填二選一', async () => {
   const json = coinAdmin.data.toJSON();
   const names = json.options.map((option) => option.name);
@@ -285,13 +297,13 @@ test('正式 Slash 只保留 add/history，add 的 user 與 role 均為選填二
   assert.deepEqual(history.options.find((option) => option.name === 'action').choices.map((choice) => choice.value),
     ['plan', 'review', 'classify', 'import']);
 
-  const guild = guildWithMembers('guild-xor', [member('xor-user', ['xor-role'])]);
+  const guild = guildWithMembers('guild-xor', [member('760000000000000401', ['xor-role'])]);
   const neither = slashInteraction('add', { amount: 10, reason: 'xor neither' }, guild, 'xor-neither');
   await coinAdmin.execute(neither.interaction);
   assert.match(neither.output.replies[0].content, /請確認發放對象/u);
 
   const both = slashInteraction('add', {
-    user: { id: 'xor-user', username: 'Xor' },
+    user: { id: '760000000000000401', username: 'Xor' },
     role: { id: 'xor-role', name: 'Xor role' },
     amount: 10,
     reason: 'xor both',
@@ -337,11 +349,11 @@ test('完整名單必須與穩定 memberCount 完全相符，角色名單排除 
 });
 
 test('單人私密預覽綁定 actor/guild/op/token/期限，重播與重啟不重複 admin_add', async () => {
-  const guild = guildWithMembers('guild-user', [member('target-user', [])]);
+  const guild = guildWithMembers('guild-user', [member('760000000000000402', [])]);
   await setGuildEconomyEnabled(guild.id, false, { operatorId: 'owner-user' });
-  await ensureWallet(guild.id, 'target-user', 40);
+  await ensureWallet(guild.id, '760000000000000402', 40);
   const slash = slashInteraction('add', {
-    user: { id: 'target-user', username: 'Target' },
+    user: { id: '760000000000000402', username: 'Target' },
     amount: 100,
     reason: 'synthetic manual add',
   }, guild, 'single-operation');
@@ -368,9 +380,9 @@ test('單人私密預覽綁定 actor/guild/op/token/期限，重播與重啟不�
   await Promise.all([coinAdmin.handleComponent(first.interaction), coinAdmin.handleComponent(second.interaction)]);
 
   let state = await withCoinDatabase((api) => ({
-    wallet: api.get('SELECT balance FROM coin_wallets WHERE user_id = ?', ['target-user']),
-    debt: api.get('SELECT amount FROM coin_debts WHERE user_id = ?', ['target-user']),
-    transactions: api.get("SELECT COUNT(*) AS count FROM coin_transactions WHERE user_id = ? AND type = 'admin_add'", ['target-user']),
+    wallet: api.get('SELECT balance FROM coin_wallets WHERE user_id = ?', ['760000000000000402']),
+    debt: api.get('SELECT amount FROM coin_debts WHERE user_id = ?', ['760000000000000402']),
+    transactions: api.get("SELECT COUNT(*) AS count FROM coin_transactions WHERE user_id = ? AND type = 'admin_add'", ['760000000000000402']),
     receipts: api.get("SELECT COUNT(*) AS count FROM coin_operation_receipts WHERE operation_id = 'single-operation'"),
     enabled: api.get('SELECT enabled FROM coin_guild_settings WHERE guild_id = ?', [guild.id]),
   }));
@@ -384,8 +396,8 @@ test('單人私密預覽綁定 actor/guild/op/token/期限，重播與重啟不�
   const replay = componentInteraction(preview, customId, guild, { id: 'single-confirm-after-restart' });
   await coinAdmin.handleComponent(replay.interaction);
   state = await withCoinDatabase((api) => ({
-    balance: api.get('SELECT balance FROM coin_wallets WHERE user_id = ?', ['target-user']).balance,
-    transactions: api.get("SELECT COUNT(*) AS count FROM coin_transactions WHERE user_id = ? AND type = 'admin_add'", ['target-user']).count,
+    balance: api.get('SELECT balance FROM coin_wallets WHERE user_id = ?', ['760000000000000402']).balance,
+    transactions: api.get("SELECT COUNT(*) AS count FROM coin_transactions WHERE user_id = ? AND type = 'admin_add'", ['760000000000000402']).count,
   }));
   assert.deepEqual(state, { balance: 100, transactions: 1 });
 
@@ -393,9 +405,9 @@ test('單人私密預覽綁定 actor/guild/op/token/期限，重播與重啟不�
   await coinAdmin.handleComponent(tooLateCancel.interaction);
   assert.match(tooLateCancel.output.updates[0].content, /已完成，不能取消/u);
 
-  await ensureWallet(guild.id, 'cancelled-user');
+  await ensureWallet(guild.id, '760000000000000403');
   const cancelledSlash = slashInteraction('add', {
-    user: { id: 'cancelled-user', username: 'Cancelled' }, amount: 55, reason: 'cancel wins',
+    user: { id: '760000000000000403', username: 'Cancelled' }, amount: 55, reason: 'cancel wins',
   }, guild, 'single-cancel-operation');
   await coinAdmin.execute(cancelledSlash.interaction);
   const cancelledPreview = cancelledSlash.output.replies[0];
@@ -411,8 +423,8 @@ test('單人私密預覽綁定 actor/guild/op/token/期限，重播與重啟不�
     { id: 'single-delayed-confirm-after-restart' });
   await coinAdmin.handleComponent(restartedDelayed.interaction);
   const cancelledState = await withCoinDatabase((api) => ({
-    balance: api.get("SELECT balance FROM coin_wallets WHERE user_id = 'cancelled-user'").balance,
-    transactions: api.get("SELECT COUNT(*) AS count FROM coin_transactions WHERE user_id = 'cancelled-user'").count,
+    balance: api.get("SELECT balance FROM coin_wallets WHERE user_id = '760000000000000403'").balance,
+    transactions: api.get("SELECT COUNT(*) AS count FROM coin_transactions WHERE user_id = '760000000000000403'").count,
     receipt: api.get("SELECT COUNT(*) AS count FROM coin_operation_receipts WHERE operation_id = 'single-cancel-operation'").count,
     status: api.get("SELECT status FROM coin_admin_add_confirmations WHERE operation_id = 'single-cancel-operation'").status,
   }));
@@ -420,9 +432,9 @@ test('單人私密預覽綁定 actor/guild/op/token/期限，重播與重啟不�
 });
 
 test('單人加幣預覽的到期時間是相對時間標記，不是原始秒數', async () => {
-  const guild = guildWithMembers('guild-expiry-display', [member('expiry-target', [])]);
+  const guild = guildWithMembers('guild-expiry-display', [member('760000000000000404', [])]);
   const slash = slashInteraction('add', {
-    user: { id: 'expiry-target', username: 'Expiry' }, amount: 10, reason: 'synthetic expiry display',
+    user: { id: '760000000000000404', username: 'Expiry' }, amount: 10, reason: 'synthetic expiry display',
   }, guild, 'expiry-display-operation');
   await coinAdmin.execute(slash.interaction);
   const stored = await getAddConfirmation('expiry-display-operation');
@@ -433,7 +445,7 @@ test('單人加幣預覽的到期時間是相對時間標記，不是原始秒�
 });
 
 test('單人加幣完成訊息用成員顯示名稱，成員已離開時用帳號名，不顯示原始 ID', async () => {
-  const members = new Map([['named-target', member('named-target', [], { name: '伺服器暱稱' })]]);
+  const members = new Map([['760000000000000405', member('760000000000000405', [], { name: '伺服器暱稱' })]]);
   const guild = {
     id: 'guild-name-reply',
     memberCount: members.size,
@@ -442,9 +454,9 @@ test('單人加幣完成訊息用成員顯示名稱，成員已離開時用帳�
       return members.get(id);
     } },
   };
-  await ensureWallet(guild.id, 'named-target');
+  await ensureWallet(guild.id, '760000000000000405');
   const slash = slashInteraction('add', {
-    user: { id: 'named-target', username: 'Named' }, amount: 20, reason: 'synthetic named reply',
+    user: { id: '760000000000000405', username: 'Named' }, amount: 20, reason: 'synthetic named reply',
   }, guild, 'named-reply-operation');
   await coinAdmin.execute(slash.interaction);
   const preview = slash.output.replies[0];
@@ -452,12 +464,12 @@ test('單人加幣完成訊息用成員顯示名稱，成員已離開時用帳�
   await coinAdmin.handleComponent(confirm.interaction);
   const content = confirm.output.edits[0].content;
   assert.match(content, /^單人加幣完成。\n目標：伺服器暱稱\n/u);
-  assert.doesNotMatch(content, /named-target/u);
+  assert.doesNotMatch(content, /760000000000000405/u);
 
   const leftGuild = { id: 'guild-left-reply', memberCount: 0, members: { fetch: async () => { throw new Error('Unknown Member'); } } };
-  await ensureWallet(leftGuild.id, 'left-target');
+  await ensureWallet(leftGuild.id, '760000000000000406');
   const leftSlash = slashInteraction('add', {
-    user: { id: 'left-target', username: 'Left' }, amount: 20, reason: 'synthetic left reply',
+    user: { id: '760000000000000406', username: 'Left' }, amount: 20, reason: 'synthetic left reply',
   }, leftGuild, 'left-reply-operation');
   await coinAdmin.execute(leftSlash.interaction);
   const leftPreview = leftSlash.output.replies[0];
@@ -468,7 +480,7 @@ test('單人加幣完成訊息用成員顯示名稱，成員已離開時用帳�
   await coinAdmin.handleComponent(leftConfirm.interaction);
   const leftContent = leftConfirm.output.edits[0].content;
   assert.match(leftContent, /^單人加幣完成。\n目標：已離開的成員\n/u);
-  assert.doesNotMatch(leftContent, /left-target/u);
+  assert.doesNotMatch(leftContent, /760000000000000406/u);
 });
 
 test('角色預覽列出完整非 bot 名單，history 整併核對後並行確認只發一次並抵扣欠款', async () => {
@@ -753,6 +765,32 @@ test('身分組確認被擋下後先核對歷史：再次確認（同時按兩�
   assert.deepEqual(await campaignLedger(campaignId, users), paidLedger(users, 35));
 });
 
+// Calls onWrite after every COMMIT of the coin database that wrote something, with the database file and its -wal as
+// they are then: a crash right after that COMMIT leaves exactly these two files. Returns the function that stops it.
+function watchCoinCommits(onWrite) {
+  const original = DatabaseSync.prototype.exec;
+  const dbPath = path.resolve(process.env.COIN_DB_PATH);
+  const files = () => ({
+    main: fs.readFileSync(dbPath),
+    wal: fs.existsSync(`${dbPath}-wal`) ? fs.readFileSync(`${dbPath}-wal`) : null,
+  });
+  const same = (left, right) => left.main.equals(right.main) &&
+    (left.wal === null ? right.wal === null : right.wal !== null && left.wal.equals(right.wal));
+  let last = files();
+  DatabaseSync.prototype.exec = function exec(sql) {
+    const result = original.call(this, sql);
+    if (/^\s*COMMIT\s*$/iu.test(String(sql)) && isSameDatabaseFile(this.location(), dbPath)) {
+      const now = files();
+      if (!same(now, last)) {
+        last = now;
+        onWrite(now);
+      }
+    }
+    return result;
+  };
+  return () => { DatabaseSync.prototype.exec = original; };
+}
+
 test('身分組確認在第一筆入帳後中斷：重啟後是 partial，取消被拒，續跑只補發其餘成員', async () => {
   const users = ['crash-user-1', 'crash-user-2'];
   const campaignId = 'campaign-crash-after-first';
@@ -761,17 +799,14 @@ test('身分組確認在第一筆入帳後中斷：重啟後是 partial，取消
   const preview = await rolePreview(guild, role, { campaignId, operationId, amount: 45 });
   await reviewEmptyCampaign(campaignId, users);
 
-  // Keeps the database file as every write of the confirm left it: a crash right after a write leaves that file.
+  // Keeps the database files as every write of the confirm left them: a crash right after a write leaves those files.
   const images = [];
-  setCoinDatabaseDurabilityForTests({ filesystem: { ...fs, renameSync(from, to) {
-    fs.renameSync(from, to);
-    images.push(fs.readFileSync(to));
-  } } });
+  const unwatch = watchCoinCommits((image) => images.push(image));
   let confirmed;
   try {
     confirmed = await press(preview, guild, 'crash-confirm');
   } finally {
-    setCoinDatabaseDurabilityForTests(null);
+    unwatch();
   }
   assert.match(confirmText(confirmed), /本輪新發 2 人/u);
   // The press writes the two payments and then its result; checking the press writes nothing.
@@ -779,7 +814,8 @@ test('身分組確認在第一筆入帳後中斷：重啟後是 partial，取消
 
   // The crash right after the first payment: that payment and the state that forbids cancelling are on disk together.
   resetCoinDatabaseForTests();
-  fs.writeFileSync(process.env.COIN_DB_PATH, images[0]);
+  fs.writeFileSync(process.env.COIN_DB_PATH, images[0].main);
+  if (images[0].wal) fs.writeFileSync(`${process.env.COIN_DB_PATH}-wal`, images[0].wal);
   await initializeCoinDatabase();
   const crashed = await getAddConfirmation(operationId);
   assert.deepEqual([crashed.status, crashed.result], ['partial', null]);
@@ -830,15 +866,14 @@ test('確認進行中、第一筆入帳後按取消：取消被拒，該次確�
 
   // The first write of the confirm is its first payment; a cancel sent while it is written runs right after it.
   let cancelled = null;
-  setCoinDatabaseDurabilityForTests({ filesystem: { ...fs, renameSync(from, to) {
-    fs.renameSync(from, to);
+  const unwatch = watchCoinCommits(() => {
     cancelled ??= cancelAddConfirmation(controlFrom(buttonId(preview, 1), guild.id));
-  } } });
+  });
   let confirmed;
   try {
     confirmed = await press(preview, guild, 'race-after-confirm');
   } finally {
-    setCoinDatabaseDurabilityForTests(null);
+    unwatch();
   }
   assert.equal((await cancelled).state, 'partial');
   assert.match(confirmText(confirmed), /本輪新發 2 人/u);

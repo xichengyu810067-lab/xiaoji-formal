@@ -14,11 +14,37 @@ const FORBIDDEN_SEGMENTS = new Set([
   'storage',
 ]);
 const LIVE_TEST_FILE_NAME_PATTERN = /^livetest/i;
-const BOARD_STORAGE_SOURCES = new Set([
-  'src/games/storage/boardSchema.js',
-  'src/games/storage/sqliteBoardStore.js',
+// Source files that sit in a directory named storage and are public code, not stored data: the board
+// storage and the coin database of the economy. They are listed one by one, so a new file in such a
+// directory is refused until it is added here.
+const STORAGE_SOURCES = new Set([
   'src/systems/games/board/storage/boardSchema.js',
   'src/systems/games/board/storage/sqliteBoardStore.js',
+  'src/systems/economy/storage/coinDatabase.js',
+  'src/systems/economy/storage/errors.js',
+  'src/systems/economy/storage/sqlHelpers.js',
+  'src/systems/economy/storage/durableFile.js',
+  'src/systems/economy/storage/safetyRegistrations.js',
+  'src/systems/economy/storage/connection.js',
+  'src/systems/economy/storage/schema/index.js',
+  'src/systems/economy/storage/schema/metadata.js',
+  'src/systems/economy/storage/schema/economy.js',
+  'src/systems/economy/storage/schema/work.js',
+  'src/systems/economy/storage/schema/casino.js',
+  'src/systems/economy/storage/schema/games.js',
+  'src/systems/economy/storage/schema/community.js',
+  'src/systems/economy/storage/schema/conversation.js',
+  'src/systems/economy/storage/schema/featurePlatform.js',
+  'src/systems/economy/storage/schema/releaseAnnouncements.js',
+  'src/systems/economy/storage/migrations/index.js',
+  'src/systems/economy/storage/migrations/featurePlatformSchema.js',
+  'src/systems/economy/storage/migrations/v12v13Chains.js',
+  'src/systems/economy/storage/migrations/v15DailyRiddle.js',
+  'src/systems/economy/storage/migrations/v18GameSessions.js',
+  'src/systems/economy/storage/migrations/v20GlobalWallet.js',
+  'src/systems/economy/storage/migrations/v21GlobalEconomy.js',
+  'src/systems/economy/storage/migrations/v22GlobalEconomy.js',
+  'src/systems/economy/storage/migrations/staleGameHealthCleanup.js',
 ]);
 // Files that hold local secrets, refused by name. .env and .env.* (but not .env.example) are handled
 // separately below. The others are the names .gitignore keeps out of Git for the same reason, so that a
@@ -106,9 +132,9 @@ function resolveSyntheticFixtures(syntheticFixtures) {
 function assertAllowedPath(relativePath, { syntheticFixtures } = {}) {
   const normalized = normalizeRelativePath(relativePath);
   const parts = normalized.split('/');
-  const isBoardStorageSource = BOARD_STORAGE_SOURCES.has(normalized);
+  const isStorageSource = STORAGE_SOURCES.has(normalized);
   if (parts.some((part) => FORBIDDEN_SEGMENTS.has(part.toLowerCase()) &&
-      !(isBoardStorageSource && part.toLowerCase() === 'storage'))) {
+      !(isStorageSource && part.toLowerCase() === 'storage'))) {
     throw new Error(`Public export refuses protected path: ${normalized}`);
   }
   const baseName = parts.at(-1).toLowerCase();
@@ -348,7 +374,6 @@ const PUBLIC_PACKAGE_SCRIPTS = Object.freeze([
   'site:preview',
   'site:check',
   'site:render',
-  'games:preview',
 ]);
 
 // Keeps only the allowed scripts of the exported package.json. A package that holds no other script is left

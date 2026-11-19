@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const defaultCatalog = require('../website/commandCatalog');
+const defaultCatalog = require('../src/platform/catalogs/commandCatalog');
 const { buildHelpSections } = require('../src/commands/help');
 const { COMMAND_DOCS_PATH, renderCommandDocs } = require('./render-command-docs');
 

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { AI_PROVIDER_RATE_LIMIT_REPLY, finalizeAssistantReply, getMemoryKey } = require('../src/services/aiService');
+const { AI_PROVIDER_RATE_LIMIT_REPLY, finalizeAssistantReply, getMemoryKey } = require('../src/systems/conversation/provider');
 
 test('chat memory separates people and channels', () => {
   const first = getMemoryKey({ guildId: 'guild-a', channelId: 'room-a', userId: 'person-a' });

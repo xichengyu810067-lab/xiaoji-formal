@@ -1,7 +1,7 @@
 if (process.env.XIAOJI_RUNTIME_MODE !== 'test-control') require('dotenv').config({ quiet: true });
 
 const { REST, Routes } = require('discord.js');
-const defaultCommandCatalog = require('./website/commandCatalog');
+const defaultCommandCatalog = require('./src/platform/catalogs/commandCatalog');
 const {
   assertNoPublicPrivateCommandCollisions,
   assertPublicCommandCatalog,

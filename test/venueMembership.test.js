@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { verifyVenueMembers } = require('../src/platform/venueMembership');
+const { verifyVenueMembers } = require('../src/systems/casino/venueMembership');
 
 function member(id, guildId = '100', bot = false) {
   return { id, guild: { id: guildId }, user: { bot } };

@@ -15,7 +15,7 @@ const { FAILURES_TO_BREAK, FAILURE_MEMORY_MS } = require('./serviceHealth');
 const NAME_PATTERN = /^[a-z0-9_-]{1,32}$/u;
 const state = new Map();
 
-// "command" or "command subcommand"; a subcommand inside a group is "command group sub", as in website/commandCatalog.js.
+// "command" or "command subcommand"; a subcommand inside a group is "command group sub", as in src/platform/catalogs/commandCatalog.js.
 function commandPath(command, subcommand = null) {
   return subcommand ? `${command} ${subcommand}` : command;
 }

@@ -1,6 +1,6 @@
 'use strict';
 
-const { GAME_CATALOG, getGame } = require('../../website/gameCatalog');
+const { GAME_CATALOG, getGame } = require('../platform/catalogs/gameCatalog');
 const { getBoardRuntime } = require('../systems/games/board/core/boardRuntimeRegistry');
 const { getSoloRuntime } = require('../systems/games/soloRuntimeRegistry');
 const { launchWordChain } = require('../systems/community/discord/wordChainLaunch');
@@ -8,10 +8,10 @@ const { launchNumberChain } = require('../systems/community/discord/numberChainL
 const { executeCasinoGame } = require('../systems/casino/discord/casinoLaunch');
 const { executeDuelTowerGame } = require('../systems/casino/discord/duelTowerLaunch');
 const { buildBlackjackPayload, getActiveBlackjackSession } = require('../services/casinoService');
-const { getDailyRiddleEvent, getRiddlePhase, openOrGetDailyRiddle } = require('../services/dailyRiddleService');
-const { describeNumberChainStatus, getNumberChainStatus } = require('../services/numberChainService');
-const { describeWordChainStatus, getWordChainStatus } = require('../services/wordChainService');
-const { replyCoinError } = require('../utils/coinPresentation');
+const { getDailyRiddleEvent, getRiddlePhase, openOrGetDailyRiddle } = require('../systems/community/daily/dailyRiddleService');
+const { describeNumberChainStatus, getNumberChainStatus } = require('../systems/community/chains/numberChainService');
+const { describeWordChainStatus, getWordChainStatus } = require('../systems/community/chains/wordChainService');
+const { replyCoinError } = require('../systems/economy/coinPresentation');
 const { replyEphemeral } = require('../utils/moderation');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');
 const { openFarmPanel } = require('../systems/farm/discord/farmDiscord');

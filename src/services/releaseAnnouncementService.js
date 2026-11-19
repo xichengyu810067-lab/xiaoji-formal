@@ -7,7 +7,7 @@ const {
   parseStableSemverTag,
 } = require('../platform/linkPolicy');
 const { cachedBotMember, resolveBotMember } = require('../utils/botMember');
-const { withCoinDatabase, withCoinTransaction } = require('./coinDatabase');
+const { withCoinDatabase, withCoinTransaction } = require('../systems/economy/storage/coinDatabase');
 const {
   getGuildFeatureSetting,
   recordFeatureUsage,

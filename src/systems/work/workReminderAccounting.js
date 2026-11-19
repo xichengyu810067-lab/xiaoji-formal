@@ -1,6 +1,6 @@
 'use strict';
 
-const { readActiveWorkReminderSource } = require('../../services/coinDatabase');
+const { readActiveWorkReminderSource } = require('../economy/storage/coinDatabase');
 const { normalizeReminderSource, reminderOperationId } = require('../safety/workReminderSource');
 
 function sameNullable(left, right) {

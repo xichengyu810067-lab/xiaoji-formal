@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { buyChips, cashoutChips, getChipBalance, getChipHistory, MAX_CHIP_AMOUNT } = require('../services/chipService');
-const { getPlayerBalance } = require('../services/coinService');
-const { formatChips, formatCoins, replyCoinError } = require('../utils/coinPresentation');
+const { buyChips, cashoutChips, getChipBalance, getChipHistory, MAX_CHIP_AMOUNT } = require('../systems/economy/chipService');
+const { getPlayerBalance } = require('../systems/economy/coinService');
+const { formatChips, formatCoins, replyCoinError } = require('../systems/economy/coinPresentation');
 const { fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 const ledgerTypeLabels = {

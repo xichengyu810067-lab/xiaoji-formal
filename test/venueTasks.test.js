@@ -2,7 +2,7 @@
 
 // Unit tests for src/systems/work/venueTasks.js.
 //
-// Every port runs inside a real sql.js coin transaction on a fresh synthetic COIN_DB_PATH and
+// Every port runs inside a real coin transaction (node:sqlite) on a fresh synthetic COIN_DB_PATH and
 // is compared with the statements it replaced.  The reference* functions below are those
 // statements copied byte for byte (SQL text, bound values and their order) from
 // src/services/venueService.js at 1d3fcc2; the comments give the original line numbers.  Each
@@ -34,8 +34,8 @@ const {
   readCoinSchemaVersionWithApi,
   resetCoinDatabaseForTests,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const { TASK_STATUS, WAITER_JOB_NAMES } = require('../src/services/workService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const { TASK_STATUS, WAITER_JOB_NAMES } = require('../src/systems/work/workService');
 const venueService = require('../src/services/venueService');
 const venueTasks = require('../src/systems/work/venueTasks');
 const { countMakerItemsInWindowWithApi } = require('../src/systems/casino/venueOrders');
@@ -554,6 +554,8 @@ test('venueTasks is a leaf module of *WithApi ports that never controls a transa
 
 test('venueService keeps its public exports after the move', () => {
   assert.deepEqual(Object.keys(venueService).sort(), [
+    'MAX_MENU_ITEMS_PER_GUILD',
+    'MAX_MENU_ITEMS_PER_MEMBER',
     'ORDER_RATE_LIMIT_PER_MINUTE',
     'VENUE_BONUS_AMOUNT',
     'VENUE_BONUS_THRESHOLD',

@@ -21,27 +21,27 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const { createPublicEffectAuthority } = require('../src/platform/publicEffectGrant');
 const { configurePublicEffectAdapter } = require('../src/platform/publicEffectAdapter');
 const { configureChainReactionFence } = require('../src/systems/safety/chainReactionFence');
 const {
   dispatchImmediateChainReaction,
-} = require('../src/services/chainReactionDelivery');
+} = require('../src/systems/community/chains/chainReactionDelivery');
 const {
   startWordChain,
   acceptWordChainMessage,
   processWordChainReactionOutbox,
   stopWordChain,
-} = require('../src/services/wordChainService');
+} = require('../src/systems/community/chains/wordChainService');
 const {
   startNumberChain,
   acceptNumberChainMessage,
   processNumberChainReactionOutbox,
   stopNumberChain,
   MAX_TARGET,
-} = require('../src/services/numberChainService');
-const { corpusVersion } = require('../src/services/wordChainLexicon');
+} = require('../src/systems/community/chains/numberChainService');
+const { corpusVersion } = require('../src/systems/community/chains/wordChainLexicon');
 const {
   processWorkPenaltyAnnouncements,
   sendWorkPenaltyAnnouncement,

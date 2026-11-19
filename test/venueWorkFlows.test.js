@@ -21,6 +21,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-venue-work-flows-'));
 process.env.COIN_DB_PATH = path.join(root, 'synthetic.sqlite');
@@ -34,9 +35,9 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const { adjustPlayerBalance } = require('../src/services/coinService');
-const { ChipLedgerType, debitChipsForCasinoWithApi } = require('../src/services/chipService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance } = require('../src/systems/economy/coinService');
+const { ChipLedgerType, debitChipsForCasinoWithApi } = require('../src/systems/economy/chipService');
 const {
   VENUE_BONUS_AMOUNT,
   VENUE_BONUS_THRESHOLD,
@@ -63,7 +64,7 @@ const {
   reportWork,
   reviewWorkSubmission,
   startVenueJobs,
-} = require('../src/services/workService');
+} = require('../src/systems/work/workService');
 const { createRuntimeRewardCoordinator } = require('../src/coordinators/rewardRuntime');
 const { configureWorkRewardCoordinator } = require('../src/systems/work/workRewardPort');
 const {
@@ -238,6 +239,18 @@ async function readTaskStatuses(messageId) {
   return (await readRows(
     'SELECT user_id, job_id, status FROM coin_work_tasks WHERE message_id = ? ORDER BY id', [messageId]
   )).map((row) => [row.user_id, row.job_id, row.status]);
+}
+
+
+// Whether a connection's file is the given one. SQLite reports the path it resolved (macOS reaches its temp
+// folder through the /var -> /private/var link, Windows may shorten names), so both sides are resolved first.
+function isSameDatabaseFile(location, target) {
+  if (!location) return false;
+  try {
+    return fs.realpathSync.native(String(location)) === fs.realpathSync.native(target);
+  } catch (_error) {
+    return path.resolve(String(location)) === path.resolve(target);
+  }
 }
 
 test('primary venue order runs from order to payroll with task, tip escrow and maker bonus', async (t) => {
@@ -465,14 +478,14 @@ test('primary cycle settlement grants once across a failed persist, overlapping 
   assertSyntheticPath(databasePath);
   const fileBeforeSettlement = sha256File(databasePath);
 
-  // 1. The settlement commit cannot reach disk: the in-memory state is rolled back and
-  //    the file is untouched, so no reward exists anywhere.
-  const originalRenameSync = fs.renameSync;
-  const crash = t.mock.method(fs, 'renameSync', function renameSync(from, to) {
-    if (path.resolve(String(to)) === path.resolve(databasePath)) {
+  // 1. The settlement commit cannot reach disk: the COMMIT fails, the transaction is rolled
+  //    back and the file is untouched, so no reward exists anywhere.
+  const originalExec = DatabaseSync.prototype.exec;
+  const crash = t.mock.method(DatabaseSync.prototype, 'exec', function exec(sql) {
+    if (/^\s*COMMIT\s*$/iu.test(String(sql)) && isSameDatabaseFile(this.location(), databasePath)) {
       throw Object.assign(new Error('synthetic crash before the settlement reached disk'), { code: 'EIO' });
     }
-    return originalRenameSync.call(fs, from, to);
+    return originalExec.call(this, sql);
   });
   const crashed = await processDueJobs(null);
   crash.mock.restore();

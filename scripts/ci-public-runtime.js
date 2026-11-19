@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 async function main() {
@@ -18,18 +19,25 @@ async function main() {
   const png = new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="blue"/></svg>').render().asPng();
   assert.ok(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])));
 
-  const initSqlJs = require('sql.js');
-  const SQL = await initSqlJs();
-  const first = new SQL.Database();
-  first.run('CREATE TABLE ledger (amount INTEGER NOT NULL)');
-  first.run('BEGIN TRANSACTION');
-  first.run('INSERT INTO ledger VALUES (7)');
-  first.run('COMMIT');
-  const saved = first.export();
-  first.close();
-  const reopened = new SQL.Database(saved);
-  assert.deepEqual(reopened.exec('SELECT amount FROM ledger')[0].values, [[7]]);
-  reopened.close();
+  // The SQLite the coin database runs on: Node's built-in node:sqlite, on a file in WAL mode.
+  const { DatabaseSync } = require('node:sqlite');
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-ci-sqlite-'));
+  try {
+    const file = path.join(folder, 'ledger.sqlite');
+    const first = new DatabaseSync(file);
+    first.exec('PRAGMA locking_mode = EXCLUSIVE; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL');
+    first.exec('CREATE TABLE ledger (amount INTEGER NOT NULL)');
+    first.exec('BEGIN IMMEDIATE');
+    first.prepare('INSERT INTO ledger VALUES (?)').run(7);
+    first.exec('COMMIT');
+    first.close();
+    assert.deepEqual(fs.readdirSync(folder), ['ledger.sqlite'], 'a clean close leaves no -wal');
+    const reopened = new DatabaseSync(file, { readOnly: true });
+    assert.deepEqual(reopened.prepare('SELECT amount FROM ledger').all().map((row) => row.amount), [7]);
+    reopened.close();
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
   console.log(`Public runtime passed: ${commands.size} commands, PNG render, SQLite transaction and reopen.`);
 }
 

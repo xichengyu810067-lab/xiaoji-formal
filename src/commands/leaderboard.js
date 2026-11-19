@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getAllBalanceSummaries } = require('../services/bankService');
-const { CoinServiceError, getGuildCoinSettings, getLeaderboard } = require('../services/coinService');
-const { formatCoins, replyCoinError } = require('../utils/coinPresentation');
+const { getAllBalanceSummaries } = require('../systems/economy/bankService');
+const { CoinServiceError, getGuildCoinSettings, getLeaderboard } = require('../systems/economy/coinService');
+const { formatCoins, replyCoinError } = require('../systems/economy/coinPresentation');
 
 const LEADERBOARD_COINS = 'coins';
 const LEADERBOARD_ASSETS = 'assets';

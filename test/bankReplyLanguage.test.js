@@ -18,9 +18,9 @@ process.env.COIN_TIMEZONE = 'Asia/Taipei';
 require('../src/utils/moderation').ensureModerationAccess = async () => ({ ok: true });
 
 const bankCommand = require('../src/commands/bank');
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
-const { adjustPlayerBalance } = require('../src/services/coinService');
-const { cancelFixedDeposit, createFixedDeposit, setDemandRate } = require('../src/services/bankService');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance } = require('../src/systems/economy/coinService');
+const { cancelFixedDeposit, createFixedDeposit, setDemandRate } = require('../src/systems/economy/bankService');
 const { GameError, applyNumberMatchAction, applyTetrisAction, initialState } = require('../src/systems/games/soloGameRules');
 
 const GUILD_ID = 'bank-language-guild';

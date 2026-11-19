@@ -433,8 +433,6 @@ function createReadyHarness() {
       startConversationHistoryCleanupScheduler: job('conversation.scheduler'),
     },
     'systems/games/board/core/boardRuntimeRegistry.js': { getBoardRuntime: () => ({ startLifecycle: job('board.start') }) },
-    'services/gameService.js': { resumePendingGameRewards: job('game.rewards') },
-    'services/gameServer.js': { startGameServer: job('game.server') },
     'services/publicStatusServer.js': {
       async startPublicStatusServer() {
         record('status.server');
@@ -448,8 +446,8 @@ function createReadyHarness() {
     },
     'services/statusSnapshotPublisher.js': { startStatusSnapshotPublisher: job('status.publisher') },
     'services/publicStatusService.js': { createFeatureStatusWatcher: () => job('status.watch') },
-    'services/dailyRiddleService.js': { startDailyRiddleScheduler: job('riddle.scheduler') },
-    'services/dailyDiscussionService.js': { startDailyDiscussionScheduler: job('discussion.scheduler') },
+    'systems/community/daily/dailyRiddleService.js': { startDailyRiddleScheduler: job('riddle.scheduler') },
+    'systems/community/daily/dailyDiscussionService.js': { startDailyDiscussionScheduler: job('discussion.scheduler') },
     'services/pollService.js': {
       async restoreActivePolls() {
         record('polls.restore');
@@ -461,20 +459,20 @@ function createReadyHarness() {
     },
     'services/reminderService.js': { restoreActiveReminders: job('reminders.restore') },
     'services/releaseAnnouncementService.js': { startReleaseAnnouncementScheduler: job('release.scheduler') },
-    'services/workService.js': {
+    'systems/work/workService.js': {
       processDueJobs: job('work.payroll'),
       processWorkReminders: job('work.reminder'),
       processExpiredWorkTasks: job('work.expired-tasks'),
       processWorkPenaltyAnnouncements: job('work.penalty-announcement'),
     },
-    'services/bankService.js': { processBankInterest: job('bank.interest') },
+    'systems/economy/bankService.js': { processBankInterest: job('bank.interest') },
     'services/casinoService.js': {
       processCasinoLoanInterest: job('casino.loan-interest'),
       processExpiredBlackjackSessions: job('casino.blackjack-refund'),
     },
     'services/venueService.js': { processExpiredVenueOrderItems: job('venue.expired-orders') },
-    'services/wordChainService.js': { processWordChainReactionOutbox: job('word-chain.reaction-outbox') },
-    'services/numberChainService.js': { processNumberChainReactionOutbox: job('number-chain.reaction-outbox') },
+    'systems/community/chains/wordChainService.js': { processWordChainReactionOutbox: job('word-chain.reaction-outbox') },
+    'systems/community/chains/numberChainService.js': { processNumberChainReactionOutbox: job('number-chain.reaction-outbox') },
     'systems/community/sparkRelay/discord.js': { processSparkRelayClock: job('spark-relay.clock') },
     'utils/logger.js': {
       info: (...args) => infos.push(args),
@@ -516,7 +514,7 @@ test('ready.js starts HTTP services and the extension hook without a context, ru
 
   // The startup order, including where the extension hook runs, is unchanged.
   assert.deepEqual(startup.map((call) => call.label), [
-    'conversation.clear', 'conversation.scheduler', 'board.start', 'game.rewards', 'game.server', 'status.server',
+    'conversation.clear', 'conversation.scheduler', 'board.start', 'status.server',
     'status.publisher', 'riddle.scheduler', 'discussion.scheduler', 'polls.restore', 'reminders.restore',
     'release.scheduler', 'extension.ready', 'extension.task', ...SCHEDULED_JOBS.map(([job]) => job),
   ]);
@@ -527,10 +525,10 @@ test('ready.js starts HTTP services and the extension hook without a context, ru
   assert.deepEqual(harness.warnings, []);
   assert.equal(harness.infos.some(([line]) => /審核|未知|lineage/iu.test(String(line))), false);
   const byLabel = new Map(startup.map((call) => [call.label, call]));
-  for (const label of ['game.server', 'status.server', 'extension.ready', 'extension.task']) {
+  for (const label of ['status.server', 'extension.ready', 'extension.task']) {
     assert.equal(byLabel.get(label).context, null, label);
   }
-  for (const label of ['conversation.clear', 'conversation.scheduler', 'board.start', 'game.rewards',
+  for (const label of ['conversation.clear', 'conversation.scheduler', 'board.start',
     'status.publisher', 'riddle.scheduler', 'discussion.scheduler', 'polls.restore', 'reminders.restore',
     'release.scheduler']) {
     assert.deepEqual(byLabel.get(label).context, readyContextFor(BOT_ID), label);
@@ -636,8 +634,8 @@ test('every reminder firing runs as its own background job, not in the context t
 });
 
 test('daily riddle and daily discussion ticks each run as their own background job', async () => {
-  const riddle = require('../src/services/dailyRiddleService');
-  const discussion = require('../src/services/dailyDiscussionService');
+  const riddle = require('../src/systems/community/daily/dailyRiddleService');
+  const discussion = require('../src/systems/community/daily/dailyDiscussionService');
   for (const [start, stop, job] of [
     [riddle.startDailyRiddleScheduler, riddle.stopDailyRiddleScheduler, 'daily-riddle.tick'],
     [discussion.startDailyDiscussionScheduler, discussion.stopDailyDiscussionScheduler, 'daily-discussion.tick'],

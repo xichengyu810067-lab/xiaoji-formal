@@ -21,14 +21,14 @@ const {
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const {
   CoinServiceError,
   adjustPlayerBalance,
   getCoinDatabaseStats,
   readCoinDatabaseStats,
   setGuildEconomyEnabled,
-} = require('../src/services/coinService');
+} = require('../src/systems/economy/coinService');
 const {
   applyLoanInterest,
   projectLoanInterest,

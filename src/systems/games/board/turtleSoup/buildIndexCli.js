@@ -29,7 +29,7 @@ function buildAndVerifyScenarioIndex({ rootDir }) {
 // or any scenario text.
 function main(argv = process.argv.slice(2), output = console) {
   if (argv.length !== 1 || !String(argv[0] || '').trim()) {
-    output.error('Usage: node src/games/turtleSoup/buildIndexCli.js <private-corpus-root>');
+    output.error('Usage: node src/systems/games/board/turtleSoup/buildIndexCli.js <private-corpus-root>');
     return 1;
   }
   try {

@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const { withCoinDatabase, withCoinTransaction } = require('../../services/coinDatabase');
+const { withCoinDatabase, withCoinTransaction } = require('./storage/coinDatabase');
 // The reward ledger belongs to featurePlatformService; this module reads and writes the
 // ledger only through its transaction ports.
 const { grantRewardOnceV2WithApi, getRewardReceiptV2, makeRewardKey,

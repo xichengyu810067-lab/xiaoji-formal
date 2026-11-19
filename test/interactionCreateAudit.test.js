@@ -18,7 +18,7 @@ process.env.XIAOJI_AUDIT_DATA_PATH = path.join(root, 'guildAudit.json');
 process.env.XIAOJI_INVITER_WHITELIST_PATH = path.join(root, 'inviterWhitelist.json');
 process.env.BOT_OWNER_ID = 'owner-user';
 
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
 const interactionCreate = require('../src/events/interactionCreate');
 const logger = require('../src/utils/logger');
 

@@ -9,7 +9,7 @@ let rewardCoordinator = null;
 // coinService is loaded when a refusal is made, not when this module is: the assembly root requires this module early
 // and it should stay light.
 function refusal(code, message) {
-  const { CoinServiceError } = require('../../services/coinService');
+  const { CoinServiceError } = require('../economy/coinService');
   return new CoinServiceError(code, message);
 }
 

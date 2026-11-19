@@ -14,9 +14,9 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const { buildReactionEffect } = require('../src/services/chainReactionDelivery');
-const { startWordChain, acceptWordChainMessage } = require('../src/services/wordChainService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const { buildReactionEffect } = require('../src/systems/community/chains/chainReactionDelivery');
+const { startWordChain, acceptWordChainMessage } = require('../src/systems/community/chains/wordChainService');
 const { createPublicEffectAuthority } = require('../src/platform/publicEffectGrant');
 const { configurePublicEffectAdapter } = require('../src/platform/publicEffectAdapter');
 const {

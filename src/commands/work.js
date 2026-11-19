@@ -26,7 +26,7 @@ const {
   reviewWorkSubmission,
   startJob,
   startVenueJobs,
-} = require('../services/workService');
+} = require('../systems/work/workService');
 const {
   formatCoins,
   formatSourceGuild,
@@ -35,7 +35,7 @@ const {
   isForeignPrimaryJob,
   isPrimaryPayrollVisibleTo,
   replyCoinError,
-} = require('../utils/coinPresentation');
+} = require('../systems/economy/coinPresentation');
 const { ensureModerationAccess } = require('../utils/moderation');
 const { reportInteractionSecurityAlert } = require('../utils/securityAlert');
 const { isBotOwner } = require('../utils/ownerOnly');

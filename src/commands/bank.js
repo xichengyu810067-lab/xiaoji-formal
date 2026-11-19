@@ -15,11 +15,11 @@ const {
   setDemandRate,
   setFixedRate,
   withdraw,
-} = require('../services/bankService');
+} = require('../systems/economy/bankService');
 const { ensureModerationAccess } = require('../utils/moderation');
 const { reportInteractionSecurityAlert } = require('../utils/securityAlert');
 const { ensureBotOwner } = require('../utils/ownerOnly');
-const { formatCoins, formatFixedDepositStatus, formatMemberName, formatRateKey, replyCoinError } = require('../utils/coinPresentation');
+const { formatCoins, formatFixedDepositStatus, formatMemberName, formatRateKey, replyCoinError } = require('../systems/economy/coinPresentation');
 const { fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 const sourceLabels = Object.freeze({ wallet: '錢包', bank: '活存' });
@@ -292,7 +292,8 @@ module.exports = {
         const item = await createFixedDeposit(interaction.guildId, interaction.user.id, {
           amount: interaction.options.getInteger('amount', true),
           termDays: interaction.options.getInteger('term-days', true),
-          source: interaction.options.getString('source') || 'wallet',
+          // Not given is the wallet; a given value that is not one of the choices is refused by the service.
+          source: interaction.options.getString('source') ?? 'wallet',
         });
         await interaction.reply({ content: `**定存建立成功**\n${formatFixedDeposit(item)}`, ephemeral: true });
         return;

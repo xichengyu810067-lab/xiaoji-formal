@@ -74,16 +74,13 @@ const BASELINE_FIELDS = new Set(['id', 'rule', 'file', 'target', 'count', 'dispo
 const ENTRY_FILES = new Set(['deploy-commands.js', 'src/index.js', 'src/loadCommands.js']);
 const ENTRY_DIRECTORIES = Object.freeze(['src/commands', 'src/events', 'src/handlers']);
 
-// R1: the modules that open a database or a data store. The legacy board storage paths are the same
-// modules behind adapters, so loading them counts too.
+// R1: the modules that open a database or a data store.
 const STORAGE_ENGINES = new Set([
-  'src/services/coinDatabase.js',
+  'src/systems/economy/storage/coinDatabase.js',
   'src/systems/safety/sideEffectLedger.js',
   'src/systems/safety/ledgerStore.js',
   'src/systems/games/board/storage/boardSchema.js',
   'src/systems/games/board/storage/sqliteBoardStore.js',
-  'src/games/storage/boardSchema.js',
-  'src/games/storage/sqliteBoardStore.js',
   'src/utils/guildConfig.js',
 ]);
 
@@ -95,14 +92,7 @@ const SYSTEMS = Object.freeze({
   economy: {
     directories: ['src/systems/economy'],
     files: [
-      'src/services/coinDatabase.js',
       'src/services/coinAdminAddService.js',
-      'src/services/coinService.js',
-      'src/services/coinWalletService.js',
-      'src/services/coinCampaignService.js',
-      'src/services/bankService.js',
-      'src/services/chipService.js',
-      'src/services/luxuryService.js',
     ],
   },
   casino: {
@@ -115,46 +105,28 @@ const SYSTEMS = Object.freeze({
   },
   work: {
     directories: ['src/systems/work'],
-    files: ['src/services/workService.js'],
+    files: [],
   },
   games: {
-    directories: ['src/systems/games', 'src/games'],
-    files: [
-      'src/services/gameService.js',
-      'src/services/gameRewardPolicy.js',
-      'src/services/gameServer.js',
-    ],
+    directories: ['src/systems/games'],
+    files: [],
   },
   // featurePlatformService is not part of community: it also holds the reward ledger, which the economy
   // calls, so it is listed as rewardLedger until the ledger moves into a module of its own.
   community: {
     directories: ['src/systems/community'],
     files: [
-      'src/services/dailyDiscussionService.js',
-      'src/services/dailyDiscussionCorpus.js',
-      'src/services/dailyRiddleService.js',
-      'src/services/dailyRiddleCorpus.js',
-      'src/services/wordChainService.js',
-      'src/services/wordChainLexicon.js',
-      'src/services/numberChainService.js',
-      'src/services/numberExpressionService.js',
       'src/services/pollService.js',
       'src/services/releaseAnnouncementService.js',
       'src/services/welcomeService.js',
-      'src/services/messageFeatureRouter.js',
-      'src/services/chainReactionDelivery.js',
     ],
   },
   conversation: {
     directories: ['src/systems/conversation'],
     files: [
-      'src/services/aiService.js',
       'src/services/aiArchiveService.js',
       'src/services/chatStyleService.js',
       'src/services/conversationHistoryService.js',
-      'src/services/conversationModeService.js',
-      'src/services/memoryService.js',
-      'src/services/mentionService.js',
       'src/services/romanceModeService.js',
     ],
   },
@@ -202,8 +174,13 @@ function systemOf(file) {
 // R6: table owners
 // ---------------------------------------------------------------------------------------------
 
-// The coin database creates and migrates the tables of every system, so its own SQL may name any.
-const SCHEMA_OWNER_FILES = new Set(['src/services/coinDatabase.js']);
+// The coin database creates and migrates the tables of every system, so the SQL of its storage
+// modules (the schema text, the migrations and the open sequence) may name any.
+const SCHEMA_OWNER_DIRECTORY = 'src/systems/economy/storage';
+
+function isSchemaOwner(file) {
+  return isUnder(file, SCHEMA_OWNER_DIRECTORY);
+}
 
 // The first family whose pattern matches a table owns it; the work family comes before the economy
 // family because the economy pattern also matches the coin_ tables of the work system.
@@ -236,17 +213,19 @@ const TABLE_FAMILIES = Object.freeze([
   {
     name: 'daily events',
     tables: /^daily_.+$/u,
-    owners: ['src/services/dailyDiscussionService.js', 'src/services/dailyRiddleService.js'],
+    owners: ['src/systems/community/daily/'],
   },
+  // The two chains share one directory: a chain refuses a channel the other chain is running in, so each reads
+  // the other's sessions (chainRound.js).
   {
     name: 'number chain',
     tables: /^number_chain_.+$/u,
-    owners: ['src/services/numberChainService.js'],
+    owners: ['src/systems/community/chains/'],
   },
   {
     name: 'word chain',
     tables: /^text_chain_.+$/u,
-    owners: ['src/services/wordChainService.js'],
+    owners: ['src/systems/community/chains/'],
   },
   {
     name: 'release announcements',
@@ -311,16 +290,6 @@ const ADAPTER_ROOTS = Object.freeze(['src/games']);
 // adapter is made of (its forward into the coordinator) while the file is registered here and is still a
 // one-line forward; R8 then keeps production code from loading it, so nothing inside depends on the old path.
 const ADAPTER_FILES = Object.freeze([
-  'src/services/aiService.js',
-  'src/services/bankService.js',
-  'src/services/chipService.js',
-  'src/services/coinCampaignService.js',
-  'src/services/coinService.js',
-  'src/services/coinWalletService.js',
-  'src/services/luxuryService.js',
-  'src/services/memoryService.js',
-  'src/services/mentionService.js',
-  'src/services/workService.js',
   'src/systems/community/calendarSystem.js',
   'src/systems/games/unifiedGameRuntime.js',
   'src/systems/reminders/reminderSystem.js',
@@ -917,7 +886,7 @@ function checkTableOwners(project, report) {
     if (!familyOf(table)) report.add('R6', file, `no-owner:${table}`, null, `creates table ${table}, which has no declared owner`);
   }
   for (const file of project.sourceFiles) {
-    if (SCHEMA_OWNER_FILES.has(file)) continue;
+    if (isSchemaOwner(file)) continue;
     const { lineOf } = project.readSource(file);
     for (const { name, offset } of references.get(file)) {
       const family = created.has(name) ? familyOf(name) : null;

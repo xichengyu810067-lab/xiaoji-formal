@@ -3,15 +3,15 @@ const {
   normalizeWorkReminderTimestamp,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../../services/coinDatabase');
+} = require('../economy/storage/coinDatabase');
 const {
   CoinServiceError,
   TransactionType,
   ensureGuildSettings,
   ensurePlayer,
   insertAdminLog,
-} = require('../../services/coinService');
-const { mutateWalletWithApi } = require('../../services/coinWalletService');
+} = require('../economy/coinService');
+const { mutateWalletWithApi } = require('../economy/coinWalletService');
 const { grantRewardOnceV2, getRewardReceiptV2, grantRewardOnceV2WithApi, makeRewardKey } = require('../../services/featurePlatformService');
 const { getWorkRewardCoordinator } = require('./workRewardPort');
 const { getWorkRoleCoordinator } = require('./workRolePort');

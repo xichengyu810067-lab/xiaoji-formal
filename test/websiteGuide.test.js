@@ -3,11 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const commandCatalog = require('../website/commandCatalog');
-const { PUBLIC_SYSTEM_CATALOG } = require('../website/publicFeatureCatalog');
+const commandCatalog = require('../src/platform/catalogs/commandCatalog');
+const { PUBLIC_SYSTEM_CATALOG } = require('../src/platform/catalogs/publicFeatureCatalog');
 const guideSearch = require('../website/guideSearch');
 const theme = require('../website/theme');
 const {
+  CATALOG_FILES,
   GROUP_FALLBACK_CATEGORY,
   HOMEPAGE_HIGHLIGHTS,
   UNMENTIONED_COMMAND_CATEGORY,
@@ -24,7 +25,10 @@ const read = (file) => fs.readFileSync(path.join(websiteRoot, file), 'utf8');
 function copyPages(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-guide-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  for (const file of ['guide.html', 'index.html', 'status.html']) fs.copyFileSync(path.join(websiteRoot, file), path.join(root, file));
+  // The catalog copies too: the check also refuses a page directory whose catalogs are not copies of src/platform/catalogs.
+  for (const file of ['guide.html', 'index.html', 'status.html', ...CATALOG_FILES]) {
+    fs.copyFileSync(path.join(websiteRoot, file), path.join(root, file));
+  }
   return root;
 }
 

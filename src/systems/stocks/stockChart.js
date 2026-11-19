@@ -5,7 +5,7 @@
 
 const path = require('node:path');
 
-const FONT_FILE = path.join(__dirname, '..', '..', 'games', 'assets', 'fonts', 'Cubic_11.ttf');
+const FONT_FILE = path.join(__dirname, '..', '..', '..', 'assets', 'fonts', 'Cubic_11.ttf');
 const WIDTH = 800;
 const HEIGHT = 420;
 const PAD = Object.freeze({ left: 80, right: 30, top: 70, bottom: 50 });

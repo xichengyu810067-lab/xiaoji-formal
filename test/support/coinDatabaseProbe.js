@@ -7,8 +7,8 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const { withCoinDatabase, withCoinTransaction } = require('../../src/services/coinDatabase');
-const { adjustPlayerBalance } = require('../../src/services/coinService');
+const { withCoinDatabase, withCoinTransaction } = require('../../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance } = require('../../src/systems/economy/coinService');
 const { borrowCasinoLoan } = require('../../src/systems/economy/loans');
 
 // Every row of every table, so that "wrote nothing" covers the whole database and not only the tables somebody

@@ -1,6 +1,6 @@
 const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
-const { corpusVersion } = require('../services/dailyRiddleCorpus');
-const { FEATURE_KEY, getDailyRiddleEvent } = require('../services/dailyRiddleService');
+const { corpusVersion } = require('../systems/community/daily/dailyRiddleCorpus');
+const { FEATURE_KEY, getDailyRiddleEvent } = require('../systems/community/daily/dailyRiddleService');
 const { getGuildFeatureSetting, setGuildFeatureSetting } = require('../services/featurePlatformService');
 const { formatDailyEventStatus } = require('../utils/dailyEventStatus');
 const { getTaipeiDateKey } = require('../utils/taipeiClock');

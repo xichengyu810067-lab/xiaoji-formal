@@ -19,8 +19,8 @@ process.env.COIN_TIMEZONE = 'Asia/Taipei';
 require('../src/utils/moderation').ensureModerationAccess = async () => ({ ok: true });
 
 const economyCommand = require('../src/commands/economy');
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
-const { createShopItem, getAllInventory, purchaseItem } = require('../src/services/coinService');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
+const { createShopItem, getAllInventory, purchaseItem } = require('../src/systems/economy/coinService');
 const { expectNoWrites, seedPlayer } = require('./support/coinDatabaseProbe');
 const { createGuild, createSlashInteraction } = require('./support/fakeSlashInteraction');
 

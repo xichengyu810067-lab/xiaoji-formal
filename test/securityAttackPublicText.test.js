@@ -20,11 +20,11 @@ const attack = require('./support/attackSession');
 
 const session = attack.createAttackSession({ prefix: 'xiaoji-attack-public-text-' });
 
-const coinService = require('../src/services/coinService');
-const chipService = require('../src/services/chipService');
+const coinService = require('../src/systems/economy/coinService');
+const chipService = require('../src/systems/economy/chipService');
 const reminderService = require('../src/services/reminderService');
-const workService = require('../src/services/workService');
-const { withCoinDatabase } = require('../src/services/coinDatabase');
+const workService = require('../src/systems/work/workService');
+const { withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
 
 const { IDS } = session;
 const HOME = IDS.approvedGuild;

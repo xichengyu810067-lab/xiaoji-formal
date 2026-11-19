@@ -1,8 +1,8 @@
 const { ChannelType, SlashCommandBuilder } = require('discord.js');
-const { BOARD_GAME_CHOICES, getGame } = require('../../website/gameCatalog');
+const { BOARD_GAME_CHOICES, getGame } = require('../platform/catalogs/gameCatalog');
 const { getBoardRuntime } = require('../systems/games/board/core/boardRuntimeRegistry');
 const { MAX_CASINO_AMOUNT } = require('../services/casinoService');
-const { MAX_CHIP_AMOUNT } = require('../services/chipService');
+const { MAX_CHIP_AMOUNT } = require('../systems/economy/chipService');
 const { endOwnSoloGame, showUnifiedGameStatus, startUnifiedGame } = require('../coordinators/gameLaunchCoordinator');
 const { replyEphemeral } = require('../utils/moderation');
 

@@ -21,9 +21,9 @@ const {
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
   withCoinDatabase,
-} = require('../src/services/coinDatabase');
-const riddleService = require('../src/services/dailyRiddleService');
-const discussionService = require('../src/services/dailyDiscussionService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const riddleService = require('../src/systems/community/daily/dailyRiddleService');
+const discussionService = require('../src/systems/community/daily/dailyDiscussionService');
 const { dailyEventStatusLabels, formatDailyEventStatus } = require('../src/utils/dailyEventStatus');
 const { getTaipeiDateKey } = require('../src/utils/taipeiClock');
 const riddleCommand = require('../src/commands/daily-riddle');

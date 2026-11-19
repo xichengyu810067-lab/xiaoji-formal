@@ -18,13 +18,13 @@ const harness = require('./support/securityAttackHarness');
 
 const root = harness.createAttackEnvironment('xiaoji-attack-replay-');
 
-const coin = require('../src/services/coinService');
-const bankService = require('../src/services/bankService');
-const chipService = require('../src/services/chipService');
-const luxuryService = require('../src/services/luxuryService');
+const coin = require('../src/systems/economy/coinService');
+const bankService = require('../src/systems/economy/bankService');
+const chipService = require('../src/systems/economy/chipService');
+const luxuryService = require('../src/systems/economy/luxuryService');
 const casinoService = require('../src/services/casinoService');
 const casinoFacility = require('../src/services/casinoFacilityService');
-const workService = require('../src/services/workService');
+const workService = require('../src/systems/work/workService');
 const venueService = require('../src/services/venueService');
 const featurePlatform = require('../src/services/featurePlatformService');
 const { createRuntimeRewardCoordinator } = require('../src/coordinators/rewardRuntime');
@@ -530,7 +530,7 @@ test('a primary penalty is refunded once after an approved appeal, and only the 
 });
 
 test('an appealed old-style penalty refunds in total no more than payroll really took, in any order', async () => {
-  const { withCoinTransaction } = require('../src/services/coinDatabase');
+  const { withCoinTransaction } = require('../src/systems/economy/storage/coinDatabase');
   const logger = require('../src/utils/logger');
   await harness.openAttackDatabase(root);
   const STARTED = '2026-04-01T01:00:00.000Z';

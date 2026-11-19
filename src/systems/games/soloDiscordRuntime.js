@@ -358,7 +358,7 @@ function createDefaultSoloDiscordRuntime({ client, runtimeLogger, rewardCoordina
   if (typeof rewardCoordinator?.grantInTransaction !== 'function') {
     throw new GameError('REWARD_NOT_CONFIGURED', 'The solo game runtime needs the reward coordinator from the assembly root.');
   }
-  const { withCoinTransaction, withCoinDatabase } = require('../../services/coinDatabase');
+  const { withCoinTransaction, withCoinDatabase } = require('../economy/storage/coinDatabase');
   const service = createSoloSessionService({ withTransaction: withCoinTransaction, withDatabase: withCoinDatabase,
     grantRewardOnceV2WithApi: (api, input) => rewardCoordinator.grantInTransaction(api, input) });
   return createSoloDiscordRuntime({ service, client, runtimeLogger });

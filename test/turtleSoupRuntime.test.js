@@ -5,21 +5,21 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildBoardCustomId } = require('../src/games/discord/boardCustomId');
+const { buildBoardCustomId } = require('../src/systems/games/board/discord/boardCustomId');
 const {
   JUDGE_READY,
   createBoardDiscordRuntime,
   formatTurtleSoupStartupLog,
   logTurtleSoupStartup,
-} = require('../src/games/discord/boardDiscordRuntime');
+} = require('../src/systems/games/board/discord/boardDiscordRuntime');
 const {
   JUDGE_UNAVAILABLE_MESSAGE,
   LOCAL_BUSY_MESSAGE,
   RATE_LIMIT_MESSAGE,
-} = require('../src/games/discord/turtleSoupDiscordAdapter');
-const { buildAndVerifyScenarioIndex, main: runBuildIndexCli } = require('../src/games/turtleSoup/buildIndexCli');
-const { TurtleSoupError } = require('../src/games/turtleSoup/errors');
-const { createJudgeProvider, normalizeProviderError } = require('../src/games/turtleSoup/providerAdapter');
+} = require('../src/systems/games/board/discord/turtleSoupDiscordAdapter');
+const { buildAndVerifyScenarioIndex, main: runBuildIndexCli } = require('../src/systems/games/board/turtleSoup/buildIndexCli');
+const { TurtleSoupError } = require('../src/systems/games/board/turtleSoup/errors');
+const { createJudgeProvider, normalizeProviderError } = require('../src/systems/games/board/turtleSoup/providerAdapter');
 const { turtleSoupSpamGuard } = require('../src/systems/conversation/aiSpamGuard');
 const {
   CORPUS_EMPTY,
@@ -34,7 +34,7 @@ const {
   buildScenarioIndex,
   createFileScenarioProvider,
   prepareFileScenarioProvider,
-} = require('../src/games/turtleSoup/scenarioProvider');
+} = require('../src/systems/games/board/turtleSoup/scenarioProvider');
 const {
   BLOCK_REASONS,
   DEFAULT_PROVIDER_GUARD_CONFIG,
@@ -1591,7 +1591,7 @@ test('the index CLI usage line is fixed text and only a single argument is accep
   for (const argv of [[], ['   '], ['first', 'second']]) {
     const { exitCode, lines } = runIndexCli(argv);
     assert.equal(exitCode, 1);
-    assert.deepEqual(lines, [['error', 'Usage: node src/games/turtleSoup/buildIndexCli.js <private-corpus-root>']]);
+    assert.deepEqual(lines, [['error', 'Usage: node src/systems/games/board/turtleSoup/buildIndexCli.js <private-corpus-root>']]);
   }
 });
 
@@ -1641,7 +1641,7 @@ test('index building classifies its own failures and refuses an empty corpus unl
 });
 
 test('the index CLI works as a real command: exit codes and streams carry only counts and codes', (t) => {
-  const cli = path.join(__dirname, '..', 'src', 'games', 'turtleSoup', 'buildIndexCli.js');
+  const cli = path.join(__dirname, '..', 'src', 'systems', 'games', 'board', 'turtleSoup', 'buildIndexCli.js');
   const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', windowsHide: true });
   const { rootDir } = makeCorpus(t);
   fs.rmSync(path.join(rootDir, INDEX_FILE_NAME));
@@ -1659,7 +1659,7 @@ test('the index CLI works as a real command: exit codes and streams carry only c
   const usage = run();
   assert.equal(usage.status, 1);
   assert.equal(usage.stdout, '');
-  assert.equal(usage.stderr, 'Usage: node src/games/turtleSoup/buildIndexCli.js <private-corpus-root>\n');
+  assert.equal(usage.stderr, 'Usage: node src/systems/games/board/turtleSoup/buildIndexCli.js <private-corpus-root>\n');
 
   const story = syntheticScenario();
   for (const result of [built, absent, usage]) {

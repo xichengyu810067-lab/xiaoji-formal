@@ -8,12 +8,12 @@ const { IDS, createFixture } = require('./testControlSupport');
 
 async function withMessageCreateFakes(state, callback) {
   const modules = [
-    ['../src/services/mentionService', {
+    ['../src/systems/conversation/chatFlow', {
       handleMentionMessage: async () => { state.mentionCalls += 1; },
       isPublicPersistenceSuppressed: () => false,
     }],
-    ['../src/services/messageFeatureRouter', { routeMessageFeatures: async () => ({ handled: false }) }],
-    ['../src/services/memoryService', { recordPublicMessage() {} }],
+    ['../src/systems/community/messageFeatureRouter', { routeMessageFeatures: async () => ({ handled: false }) }],
+    ['../src/systems/conversation/projection', { recordPublicMessage() {} }],
     ['../src/services/publicStatusService', { recordPublicInteraction: async () => {} }],
     ['../src/utils/logger', { error() {} }],
     ['../src/extensions/extensionHost', { getClientExtensionHost: () => ({ runHook: async () => [] }) }],

@@ -27,8 +27,8 @@ const STATUS = Object.freeze({
 function loadWork(t) {
   const patches = [
     [require(src('utils', 'moderation.js')), 'ensureModerationAccess', async () => ({ ok: true })],
-    [require(src('services', 'workService.js')), 'getWorkStatus', async () => STATUS],
-    [require(src('services', 'workService.js')), 'getAllWorkStatuses', async () => [PRIMARY]],
+    [require(src('systems', 'work', 'workService.js')), 'getWorkStatus', async () => STATUS],
+    [require(src('systems', 'work', 'workService.js')), 'getAllWorkStatuses', async () => [PRIMARY]],
   ];
   const originals = patches.map(([target, key]) => target[key]);
   for (const [target, key, value] of patches) target[key] = value;

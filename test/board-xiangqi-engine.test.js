@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const xiangqi = require('../src/games/engines/xiangqi');
-const { createTrustedSystemAction } = require('../src/games/trustedSystemActions');
+const xiangqi = require('../src/systems/games/board/engines/xiangqi');
+const { createTrustedSystemAction } = require('../src/systems/games/board/core/trustedSystemActions');
 
 const players = ['red-player', 'black-player'];
 function game() { return xiangqi.createInitialState({ players, rules: {}, seed: 'test-seed' }); }

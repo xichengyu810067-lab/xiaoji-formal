@@ -17,7 +17,7 @@ const {
 const rules = require('./rules');
 const service = require('./service');
 const { downloadImage, isMediaHostUrl, MAX_IMAGE_BYTES } = require('../../conversation/imageInput');
-const { isVisionAvailable } = require('../../../services/aiService');
+const { isVisionAvailable } = require('../../conversation/provider');
 const { replyEphemeral } = require('../../../utils/moderation');
 const { resolveBotMember } = require('../../../utils/botMember');
 const { getTaipeiDateKey } = require('../../../utils/taipeiClock');

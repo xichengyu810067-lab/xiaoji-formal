@@ -16,6 +16,8 @@ const requiredFiles = [
   'src/index.js',
   'src/loadCommands.js',
   'src/extensions/extensionHost.js',
+  'src/platform/catalogs/commandCatalog.js',
+  'src/platform/catalogs/statusData.js',
   'website/commandCatalog.js',
   'website/statusData.js',
 ];
@@ -24,6 +26,15 @@ const requiredWordChainExportFiles = [
   'assets/word-chain/MOE-usage-revised.pdf',
   'assets/word-chain/moe-revised-source.json',
   'assets/word-chain/moe-revised-2015_20260625.txt',
+];
+// The fonts the board, solo game and stock chart images are drawn with, and their licences.
+const requiredFontExportFiles = [
+  'assets/fonts/Cubic_11.ttf',
+  'assets/fonts/Cubic_11-OFL.txt',
+  'assets/fonts/NotoSansSymbols-Regular.ttf',
+  'assets/fonts/NotoSansSymbols-OFL.txt',
+  'assets/fonts/NotoSansSymbols2-Regular.ttf',
+  'assets/fonts/NotoSansSymbols2-OFL.txt',
 ];
 
 function resolveLocalModule(parentFile, request) {
@@ -107,8 +118,8 @@ function checkProject({
   // regenerate stale pages with `npm run site:render`.
   failures.push(...findWebsiteGuideIssues({ websiteRoot: guideWebsiteRoot, catalog: commandCatalog }));
 
-  const coinDatabase = fs.readFileSync(path.join(projectRoot, 'src/services/coinDatabase.js'), 'utf8');
-  if (!coinDatabase.includes('const schemaVersion = 24;')) {
+  const coinSchema = fs.readFileSync(path.join(projectRoot, 'src/systems/economy/storage/schema/index.js'), 'utf8');
+  if (!coinSchema.includes('const schemaVersion = 24;')) {
     failures.push('Persistent coin-admin confirmations require coin schema v24.');
   }
 
@@ -116,6 +127,9 @@ function checkProject({
   if (!exportFiles.includes('src/index.js')) failures.push('Public export manifest omits the core entrypoint.');
   for (const requiredAsset of requiredWordChainExportFiles) {
     if (!exportFiles.includes(requiredAsset)) failures.push(`Public export omits required word-chain asset: ${requiredAsset}`);
+  }
+  for (const font of requiredFontExportFiles) {
+    if (!exportFiles.includes(font)) failures.push(`Public export omits required font: ${font}`);
   }
   for (const dependency of findMissingPublicDependencies(exportFiles)) {
     failures.push(`Public export omits a local dependency: ${dependency}`);

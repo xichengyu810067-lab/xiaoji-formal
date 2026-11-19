@@ -47,7 +47,7 @@ const {
   isWeatherQuery,
 } = require('../src/coordinators/conversationCoordinator');
 const { handleMentionMessage } = require('../src/systems/conversation/chatFlow');
-const { clearConversationStateForTests } = require('../src/services/conversationModeService');
+const { clearConversationStateForTests } = require('../src/systems/conversation/conversationMode');
 const guildConfig = require('../src/utils/guildConfig');
 const weatherCommand = require('../src/commands/weather');
 const { officialWeekLocation, officialWeekResponse } = require('./fixtures/cwaForecastFixtures');

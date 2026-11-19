@@ -14,8 +14,8 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-farm-'));
 process.env.COIN_DB_PATH = path.join(root, 'farm.sqlite');
 process.env.COIN_TIMEZONE = 'Asia/Taipei';
 
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase } = require('../src/services/coinDatabase');
-const { adjustPlayerBalance, setGuildEconomyEnabled } = require('../src/services/coinService');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance, setGuildEconomyEnabled } = require('../src/systems/economy/coinService');
 const { HOUR_MS, MINUTE_MS } = require('../src/systems/farm/farmCatalog');
 const farm = require('../src/systems/farm/farmService');
 const { FarmError } = require('../src/systems/farm/farmRules');

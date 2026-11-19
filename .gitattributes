@@ -15,9 +15,9 @@
 *.sh text eol=lf
 *.ps1 text eol=crlf
 src/data/.gitkeep text eol=lf
-src/games/assets/fonts/Cubic_11-OFL.txt text eol=lf
-src/games/assets/fonts/NotoSansSymbols-OFL.txt text eol=lf
-src/games/assets/fonts/NotoSansSymbols2-OFL.txt text eol=lf
+assets/fonts/Cubic_11-OFL.txt text eol=lf
+assets/fonts/NotoSansSymbols-OFL.txt text eol=lf
+assets/fonts/NotoSansSymbols2-OFL.txt text eol=lf
 website/**/*.css text eol=lf
 cloudflare/**/*.sql text eol=lf
 cloudflare/**/*.toml text eol=lf

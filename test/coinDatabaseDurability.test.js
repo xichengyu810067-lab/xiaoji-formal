@@ -1,10 +1,11 @@
 'use strict';
 
-// Every coin database write is durable (temporary file in the same directory, fsync, rename,
-// directory fsync), and the file is rewritten only when memory differs from what was last
-// written to it. The POSIX order is checked on every host: where the host itself is POSIX the
-// directory is really opened read-only and fsynced; on Windows, which cannot open a
-// directory, those three calls are simulated.
+// The coin database file is held by one node:sqlite connection (EXCLUSIVE locking, WAL,
+// synchronous=FULL): a COMMIT is the durable write, a crash keeps exactly the committed
+// transactions, and no second process or connection can open the file. A file whose schema is
+// behind is migrated in place only after a verified backup, and a migration that fails puts the
+// backup back, so the original is byte-identical. A new database is built in memory and created
+// exclusively ('wx'); its directory sync is the one write left that can escalate.
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -12,32 +13,35 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
-const coin = require('../src/services/coinDatabase');
+const coin = require('../src/systems/economy/storage/coinDatabase');
 const logger = require('../src/utils/logger');
-const { ensureGuildSettings } = require('../src/systems/economy/coinService');
 const coinDatabaseEscalations = require('../src/systems/economy/coinDatabaseEscalations');
 const { LEDGER_ESCALATION_EXIT_CODE, settleLedgerShutdown } = require('../src/systems/safety/ledgerEscalation');
 
-const COIN_MODULE = path.join(__dirname, '..', 'src', 'services', 'coinDatabase.js');
-const GUILD_ID = '123456789012345678';
-const NOTHING = (api) => api.get('SELECT 1 AS one');
+const COIN_MODULE = path.join(__dirname, '..', 'src', 'systems', 'economy', 'storage', 'coinDatabase.js');
 const SIMULATE_DIRECTORY = process.platform === 'win32';
+const STAMP = '2026-10-03T00:00:00.000Z';
 
-let sqlModule = null;
-async function loadSql() {
-  if (!sqlModule) {
-    sqlModule = await require('sql.js')({ locateFile: (name) => path.join(path.dirname(require.resolve('sql.js')), name) });
-  }
-  return sqlModule;
+function sha256(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
 function sha256File(filePath) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  return sha256(fs.readFileSync(filePath));
 }
 
-// A fresh coin database in its own temporary folder. resetCoinDatabaseForTests() also drops
-// a replaced file system, so a test replaces it only after this.
+// The database file and its -wal, byte for byte (null when there is no -wal).
+function filesState(dbPath) {
+  return {
+    main: sha256File(dbPath),
+    wal: fs.existsSync(`${dbPath}-wal`) ? sha256File(`${dbPath}-wal`) : null,
+  };
+}
+
+// A fresh coin database in its own temporary folder. resetCoinDatabaseForTests() also drops a
+// replaced file system, so a test replaces it only after this.
 async function freshCoinDatabase(t, prefix, { create = true } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `xiaoji-coin-durability-${prefix}-`)));
   const previous = process.env.COIN_DB_PATH;
@@ -53,13 +57,69 @@ async function freshCoinDatabase(t, prefix, { create = true } = {}) {
   return { root, dbPath: process.env.COIN_DB_PATH, directoryName: path.basename(root) };
 }
 
+function insertMarker(api, key, value = '1') {
+  api.run('INSERT INTO coin_metadata (key, value, updated_at) VALUES (?, ?, ?)', [key, value, STAMP]);
+}
+
+async function memoryValue(key) {
+  const row = await coin.withCoinDatabase((api) => api.get('SELECT value FROM coin_metadata WHERE key = ?', [key]));
+  return row ? row.value : null;
+}
+
+// What the next start would read: a copy of the file and its -wal, opened on its own (SQLite
+// replays the -wal), so the files themselves stay as they are.
+function nextStartRows(dbPath, sql, params = []) {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-coin-next-start-'));
+  try {
+    const copy = path.join(folder, 'copy.sqlite');
+    fs.copyFileSync(dbPath, copy);
+    if (fs.existsSync(`${dbPath}-wal`)) fs.copyFileSync(`${dbPath}-wal`, `${copy}-wal`);
+    const db = new DatabaseSync(copy);
+    try {
+      return db.prepare(sql).all(...params).map((row) => ({ ...row }));
+    } finally {
+      db.close();
+    }
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+function nextStartValue(dbPath, key) {
+  return nextStartRows(dbPath, 'SELECT value FROM coin_metadata WHERE key = ?', [key])[0]?.value ?? null;
+}
+
+function schemaOf(db) {
+  return db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all()
+    .map((row) => ({ ...row }));
+}
+
+// Changes a closed database file with a plain connection; journal_mode=DELETE leaves it as the old
+// engine (sql.js, until v1.3.x) wrote files: a rollback-journal header and nothing beside it.
+function editClosedFile(dbPath, sql) {
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA journal_mode = DELETE');
+    db.exec(sql);
+  } finally {
+    db.close();
+  }
+}
+
+// A v23 database: the current one without the table v24 adds.
+const BACK_TO_V23 = `DROP TABLE coin_admin_add_confirmations;
+  UPDATE coin_metadata SET value = '23' WHERE key = 'schema_version';`;
+
+function backups(root) {
+  return fs.readdirSync(root).filter((name) => name.endsWith('.bak')).sort();
+}
+
 // Passes every call to the real file system and records the steps a durable write takes
-// (paths reduced to base names; renames also keep their full paths). `fail` makes one step
-// throw instead (a failing close still releases the real descriptor first);
-// `renameFailures` lists error codes the next renames throw before one succeeds.
+// (paths reduced to base names). `fail` makes one step throw instead (a failing close still
+// releases the real descriptor first); `renameFailures` lists error codes the next renames throw
+// before one succeeds.
 function recordingFileSystem({ directory = null, fail = null, renameFailures = [] } = {}) {
   const calls = [];
-  const renames = [];
   const failures = [...renameFailures];
   const names = new Map();
   const closed = new Set();
@@ -109,7 +169,6 @@ function recordingFileSystem({ directory = null, fail = null, renameFailures = [
     },
     renameSync(from, to) {
       const step = record(['rename', path.basename(String(from)), path.basename(String(to))]);
-      renames.push([String(from), String(to)]);
       const code = failures.shift();
       if (code) throw Object.assign(new Error(`synthetic rename ${code}`), { code });
       failIfChosen(step);
@@ -120,54 +179,11 @@ function recordingFileSystem({ directory = null, fail = null, renameFailures = [
       return fs.unlinkSync(target);
     },
   };
-  return { calls, renames, filesystem, steps: () => calls.filter(([kind]) => kind !== 'write') };
+  return { calls, filesystem, steps: () => calls.filter(([kind]) => kind !== 'write') };
 }
 
 function useFileSystem(recorder, platform, extra = {}) {
   coin.setCoinDatabaseDurabilityForTests({ filesystem: recorder.filesystem, platform, ...extra });
-}
-
-function insertMarker(api, key, value = '1') {
-  api.run('INSERT INTO coin_metadata (key, value, updated_at) VALUES (?, ?, ?)', [key, value, '2026-10-03T00:00:00.000Z']);
-}
-
-async function memoryValue(key) {
-  const row = await coin.withCoinDatabase((api) => api.get('SELECT value FROM coin_metadata WHERE key = ?', [key]));
-  return row ? row.value : null;
-}
-
-// The bytes memory would be written as. The export reopens the sql.js connection, so the
-// foreign-key pragma is turned back on, as the module's own export does.
-async function memoryBytes() {
-  return coin.withCoinDatabase((api) => {
-    try {
-      return Buffer.from(api.db.export());
-    } finally {
-      api.db.run('PRAGMA foreign_keys = ON');
-    }
-  });
-}
-
-async function fileRow(dbPath, sql, params) {
-  const SQL = await loadSql();
-  const db = new SQL.Database(fs.readFileSync(dbPath));
-  const statement = db.prepare(sql);
-  try {
-    statement.bind(params);
-    return statement.step() ? statement.getAsObject() : null;
-  } finally {
-    statement.free();
-    db.close();
-  }
-}
-
-async function fileMetadata(dbPath, key) {
-  const row = await fileRow(dbPath, 'SELECT value FROM coin_metadata WHERE key = ?', [key]);
-  return row ? row.value : null;
-}
-
-async function assertFileMatchesMemory(dbPath, message = 'the file holds exactly what memory holds') {
-  assert.ok(fs.readFileSync(dbPath).equals(await memoryBytes()), message);
 }
 
 function captureCoinDatabaseLogs(t) {
@@ -179,303 +195,448 @@ function captureCoinDatabaseLogs(t) {
   return lines;
 }
 
-function expectedReplaceSteps(directoryName, platform) {
-  return [
-    ['mkdir', directoryName],
-    ['open', 'xiaoji.sqlite.tmp', 'w'],
-    ['fsync', 'xiaoji.sqlite.tmp'],
-    ['close', 'xiaoji.sqlite.tmp'],
-    ['rename', 'xiaoji.sqlite.tmp', 'xiaoji.sqlite'],
-    ...(platform === 'win32'
-      ? [['open', 'xiaoji.sqlite', 'r+'], ['fsync', 'xiaoji.sqlite'], ['close', 'xiaoji.sqlite']]
-      : [['open', directoryName, 'r'], ['fsync', directoryName], ['close', directoryName]]),
-  ];
+// Runs a script in its own process against COIN_DB_PATH; the script gets the coin module as
+// `coin`.
+function runCoinProcess(dbPath, body) {
+  const script = `const coin = require(process.argv[1]);\n(async () => {\n${body}\n})().catch((error) => {
+    process.stdout.write('ERROR ' + error.message);
+    process.exitCode = 1;
+  });`;
+  return spawnSync(process.execPath, ['-e', script, COIN_MODULE], {
+    env: { ...process.env, COIN_DB_PATH: dbPath }, encoding: 'utf8', cwd: os.tmpdir(),
+  });
 }
 
-test('every coin database write fsyncs a temporary file in the same directory, renames it, then syncs the directory',
+
+// A child process that kills itself, as a crash would: nothing is closed or flushed. POSIX reports the signal;
+// Windows has no signals, so process.kill ends the process through TerminateProcess with exit code 1. The
+// marker, written synchronously just before, tells that kill apart from an ordinary failure.
+const SELF_KILL_MARKER = 'XIAOJI_TEST_SELF_KILL';
+const SELF_KILL = `(require('node:fs').writeSync(1, '${SELF_KILL_MARKER}\\n'), process.kill(process.pid, 'SIGKILL'))`;
+
+function assertSelfKilled(result) {
+  const detail = result.stderr || result.stdout;
+  assert.ok(String(result.stdout).includes(SELF_KILL_MARKER), detail);
+  if (process.platform === 'win32') assert.equal(result.status, 1, detail);
+  else assert.equal(result.signal, 'SIGKILL', detail);
+}
+
+test('the file is held by one connection: WAL, synchronous FULL, foreign keys on, and no second process or connection gets in',
   async (t) => {
-    const { dbPath, directoryName } = await freshCoinDatabase(t, 'order');
-    for (const platform of ['linux', 'win32']) {
-      for (const [label, key, write] of [
-        ['transaction', `order-${platform}-tx`, (key) => coin.withCoinTransaction((api) => insertMarker(api, key))],
-      ]) {
-        const recorder = recordingFileSystem({ directory: path.dirname(dbPath) });
-        useFileSystem(recorder, platform);
-        await write(key);
-        coin.setCoinDatabaseDurabilityForTests(null);
-        // fsync of the temporary file comes before the rename; on POSIX the directory is
-        // opened read-only ('r', O_RDONLY) and fsynced after it.
-        assert.deepEqual(recorder.steps(), expectedReplaceSteps(directoryName, platform), `${platform} ${label}`);
-        assert.ok(recorder.calls.some(([kind]) => kind === 'write'), `${platform} ${label}`);
-        // The temporary file sits next to the database file, so the rename is an atomic
-        // replace within one directory (and one file system).
-        assert.deepEqual(recorder.renames, [[`${dbPath}.tmp`, dbPath]]);
-        assert.equal(path.dirname(recorder.renames[0][0]), path.dirname(recorder.renames[0][1]));
-        assert.equal(await fileMetadata(dbPath, key), '1');
-        await assertFileMatchesMemory(dbPath, `${platform} ${label}`);
-      }
+    const { root, dbPath } = await freshCoinDatabase(t, 'connection');
+    const settings = await coin.withCoinDatabase((api) => ({
+      journal: api.get('PRAGMA journal_mode').journal_mode,
+      synchronous: api.get('PRAGMA synchronous').synchronous,
+      foreignKeys: api.get('PRAGMA foreign_keys').foreign_keys,
+      locking: api.get('PRAGMA locking_mode').locking_mode,
+    }));
+    assert.deepEqual(settings, { journal: 'wal', synchronous: 2, foreignKeys: 1, locking: 'exclusive' });
+    // A -wal and no shared-memory file while it is open.
+    assert.deepEqual(fs.readdirSync(root).sort(), ['xiaoji.sqlite', 'xiaoji.sqlite-wal']);
+
+    const other = runCoinProcess(dbPath, 'await coin.initializeCoinDatabase(); process.stdout.write("OPENED");');
+    assert.equal(other.status, 1, other.stderr);
+    assert.match(other.stdout, /^ERROR 吉幣資料庫正由另一個行程或連線使用/u);
+    const sameProcess = new DatabaseSync(dbPath, { timeout: 0 });
+    try {
+      assert.throws(() => sameProcess.prepare('SELECT COUNT(*) AS count FROM coin_metadata').get(), /database is locked/u);
+    } finally {
+      sameProcess.close();
     }
+    // The bot's own connection was never disturbed.
+    await coin.withCoinTransaction((api) => insertMarker(api, 'still-mine'));
+    assert.equal(await memoryValue('still-mine'), '1');
   });
 
-test('opening an existing database writes it back durably, and a new one is created in place without overwriting',
+test('a COMMIT is on disk when it returns, and a crash in the middle of the next transaction keeps only the committed one',
   async (t) => {
-    const { root, dbPath, directoryName } = await freshCoinDatabase(t, 'open', { create: false });
-    // A failure while creating removes the half-made file; initialization can then be retried.
-    const failing = recordingFileSystem({ directory: root, fail: { step: ['fsync', 'xiaoji.sqlite'] } });
-    useFileSystem(failing, 'linux');
-    await assert.rejects(coin.initializeNewCoinDatabase({ expectedPath: dbPath }), /synthetic fsync failure/u);
-    assert.deepEqual(fs.readdirSync(root), []);
+    const { dbPath } = await freshCoinDatabase(t, 'crash');
+    coin.resetCoinDatabaseForTests();
+    const crashed = runCoinProcess(dbPath, `
+      await coin.withCoinTransaction((api) => api.run(
+        "INSERT INTO coin_metadata (key, value, updated_at) VALUES ('committed', '1', '${STAMP}')"));
+      await coin.withCoinDatabase((api) => api.run(
+        "INSERT INTO coin_metadata (key, value, updated_at) VALUES ('autocommitted', '1', '${STAMP}')"));
+      await coin.withCoinTransaction((api) => {
+        api.run("INSERT INTO coin_metadata (key, value, updated_at) VALUES ('in-flight', '1', '${STAMP}')");
+        api.run("UPDATE coin_metadata SET value = '2' WHERE key = 'committed'");
+        ${SELF_KILL};
+      });
+    `);
+    assertSelfKilled(crashed);
+    // The crash left the -wal; the next start replays it.
+    assert.equal(fs.existsSync(`${dbPath}-wal`), true);
+    await coin.initializeCoinDatabase();
+    assert.equal(await memoryValue('committed'), '1');
+    assert.equal(await memoryValue('autocommitted'), '1');
+    assert.equal(await memoryValue('in-flight'), null);
+    assert.equal(await coin.withCoinDatabase((api) => api.get('PRAGMA integrity_check').integrity_check), 'ok');
+  });
 
-    const created = recordingFileSystem({ directory: root });
-    useFileSystem(created, 'linux');
-    await coin.initializeNewCoinDatabase({ expectedPath: dbPath });
-    assert.deepEqual(created.steps(), [
+test('a transaction that throws, or whose COMMIT fails, writes nothing and leaves the database usable', async (t) => {
+  const { dbPath } = await freshCoinDatabase(t, 'commit-fails');
+  await coin.withCoinTransaction((api) => insertMarker(api, 'before'));
+  const before = filesState(dbPath);
+
+  await assert.rejects(coin.withCoinTransaction((api) => {
+    insertMarker(api, 'thrown');
+    throw new Error('synthetic work failure');
+  }), /synthetic work failure/u);
+  // A deferred foreign key is checked by the COMMIT itself, so the COMMIT fails.
+  await assert.rejects(coin.withCoinTransaction((api) => {
+    api.run('PRAGMA defer_foreign_keys = ON');
+    insertMarker(api, 'commit-failed');
+    api.run(`INSERT INTO game_actions (session_id, action_index, action_hash, state_json, created_at)
+             VALUES ('no-such-session', 0, 'hash', '{}', ?)`, [STAMP]);
+  }), (error) => error instanceof coin.CoinDatabaseError && error.message === '吉幣資料庫落盤失敗，交易已復原。' &&
+    /FOREIGN KEY constraint failed/u.test(error.cause?.message));
+  assert.deepEqual(filesState(dbPath), before, 'neither the file nor the -wal changed');
+  assert.equal(await memoryValue('thrown'), null);
+  assert.equal(await memoryValue('commit-failed'), null);
+  assert.equal(await coin.withCoinDatabase((api) => api.db.isTransaction), false);
+  // The next transaction goes through as usual, and is what the next start reads.
+  await coin.withCoinTransaction((api) => insertMarker(api, 'after'));
+  assert.equal(nextStartValue(dbPath, 'after'), '1');
+  assert.equal(nextStartValue(dbPath, 'commit-failed'), null);
+});
+
+test('values are bound and read back as before: 32-bit integers as INTEGER, plain-object rows, multi-statement exec',
+  async (t) => {
+    await freshCoinDatabase(t, 'binding');
+    const row = await coin.withCoinDatabase((api) => {
+      api.run('CREATE TEMP TABLE binding_probe (text_value TEXT, any_value)');
+      api.run('INSERT INTO binding_probe VALUES (?, ?)', [5, 2 ** 40]);
+      api.run('INSERT INTO binding_probe VALUES (?, ?); INSERT INTO binding_probe VALUES (99, 99)', [true, 10n]);
+      api.run("INSERT INTO binding_probe VALUES ('x', 1); INSERT INTO binding_probe VALUES ('y', 2)");
+      return {
+        rows: api.all('SELECT text_value, any_value, typeof(any_value) AS type FROM binding_probe ORDER BY rowid'),
+        one: api.get('SELECT ? AS half, ? AS missing', [0.5]),
+      };
+    });
+    assert.deepEqual(row.rows, [
+      { text_value: '5', any_value: 2 ** 40, type: 'real' },
+      { text_value: '1', any_value: '10', type: 'text' },
+      { text_value: 'x', any_value: 1, type: 'integer' },
+      { text_value: 'y', any_value: 2, type: 'integer' },
+    ]);
+    assert.equal(Object.getPrototypeOf(row.rows[0]), Object.prototype);
+    assert.deepEqual(row.one, { half: 0.5, missing: null });
+  });
+
+test('a clean close checkpoints the -wal into the file and removes it; the file holds everything and opens again, also as the old engine wrote it',
+  async (t) => {
+    const { root, dbPath } = await freshCoinDatabase(t, 'close');
+    await coin.withCoinTransaction((api) => insertMarker(api, 'closed-cleanly'));
+    await coin.closeCoinDatabase();
+    await coin.closeCoinDatabase();
+    assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite']);
+    // Every later operation is refused instead of opening the file again.
+    await assert.rejects(coin.withCoinDatabase((api) => api.get('SELECT 1 AS one')), /已關閉/u);
+    await assert.rejects(coin.initializeCoinDatabase(), /已關閉/u);
+    assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite']);
+
+    // The file alone holds everything: an in-memory copy of its bytes, with nothing beside it,
+    // reads the last transaction. (The old engine, sql.js until v1.3.x, loaded the whole file into
+    // memory the same way; it was checked to read a cleanly closed file when the engine changed.)
+    const old = new DatabaseSync(':memory:');
+    try {
+      const bytes = fs.readFileSync(dbPath);
+      bytes[18] = 1;
+      bytes[19] = 1;
+      old.deserialize(bytes);
+      assert.equal(old.prepare("SELECT value FROM coin_metadata WHERE key = 'closed-cleanly'").get().value, '1');
+      // A file as the old engine wrote it (its full export: a rollback-journal header, nothing
+      // beside it) opens without a migration. serialize() of an in-memory database gives exactly
+      // that format.
+      old.prepare("INSERT INTO coin_metadata (key, value, updated_at) VALUES ('old-engine', '1', ?)").run(STAMP);
+      const exported = Buffer.from(old.serialize());
+      assert.deepEqual([exported[18], exported[19]], [1, 1]);
+      fs.writeFileSync(dbPath, exported);
+    } finally {
+      old.close();
+    }
+    coin.resetCoinDatabaseForTests();
+    await coin.initializeCoinDatabase();
+    assert.equal(await memoryValue('old-engine'), '1');
+    assert.equal(await memoryValue('closed-cleanly'), '1');
+    assert.deepEqual(backups(root), [], 'a current schema needs no migration backup');
+    assert.equal(fs.readFileSync(dbPath)[18], 2, 'the header now marks a WAL database');
+  });
+
+test('a database whose schema is behind is migrated in place after a verified backup; only the newest 3 backups stay',
+  async (t) => {
+    const { root, dbPath } = await freshCoinDatabase(t, 'migrate');
+    const expectedSchema = await coin.withCoinDatabase((api) => schemaOf(api.db));
+    await coin.withCoinTransaction((api) => insertMarker(api, 'kept-through-migration'));
+    await coin.closeCoinDatabase();
+    editClosedFile(dbPath, BACK_TO_V23);
+    const original = fs.readFileSync(dbPath);
+    // Older backups of this database, and one of another database in the same folder.
+    const older = ['20250101T000000000Z', '20250201T000000000Z', '20250301T000000000Z']
+      .map((stamp) => `xiaoji.sqlite.pre-v22-${stamp}.bak`);
+    for (const name of [...older, 'other.sqlite.pre-v22-20240101T000000000Z.bak']) fs.writeFileSync(path.join(root, name), name);
+
+    coin.resetCoinDatabaseForTests();
+    const info = await coin.initializeCoinDatabase();
+    assert.equal(info.schemaVersion, 24);
+    assert.deepEqual(info.createdTables, ['coin_admin_add_confirmations']);
+    assert.equal(await coin.withCoinDatabase((api) => coin.readCoinSchemaVersionWithApi(api)), 24);
+    assert.equal(await memoryValue('kept-through-migration'), '1');
+    assert.deepEqual(await coin.withCoinDatabase((api) => schemaOf(api.db)), expectedSchema);
+    // After a migration the connection holds the file exclusively like any other open.
+    const other = runCoinProcess(dbPath, 'await coin.initializeCoinDatabase(); process.stdout.write("OPENED");');
+    assert.equal(other.status, 1, other.stderr);
+    assert.match(other.stdout, /^ERROR 吉幣資料庫正由另一個行程或連線使用/u);
+
+    const made = backups(root).filter((name) => /^xiaoji\.sqlite\.pre-v23-\d{8}T\d{9}Z\.bak$/u.test(name));
+    assert.equal(made.length, 1);
+    assert.ok(fs.readFileSync(path.join(root, made[0])).equals(original), 'the backup is the file before the migration');
+    // The newest three of this database's backups stay; another database's backup is not touched.
+    assert.deepEqual(backups(root), [...older.slice(1), made[0], 'other.sqlite.pre-v22-20240101T000000000Z.bak'].sort());
+    assert.equal(fs.readdirSync(root).some((name) => name.endsWith('.tmp')), false);
+
+    // A database already current is opened without a backup and without rewriting schema_version.
+    const versionRow = () => coin.withCoinDatabase((api) => api.get(
+      "SELECT value, updated_at FROM coin_metadata WHERE key = 'schema_version'"));
+    const stored = await versionRow();
+    coin.resetCoinDatabaseForTests();
+    await coin.initializeCoinDatabase();
+    assert.deepEqual(await versionRow(), stored);
+    assert.equal(backups(root).length, 4);
+  });
+
+test('a migration that fails puts the backup back: the original file is byte-identical and the start stops', async (t) => {
+  const { root, dbPath } = await freshCoinDatabase(t, 'migration-fails');
+  await coin.closeCoinDatabase();
+  // The v24 migration meets a view where its table belongs and fails; before that the open has
+  // already switched the file to WAL and recreated a missing table (committed writes).
+  editClosedFile(dbPath, `${BACK_TO_V23}
+    DROP TABLE coin_admin_logs;
+    CREATE VIEW coin_admin_add_confirmations AS SELECT 1 AS operation_id;`);
+  const original = fs.readFileSync(dbPath);
+  assert.equal(original[18], 1);
+
+  coin.resetCoinDatabaseForTests();
+  await assert.rejects(coin.initializeCoinDatabase(),
+    (error) => error instanceof coin.CoinDatabaseError && /加幣確認狀態結構升級失敗/u.test(error.message));
+  assert.ok(fs.readFileSync(dbPath).equals(original), 'the file is exactly as it was');
+  assert.deepEqual(fs.readdirSync(root).filter((name) => !name.endsWith('.bak')), ['xiaoji.sqlite']);
+  const [backup] = backups(root);
+  assert.ok(fs.readFileSync(path.join(root, backup)).equals(original));
+  // Nothing is held open: a plain connection reads the restored file.
+  const db = new DatabaseSync(dbPath);
+  try {
+    assert.equal(db.prepare("SELECT value FROM coin_metadata WHERE key = 'schema_version'").get().value, '23');
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'coin_admin_logs'").get(), undefined);
+  } finally {
+    db.close();
+  }
+
+  // When putting the backup back fails as well, the start stops with a fixed code naming the backup.
+  coin.resetCoinDatabaseForTests();
+  useFileSystem(recordingFileSystem({ directory: root, fail: { step: ['rename', 'xiaoji.sqlite.tmp', 'xiaoji.sqlite'] } }),
+    process.platform);
+  await assert.rejects(coin.initializeCoinDatabase(), (error) => error.code === 'COIN_DB_MIGRATION_RESTORE_FAILED' &&
+    error.message.includes(error.backupFile) && /^xiaoji\.sqlite\.pre-v23-\d{8}T\d{9}Z\.bak$/u.test(error.backupFile));
+  coin.setCoinDatabaseDurabilityForTests(null);
+  assert.equal(fs.existsSync(`${dbPath}-wal`), false);
+  assert.equal(fs.existsSync(`${dbPath}.tmp`), false);
+  for (const name of backups(root)) assert.ok(fs.readFileSync(path.join(root, name)).equals(original), name);
+});
+
+test('a migration backup that cannot be written stops the start before anything is changed', async (t) => {
+  const { root, dbPath, directoryName } = await freshCoinDatabase(t, 'backup-fails');
+  await coin.closeCoinDatabase();
+  editClosedFile(dbPath, BACK_TO_V23);
+  const original = fs.readFileSync(dbPath);
+  for (const [label, fail] of [
+    ['temporary file fsync', (name) => ['fsync', `${name}.tmp`]],
+    ['rename', (name) => ['rename', `${name}.tmp`, name]],
+    ['directory fsync', () => ['fsync', directoryName]],
+  ]) {
+    coin.resetCoinDatabaseForTests();
+    // The backup name holds the time of the write, so the failing step is matched by prefix.
+    const recorder = recordingFileSystem({ directory: root });
+    const filesystem = recorder.filesystem;
+    const matches = (step) => {
+      const backupName = recorder.calls.map((call) => call[1]).find((name) => /\.bak(\.tmp)?$/u.test(String(name)));
+      if (!backupName) return false;
+      const expected = fail(backupName.replace(/\.tmp$/u, ''));
+      return expected.length === step.length && expected.every((part, index) => part === step[index]);
+    };
+    const failing = { ...filesystem };
+    for (const method of ['fsyncSync', 'renameSync']) {
+      failing[method] = (...args) => {
+        const before = recorder.calls.length;
+        const result = filesystem[method](...args);
+        if (matches(recorder.calls[before])) throw Object.assign(new Error(`synthetic ${label} failure`), { code: 'EIO' });
+        return result;
+      };
+    }
+    coin.setCoinDatabaseDurabilityForTests({ filesystem: failing, platform: 'linux' });
+    await assert.rejects(coin.initializeCoinDatabase(), (error) => error instanceof coin.CoinDatabaseError &&
+      /備份失敗/u.test(error.message) && error.cause?.message === `synthetic ${label} failure`, label);
+    coin.setCoinDatabaseDurabilityForTests(null);
+    assert.ok(fs.readFileSync(dbPath).equals(original), label);
+    assert.equal(fs.existsSync(`${dbPath}-wal`), false, label);
+    assert.equal(fs.readdirSync(root).some((name) => name.endsWith('.tmp')), false, label);
+  }
+});
+
+test('on Windows a scanner\'s EPERM/EBUSY on the backup rename is retried; when the retries run out the start stops',
+  async (t) => {
+    const { root, dbPath } = await freshCoinDatabase(t, 'windows-retry');
+    await coin.closeCoinDatabase();
+    editClosedFile(dbPath, BACK_TO_V23);
+    const original = fs.readFileSync(dbPath);
+    const sleeps = [];
+    const sleep = async (ms) => { sleeps.push(ms); };
+
+    coin.resetCoinDatabaseForTests();
+    useFileSystem(recordingFileSystem({ directory: root, renameFailures: Array(8).fill('EPERM') }), 'win32', { sleep });
+    await assert.rejects(coin.initializeCoinDatabase(), (error) => /備份失敗/u.test(error.message) && error.cause?.code === 'EPERM');
+    assert.deepEqual(sleeps, [25, 50, 100, 200, 400, 800, 1000]);
+    assert.ok(fs.readFileSync(dbPath).equals(original));
+    assert.deepEqual(backups(root), []);
+
+    coin.resetCoinDatabaseForTests();
+    sleeps.length = 0;
+    useFileSystem(recordingFileSystem({ directory: root, renameFailures: ['EPERM', 'EBUSY'] }), 'win32', { sleep });
+    await coin.initializeCoinDatabase();
+    assert.deepEqual(sleeps, [25, 50]);
+    assert.equal(backups(root).length, 1);
+    assert.equal(await coin.withCoinDatabase((api) => coin.readCoinSchemaVersionWithApi(api)), 24);
+  });
+
+test('a -wal beside a database whose schema is behind (a migration that never finished) stops the start, untouched',
+  async (t) => {
+    const { root, dbPath } = await freshCoinDatabase(t, 'unfinished');
+    await coin.closeCoinDatabase();
+    editClosedFile(dbPath, BACK_TO_V23);
+    // A process that wrote to the v23 file in WAL mode and was killed before it closed.
+    const crashed = spawnSync(process.execPath, ['-e', `
+      const { DatabaseSync } = require('node:sqlite');
+      const db = new DatabaseSync(process.argv[1]);
+      db.exec('PRAGMA locking_mode = EXCLUSIVE');
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec("INSERT INTO coin_metadata (key, value, updated_at) VALUES ('half-way', '1', '${STAMP}')");
+      ${SELF_KILL};
+    `, dbPath], { encoding: 'utf8' });
+    assertSelfKilled(crashed);
+    const before = filesState(dbPath);
+    assert.notEqual(before.wal, null);
+
+    coin.resetCoinDatabaseForTests();
+    await assert.rejects(coin.initializeCoinDatabase(), /需要從 v23 升級，但旁邊還有 -wal/u);
+    assert.deepEqual(filesState(dbPath), before);
+    assert.deepEqual(fs.readdirSync(root).sort(), ['xiaoji.sqlite', 'xiaoji.sqlite-wal']);
+  });
+
+test('a database that is damaged, not SQLite, or from a newer version is refused and never written', async (t) => {
+  const { dbPath } = await freshCoinDatabase(t, 'refused');
+  await coin.closeCoinDatabase();
+  editClosedFile(dbPath, "UPDATE coin_metadata SET value = '25' WHERE key = 'schema_version'");
+  const before = sha256File(dbPath);
+  coin.resetCoinDatabaseForTests();
+  await assert.rejects(coin.initializeCoinDatabase(), /不支援的吉幣資料庫 schema 版本：25/u);
+  assert.equal(sha256File(dbPath), before);
+  assert.equal(fs.existsSync(`${dbPath}-wal`), false);
+
+  for (const bytes of [Buffer.alloc(0), Buffer.from('not a database at all '.repeat(10))]) {
+    fs.writeFileSync(dbPath, bytes);
+    coin.resetCoinDatabaseForTests();
+    await assert.rejects(coin.initializeCoinDatabase(), /吉幣資料庫讀取失敗，不會自動重建空資料庫/u);
+    assert.ok(fs.readFileSync(dbPath).equals(bytes));
+  }
+
+  fs.rmSync(dbPath);
+  coin.resetCoinDatabaseForTests();
+  await assert.rejects(coin.initializeCoinDatabase(), /不存在；已停止啟動/u);
+  assert.equal(fs.existsSync(dbPath), false);
+});
+
+test('a new database is built in memory and created in place exclusively, then its directory is synced', async (t) => {
+  const { root, dbPath, directoryName } = await freshCoinDatabase(t, 'create', { create: false });
+  for (const platform of ['linux', 'win32']) {
+    coin.resetCoinDatabaseForTests();
+    fs.rmSync(dbPath, { force: true });
+    const recorder = recordingFileSystem({ directory: root });
+    useFileSystem(recorder, platform);
+    const info = await coin.initializeNewCoinDatabase({ expectedPath: dbPath });
+    assert.equal(info.createdDatabase, true, platform);
+    assert.ok(info.createdTables.includes('coin_admin_add_confirmations'), platform);
+    assert.deepEqual(recorder.steps(), [
       ['mkdir', directoryName],
       ['open', 'xiaoji.sqlite', 'wx'],
       ['fsync', 'xiaoji.sqlite'],
       ['close', 'xiaoji.sqlite'],
-      ['open', directoryName, 'r'],
-      ['fsync', directoryName],
-      ['close', directoryName],
-    ]);
-    await assertFileMatchesMemory(dbPath);
-
-    // A start writes the existing database back through the same durable steps.
-    coin.resetCoinDatabaseForTests();
-    const reopened = recordingFileSystem({ directory: root });
-    useFileSystem(reopened, 'linux');
-    await coin.initializeCoinDatabase();
-    assert.deepEqual(reopened.steps(), expectedReplaceSteps(directoryName, 'linux'));
-    await assertFileMatchesMemory(dbPath);
-    assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite']);
-  });
-
-test('on Windows a scanner\'s EPERM/EBUSY on the rename is retried; when the retries run out the transaction is undone',
-  async (t) => {
-    const { root, dbPath } = await freshCoinDatabase(t, 'retry');
-    const slept = [];
-    const sleep = async (ms) => { slept.push(ms); };
-    const transient = recordingFileSystem({ renameFailures: ['EPERM', 'EBUSY'] });
-    useFileSystem(transient, 'win32', { sleep });
-    await coin.withCoinTransaction((api) => insertMarker(api, 'retry-ok'));
-    assert.equal(transient.calls.filter(([kind]) => kind === 'rename').length, 3);
-    assert.deepEqual(slept, [25, 50]);
-    assert.equal(await fileMetadata(dbPath, 'retry-ok'), '1');
-
-    const before = sha256File(dbPath);
-    slept.length = 0;
-    const exhausted = recordingFileSystem({ renameFailures: Array(8).fill('EBUSY') });
-    useFileSystem(exhausted, 'win32', { sleep });
-    await assert.rejects(coin.withCoinTransaction((api) => insertMarker(api, 'retry-exhausted')),
-      (error) => error instanceof coin.CoinDatabaseError && error.message === '吉幣資料庫落盤失敗，交易已復原。' &&
-        error.cause?.code === 'EBUSY');
-    assert.equal(exhausted.calls.filter(([kind]) => kind === 'rename').length, 8);
-    assert.deepEqual(slept, [25, 50, 100, 200, 400, 800, 1000]);
-    // The file is untouched, the temporary file is gone, and memory is back to its state
-    // before the transaction.
-    assert.equal(sha256File(dbPath), before);
-    assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite']);
+      ...(platform === 'win32'
+        ? [['open', 'xiaoji.sqlite', 'r+'], ['fsync', 'xiaoji.sqlite'], ['close', 'xiaoji.sqlite']]
+        : [['open', directoryName, 'r'], ['fsync', directoryName], ['close', directoryName]]),
+    ], platform);
     coin.setCoinDatabaseDurabilityForTests(null);
-    assert.equal(await memoryValue('retry-exhausted'), null);
-    assert.equal(await memoryValue('retry-ok'), '1');
-
-    // On POSIX the same codes are real errors: one attempt, no retry.
-    const denied = recordingFileSystem({ renameFailures: ['EACCES'] });
-    useFileSystem(denied, 'linux', { sleep });
-    await assert.rejects(coin.withCoinTransaction((api) => insertMarker(api, 'denied')),
-      (error) => error.cause?.code === 'EACCES');
-    assert.equal(denied.calls.filter(([kind]) => kind === 'rename').length, 1);
+    // Transactions never come through the whole-file writes.
+    const quiet = recordingFileSystem({ directory: root });
+    useFileSystem(quiet, platform);
+    await coin.withCoinTransaction((api) => insertMarker(api, `created-${platform}`));
+    assert.deepEqual(quiet.calls, [], platform);
     coin.setCoinDatabaseDurabilityForTests(null);
-    assert.equal(sha256File(dbPath), before);
-    assert.equal(await memoryValue('denied'), null);
-  });
-
-test('a failure at any step up to the rename restores memory and leaves the database file untouched', async (t) => {
-  const { root, dbPath, directoryName } = await freshCoinDatabase(t, 'steps');
-  const steps = [
-    ['mkdir', directoryName],
-    ['open', 'xiaoji.sqlite.tmp', 'w'],
-    ['write', 'xiaoji.sqlite.tmp'],
-    ['fsync', 'xiaoji.sqlite.tmp'],
-    ['close', 'xiaoji.sqlite.tmp'],
-    ['rename', 'xiaoji.sqlite.tmp', 'xiaoji.sqlite'],
-  ];
-  for (const [index, step] of steps.entries()) {
-    const label = step.join(' ');
-    const key = `step-${index}`;
-    const before = sha256File(dbPath);
-    const recorder = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step } });
-    useFileSystem(recorder, 'linux');
-    await assert.rejects(coin.withCoinTransaction((api) => insertMarker(api, key)),
-      (error) => error instanceof coin.CoinDatabaseError && error.message === '吉幣資料庫落盤失敗，交易已復原。' &&
-        error.cause?.message === `synthetic ${step[0]} failure`, label);
-    coin.setCoinDatabaseDurabilityForTests(null);
-    if (step[0] !== 'rename') assert.equal(recorder.calls.some(([kind]) => kind === 'rename'), false, label);
-    assert.equal(sha256File(dbPath), before, label);
-    assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite'], label);
-    assert.equal(await memoryValue(key), null, label);
-    // The restored database keeps working, and the file follows memory again.
-    await coin.withCoinTransaction((api) => insertMarker(api, `${key}-after`));
-    assert.equal(await fileMetadata(dbPath, `${key}-after`), '1', label);
-    assert.equal(await fileMetadata(dbPath, key), null, label);
-    await assertFileMatchesMemory(dbPath, label);
   }
+  // Never over an existing file.
+  coin.resetCoinDatabaseForTests();
+  const before = sha256File(dbPath);
+  await assert.rejects(coin.initializeNewCoinDatabase({ expectedPath: dbPath }), /來源不存在/u);
+  assert.equal(sha256File(dbPath), before);
 });
 
-test('a directory fsync failing after the rename counts as committed: memory keeps the write and a fixed code is escalated',
-  async (t) => {
-    const { dbPath, directoryName } = await freshCoinDatabase(t, 'directory');
-    const logs = captureCoinDatabaseLogs(t);
-    const failing = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['fsync', directoryName] } });
-    useFileSystem(failing, 'linux');
-    const result = await coin.withCoinTransaction((api) => {
-      insertMarker(api, 'after-rename');
-      return 'committed';
-    });
-    assert.equal(result, 'committed');
-    assert.deepEqual(failing.steps(), expectedReplaceSteps(directoryName, 'linux'));
-    // Memory and the file hold the same write: nothing was rolled back.
-    assert.equal(await memoryValue('after-rename'), '1');
-    assert.equal(await fileMetadata(dbPath, 'after-rename'), '1');
-    await assertFileMatchesMemory(dbPath);
-    assert.deepEqual(coin.getLedgerEscalations(), [
-      { purposeId: 'coin-database', code: 'COIN_DB_DIRECTORY_SYNC_FAILED', stage: 'runtime', reason: null },
-    ]);
-    assert.deepEqual(logs, [
-      '[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_FAILED stage=runtime errno=EIO',
-      '[COIN_DB] code=COIN_DB_ESCALATION cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=runtime',
-    ]);
-
-    // The write is not confirmed durable, so the next operation writes and syncs again even
-    // though it changes nothing; once that succeeds, an unchanged database is not written.
-    const retry = recordingFileSystem({ directory: path.dirname(dbPath) });
-    useFileSystem(retry, 'linux');
-    await coin.withCoinTransaction(NOTHING);
-    assert.deepEqual(retry.steps(), expectedReplaceSteps(directoryName, 'linux'));
-    const quiet = recordingFileSystem({ directory: path.dirname(dbPath) });
-    useFileSystem(quiet, 'linux');
-    await coin.withCoinTransaction(NOTHING);
-    assert.deepEqual(quiet.calls, []);
-
-    // The same failure while opening the database lets the start continue, escalated as 'open'.
-    coin.resetCoinDatabaseForTests();
-    const atOpen = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['fsync', directoryName] } });
-    useFileSystem(atOpen, 'linux');
-    await coin.initializeCoinDatabase();
-    assert.deepEqual(coin.getLedgerEscalations().map((entry) => entry.stage), ['open']);
-    await assertFileMatchesMemory(dbPath);
-  });
-
-test('a file system that cannot sync a directory (EINVAL and the like) keeps the write with one warning', async (t) => {
-  const { dbPath, directoryName } = await freshCoinDatabase(t, 'unsupported');
-  const logs = captureCoinDatabaseLogs(t);
-  for (const [index, code] of ['EINVAL', 'EINVAL', 'ENOTSUP'].entries()) {
-    const recorder = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['fsync', directoryName], code } });
-    useFileSystem(recorder, 'linux');
-    await coin.withCoinTransaction((api) => insertMarker(api, `unsupported-${index}`));
-    assert.deepEqual(recorder.steps(), expectedReplaceSteps(directoryName, 'linux'), code);
-    assert.equal(await fileMetadata(dbPath, `unsupported-${index}`), '1', code);
-  }
-  // Committed, not escalated; one warning per code; an unchanged database is not rewritten.
-  assert.deepEqual(coin.getLedgerEscalations(), []);
-  assert.deepEqual(logs, [
-    '[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_UNSUPPORTED errno=EINVAL',
-    '[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_UNSUPPORTED errno=ENOTSUP',
-  ]);
-  const quiet = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['fsync', directoryName], code: 'EINVAL' } });
-  useFileSystem(quiet, 'linux');
-  await coin.withCoinTransaction(NOTHING);
-  assert.deepEqual(quiet.calls, []);
-  // A safety registration written there succeeds the same way instead of failing closed.
+test('a new database whose close fails leaves nothing behind, closing each descriptor at most once', async (t) => {
+  const { root, dbPath, directoryName } = await freshCoinDatabase(t, 'close-once', { create: false });
+  const creating = recordingFileSystem({ directory: root, fail: { step: ['close', 'xiaoji.sqlite'] } });
+  useFileSystem(creating, 'linux');
+  await assert.rejects(coin.initializeNewCoinDatabase({ expectedPath: dbPath }), /synthetic close failure/u);
   coin.setCoinDatabaseDurabilityForTests(null);
-  const einval = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['fsync', directoryName], code: 'EINVAL' } });
-  const written = await coin.writeSafetyLedgerRegistrations([{ purposeId: 'welcome', expectedValue: null, value: '{"n":1}' }],
-    { filesystem: einval.filesystem, platform: 'linux' });
-  assert.equal(written.written, 1);
-  assert.equal((await coin.readSafetyLedgerRegistrations()).welcome.value, '{"n":1}');
-  assert.equal((await coin.inspectSafetyRegistrationsFromFile(dbPath)).registrations.welcome.value, '{"n":1}');
-  await assertFileMatchesMemory(dbPath);
+  assert.equal(creating.calls.filter(([kind, name]) => kind === 'close' && name === 'xiaoji.sqlite').length, 1);
+  assert.equal(creating.calls.some(([kind, name]) => kind === 'open' && name === directoryName), false);
+  assert.deepEqual(fs.readdirSync(root), []);
 });
 
-test('a transaction that changes nothing writes nothing; a change made outside a transaction is written by the next one',
+test('the directory sync of a new database: open, fsync or close failing is escalated; EOPNOTSUPP and EISDIR count as unsupported',
   async (t) => {
-    const { dbPath, directoryName } = await freshCoinDatabase(t, 'skip');
-    const recorder = recordingFileSystem({ directory: path.dirname(dbPath) });
-    useFileSystem(recorder, 'linux');
-    const before = sha256File(dbPath);
-    const mtime = fs.statSync(dbPath).mtimeMs;
-    await coin.withCoinTransaction(NOTHING);
-    await coin.withCoinTransaction((api) => api.run(
-      "INSERT INTO coin_metadata (key, value, updated_at) VALUES ('schema_version', 'x', 'y') ON CONFLICT(key) DO NOTHING"));
-    assert.deepEqual(recorder.calls, []);
-    assert.equal(sha256File(dbPath), before);
-    assert.equal(fs.statSync(dbPath).mtimeMs, mtime);
-
-    // ensureGuildSettings through withCoinDatabase changes memory only, as the work penalty
-    // announcement does; the next transaction writes it although it changes nothing itself.
-    const settings = await coin.withCoinDatabase((api) => ensureGuildSettings(api, GUILD_ID));
-    assert.equal(settings.guildId, GUILD_ID);
-    assert.deepEqual(recorder.calls, []);
-    const sql = 'SELECT guild_id FROM coin_guild_settings WHERE guild_id = ?';
-    assert.equal(await fileRow(dbPath, sql, [GUILD_ID]), null);
-    await coin.withCoinTransaction(NOTHING);
-    assert.deepEqual(recorder.steps(), expectedReplaceSteps(directoryName, 'linux'));
-    assert.deepEqual(await fileRow(dbPath, sql, [GUILD_ID]), { guild_id: GUILD_ID });
-    await assertFileMatchesMemory(dbPath);
-  });
-
-test('every kind of change is written by the next transaction: run, exec, prepare and step, schema and PRAGMA',
-  async (t) => {
-    const { dbPath } = await freshCoinDatabase(t, 'kinds');
-    const changes = [
-      ['api.run', (api) => insertMarker(api, 'kind-run')],
-      ['db.run', (api) => api.db.run("UPDATE coin_metadata SET value = '2' WHERE key = 'kind-run'")],
-      ['db.exec', (api) => api.db.exec(
-        "INSERT INTO coin_metadata (key, value, updated_at) VALUES ('kind-exec', '1', '2026-10-03T00:00:00.000Z')")],
-      ['prepare and step', (api) => {
-        const statement = api.db.prepare("DELETE FROM coin_metadata WHERE key = 'kind-exec'");
-        try {
-          statement.step();
-        } finally {
-          statement.free();
-        }
-      }],
-      ['CREATE TABLE', (api) => api.db.run('CREATE TABLE durability_probe (id INTEGER PRIMARY KEY)')],
-      ['DROP TABLE', (api) => api.db.run('DROP TABLE durability_probe')],
-      ['PRAGMA user_version', (api) => api.db.run('PRAGMA user_version = 7')],
+    const { root, dbPath, directoryName } = await freshCoinDatabase(t, 'directory-steps', { create: false });
+    const logs = captureCoinDatabaseLogs(t);
+    const cases = [
+      { step: ['open', directoryName, 'r'], code: 'EACCES', expected: 'failed', closes: 0 },
+      { step: ['fsync', directoryName], code: 'EIO', expected: 'failed', closes: 1 },
+      { step: ['close', directoryName], code: 'EIO', expected: 'failed', closes: 1 },
+      { step: ['fsync', directoryName], code: 'EOPNOTSUPP', expected: 'unsupported', closes: 1 },
+      { step: ['open', directoryName, 'r'], code: 'EISDIR', expected: 'unsupported', closes: 0 },
     ];
-    for (const [label, change] of changes) {
-      const before = sha256File(dbPath);
-      await coin.withCoinDatabase(change);
-      assert.equal(sha256File(dbPath), before, `${label}: memory only until the next write`);
-      await coin.withCoinTransaction(NOTHING);
-      assert.notEqual(sha256File(dbPath), before, `${label}: written by the next transaction`);
-      await assertFileMatchesMemory(dbPath, label);
+    for (const { step, code, expected, closes } of cases) {
+      const label = `${step[0]} ${code}`;
+      coin.resetCoinDatabaseForTests();
+      fs.rmSync(dbPath, { force: true });
+      logs.length = 0;
+      const recorder = recordingFileSystem({ directory: root, fail: { step, code } });
+      useFileSystem(recorder, 'linux');
+      // The database stands either way.
+      await coin.initializeNewCoinDatabase({ expectedPath: dbPath });
+      coin.setCoinDatabaseDurabilityForTests(null);
+      assert.equal(recorder.calls.filter(([kind, name]) => kind === 'close' && name === directoryName).length, closes, label);
+      await coin.withCoinTransaction((api) => insertMarker(api, 'stands'));
+      if (expected === 'failed') {
+        assert.deepEqual(logs, [
+          `[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_FAILED stage=open errno=${code}`,
+          '[COIN_DB] code=COIN_DB_ESCALATION cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=open',
+        ], label);
+        assert.deepEqual(coin.getLedgerEscalations().map((entry) => entry.code), ['COIN_DB_DIRECTORY_SYNC_FAILED'], label);
+      } else {
+        assert.deepEqual(logs, [`[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_UNSUPPORTED errno=${code}`], label);
+        assert.deepEqual(coin.getLedgerEscalations(), [], label);
+      }
     }
-    assert.equal(await fileMetadata(dbPath, 'kind-run'), '2');
-    assert.equal(await fileMetadata(dbPath, 'kind-exec'), null);
-    assert.deepEqual(await fileRow(dbPath, 'PRAGMA user_version', []), { user_version: 7 });
   });
 
-test('after a registration write fails past the rename, the next transaction writes memory back even if it changes nothing',
-  async (t) => {
-    const { dbPath, directoryName } = await freshCoinDatabase(t, 'registration');
-    const original = JSON.stringify({ state: 'creating' });
-    await coin.writeSafetyLedgerRegistrations([{ purposeId: 'welcome', expectedValue: null, value: original }]);
-    const failing = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['fsync', directoryName] } });
-    await assert.rejects(coin.writeSafetyLedgerRegistrations(
-      [{ purposeId: 'welcome', expectedValue: original, value: JSON.stringify({ state: 'active' }) }],
-      { filesystem: failing.filesystem, platform: 'linux' }), (error) => error.code === 'SAFETY_REGISTRATION_WRITE_FAILED');
-    // Unchanged registration rule: memory went back, the file is one write ahead.
-    assert.equal((await coin.readSafetyLedgerRegistrations()).welcome.value, original);
-    assert.notEqual((await coin.inspectSafetyRegistrationsFromFile(dbPath)).registrations.welcome.value, original);
-    // A transaction that changes nothing still writes memory back.
-    await coin.withCoinTransaction(NOTHING);
-    assert.equal((await coin.inspectSafetyRegistrationsFromFile(dbPath)).registrations.welcome.value, original);
-    await assertFileMatchesMemory(dbPath);
-  });
-
-test('the file-system hook of coin database writes is refused outside the Node test runner', () => {
+test('the file-system hook of the whole-file writes is refused outside the Node test runner', () => {
   const script = `
     const coin = require(process.argv[1]);
     try {
@@ -493,55 +654,44 @@ test('the file-system hook of coin database writes is refused outside the Node t
 });
 
 const ESCALATION_LINE =
-  '[SIDE_EFFECT_LEDGER] code=LEDGER_ESCALATION purpose=coin-database cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=runtime';
+  '[SIDE_EFFECT_LEDGER] code=LEDGER_ESCALATION purpose=coin-database cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=open';
 
-async function failOneDirectorySync(dbPath, directoryName, key) {
-  useFileSystem(recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['fsync', directoryName] } }), 'linux');
+async function createWithFailingDirectorySync(dbPath) {
+  coin.resetCoinDatabaseForTests();
+  fs.rmSync(dbPath, { force: true });
+  useFileSystem(recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['fsync', path.basename(path.dirname(dbPath))] } }),
+    'linux');
   try {
-    await coin.withCoinTransaction((api) => insertMarker(api, key));
+    await coin.initializeNewCoinDatabase({ expectedPath: dbPath });
   } finally {
     coin.setCoinDatabaseDurabilityForTests(null);
   }
 }
 
-test('a coin database escalation is reported once and ends the stop with exit code 3, also when it comes late',
-  async (t) => {
-    const { dbPath, directoryName } = await freshCoinDatabase(t, 'shutdown');
-    captureCoinDatabaseLogs(t);
-    const reported = [];
-    const logger = { error: (line) => reported.push(line) };
-    // A clean first report, then a failure during the later stop steps: the last report of the
-    // coin database alone still turns the clean code into the escalation code.
-    const late = {};
-    assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger, processRef: late, exitCode: 0 }), 0);
-    assert.equal(late.exitCode, 0);
-    await failOneDirectorySync(dbPath, directoryName, 'during-later-steps');
-    assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger, processRef: late }),
-      LEDGER_ESCALATION_EXIT_CODE);
-    assert.equal(late.exitCode, 3);
-    assert.deepEqual(reported, [ESCALATION_LINE]);
-    // Reported already: a later report prints nothing again but keeps the code, and another
-    // failure in the same stage is the same escalation.
-    await failOneDirectorySync(dbPath, directoryName, 'again');
-    assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger, processRef: late }), 3);
-    assert.deepEqual(reported, [ESCALATION_LINE]);
-    // A failure code set earlier is kept.
-    const crashed = { exitCode: 1 };
-    assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger, processRef: crashed }), 1);
+test('a coin database escalation is reported once and ends the stop with exit code 3', async (t) => {
+  const { dbPath } = await freshCoinDatabase(t, 'shutdown', { create: false });
+  captureCoinDatabaseLogs(t);
+  const reported = [];
+  const reportLogger = { error: (line) => reported.push(line) };
+  await createWithFailingDirectorySync(dbPath);
+  const stop = {};
+  assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger: reportLogger, processRef: stop, exitCode: 0 }),
+    LEDGER_ESCALATION_EXIT_CODE);
+  assert.equal(stop.exitCode, 3);
+  // The last report of the stop prints nothing again but keeps the code.
+  assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger: reportLogger, processRef: stop }), 3);
+  assert.deepEqual(reported, [ESCALATION_LINE]);
+  // A failure code set earlier is kept.
+  const crashed = { exitCode: 1 };
+  assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger: reportLogger, processRef: crashed }), 1);
+  // A fresh database starts afresh.
+  await createWithFailingDirectorySync(dbPath);
+  reported.length = 0;
+  assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger: reportLogger, processRef: {}, exitCode: 0 }), 3);
+  assert.deepEqual(reported, [ESCALATION_LINE]);
+});
 
-    // A fresh database starts afresh: the same failure before the first report is printed by
-    // that report, and the last one adds nothing.
-    coin.resetCoinDatabaseForTests();
-    await coin.initializeCoinDatabase();
-    await failOneDirectorySync(dbPath, directoryName, 'before-stop');
-    reported.length = 0;
-    const early = {};
-    assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger, processRef: early, exitCode: 0 }), 3);
-    assert.equal(settleLedgerShutdown({ sources: [coinDatabaseEscalations], logger, processRef: early }), 3);
-    assert.deepEqual(reported, [ESCALATION_LINE]);
-  });
-
-test('index.js loads the coin database escalations once and reports them in every stop path, even after a failing step', () => {
+test('index.js closes the coin database after every later stop step and reports the escalations in every stop path', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.js'), 'utf8').replace(/\r\n/gu, '\n');
   // Loaded with the other modules at start, never during a stop.
   assert.match(source, /^const coinDatabaseEscalations = require\('\.\/systems\/economy\/coinDatabaseEscalations'\);$/mu);
@@ -555,152 +705,32 @@ test('index.js loads the coin database escalations once and reports them in ever
     assert.match(call, /sources: \[publicSideEffectRuntime, welcomeSideEffectRuntime, ownerSafetyNotifier, protectedEffects,\s*coinDatabaseEscalations\]/u, call);
   }
   assert.equal(calls.filter((call) => /sources: \[coinDatabaseEscalations\]/u.test(call)).length, 1, calls.join('\n'));
-  // … and the stop reports it alone once more, after every later step, right before it exits.
+  // … and the stop closes the database and reports it alone once more, after every later step, right before it exits.
   const start = source.indexOf('async function shutdown(');
   const shutdown = source.slice(start, source.indexOf('\n}\n', start));
+  assert.equal((shutdown.match(/closeCoinDatabase\(\)/gu) || []).length, 1, shutdown);
+  const close = shutdown.indexOf('await coinDatabaseEscalations.closeCoinDatabase();');
   const last = shutdown.lastIndexOf('settleLedgerShutdown({');
-  assert.ok(last > shutdown.indexOf('await boardRuntime.stopLifecycle();'), shutdown);
-  assert.ok(last > shutdown.indexOf('client.destroy();'), shutdown);
-  assert.match(shutdown.slice(last), new RegExp('^settleLedgerShutdown\\(\\{ sources: \\[coinDatabaseEscalations\\], ' +
-    'logger, processRef: process \\}\\);\\s*\\} finally \\{\\s*if \\(stepFailed && !process\\.exitCode\\) ' +
-    'process\\.exitCode = 1;\\s*process\\.exit\\(process\\.exitCode\\);\\s*\\}\\s*\\}\\s*$', 'u'));
-  // The later steps sit in a try whose catch logs one fixed line and marks the stop failed, and
-  // whose finally makes that last report and then exits, non-zero after a failed step, so a step
-  // that throws can neither skip them, hang the process, nor end it with 0.
+  assert.ok(close > shutdown.indexOf('await boardRuntime.stopLifecycle();'), shutdown);
+  assert.ok(close > shutdown.indexOf('client.destroy();'), shutdown);
+  assert.ok(close > shutdown.indexOf('await protectedEffects.stop();'), shutdown);
+  assert.ok(last > close, shutdown);
   assert.match(shutdown, /let stepFailed = false;\s*try \{\s*await boardRuntime\.stopLifecycle\(\);/u);
   const later = shutdown.slice(shutdown.lastIndexOf('try {', shutdown.indexOf('await boardRuntime.stopLifecycle();')));
   assert.match(later, new RegExp('^try \\{\\s*await boardRuntime\\.stopLifecycle\\(\\);[\\s\\S]*' +
     'testControlRuntimeController\\.dispose\\(\\);\\s*\\} catch \\(error\\) \\{\\s*stepFailed = true;\\s*' +
     'const cause = [^\\n]*\\n\\s*logger\\.error\\(`\\[SHUTDOWN\\] code=SHUTDOWN_STEP_FAILED cause=\\$\\{cause\\}`\\);' +
-    // The records of who was welcomed and of the leave notices are written first thing in this finally, so
-    // a step that threw (a private shutdown hook, say) cannot skip it.
+    // The member records are written first thing in this finally, then the coin database is closed (a failed
+    // close is one fixed line and a failed stop), so a step that threw can skip neither.
     '\\s*\\} finally \\{\\s*flushMemberRecords\\(\\);\\s*(?://[^\\n]*\\s*)*try \\{\\s*' +
+    'await coinDatabaseEscalations\\.closeCoinDatabase\\(\\);\\s*\\} catch \\{\\s*stepFailed = true;\\s*' +
+    'logger\\.error\\(\'\\[SHUTDOWN\\] code=COIN_DB_CLOSE_FAILED\'\\);\\s*\\}\\s*(?://[^\\n]*\\s*)*try \\{\\s*' +
     'settleLedgerShutdown\\(\\{ sources: \\[coinDatabaseEscalations\\], logger, processRef: process \\}\\);' +
     '\\s*\\} finally \\{\\s*if \\(stepFailed && !process\\.exitCode\\) process\\.exitCode = 1;' +
     '\\s*process\\.exit\\(process\\.exitCode\\);\\s*\\}\\s*\\}\\s*$', 'u'), later);
 });
 
-test('a close that fails is never repeated: the temporary file and a new database file are closed at most once',
-  async (t) => {
-    const { root, dbPath, directoryName } = await freshCoinDatabase(t, 'close-once');
-    const before = sha256File(dbPath);
-    const failing = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step: ['close', 'xiaoji.sqlite.tmp'] } });
-    useFileSystem(failing, 'linux');
-    await assert.rejects(coin.withCoinTransaction((api) => insertMarker(api, 'close-once')),
-      (error) => error instanceof coin.CoinDatabaseError && error.cause?.message === 'synthetic close failure');
-    coin.setCoinDatabaseDurabilityForTests(null);
-    assert.equal(failing.calls.filter(([kind, name]) => kind === 'close' && name === 'xiaoji.sqlite.tmp').length, 1);
-    assert.equal(failing.calls.some(([kind]) => kind === 'rename'), false);
-    assert.equal(sha256File(dbPath), before);
-    assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite']);
-    assert.equal(await memoryValue('close-once'), null);
-
-    // A new database whose close fails: the creation fails and leaves nothing behind.
-    coin.resetCoinDatabaseForTests();
-    fs.rmSync(dbPath);
-    const creating = recordingFileSystem({ directory: root, fail: { step: ['close', 'xiaoji.sqlite'] } });
-    useFileSystem(creating, 'linux');
-    await assert.rejects(coin.initializeNewCoinDatabase({ expectedPath: dbPath }), /synthetic close failure/u);
-    coin.setCoinDatabaseDurabilityForTests(null);
-    assert.equal(creating.calls.filter(([kind, name]) => kind === 'close' && name === 'xiaoji.sqlite').length, 1);
-    assert.equal(creating.calls.some(([kind, name]) => kind === 'open' && name === directoryName), false);
-    assert.deepEqual(fs.readdirSync(root), []);
-  });
-
-test('the directory sync: open, fsync or close failing is escalated; EOPNOTSUPP and EISDIR count as unsupported',
-  async (t) => {
-    const { dbPath, directoryName } = await freshCoinDatabase(t, 'directory-steps');
-    const logs = captureCoinDatabaseLogs(t);
-    const cases = [
-      { step: ['open', directoryName, 'r'], code: 'EACCES', expected: 'failed', closes: 0 },
-      { step: ['fsync', directoryName], code: 'EIO', expected: 'failed', closes: 1 },
-      { step: ['close', directoryName], code: 'EIO', expected: 'failed', closes: 1 },
-      { step: ['fsync', directoryName], code: 'EOPNOTSUPP', expected: 'unsupported', closes: 1 },
-      { step: ['open', directoryName, 'r'], code: 'EISDIR', expected: 'unsupported', closes: 0 },
-    ];
-    for (const [index, { step, code, expected, closes }] of cases.entries()) {
-      const label = `${step[0]} ${code}`;
-      coin.resetCoinDatabaseForTests();
-      await coin.initializeCoinDatabase();
-      logs.length = 0;
-      const recorder = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step, code } });
-      useFileSystem(recorder, 'linux');
-      // The write stands either way: memory and file both hold it.
-      await coin.withCoinTransaction((api) => insertMarker(api, `directory-${index}`));
-      assert.equal(recorder.calls.filter(([kind, name]) => kind === 'close' && name === directoryName).length, closes, label);
-      assert.equal(await memoryValue(`directory-${index}`), '1', label);
-      assert.equal(await fileMetadata(dbPath, `directory-${index}`), '1', label);
-      // A failure is escalated and leaves the write unconfirmed (the next operation writes
-      // again); an unsupported file system warns once and the write counts as done.
-      const quiet = recordingFileSystem({ directory: path.dirname(dbPath) });
-      useFileSystem(quiet, 'linux');
-      await coin.withCoinTransaction(NOTHING);
-      if (expected === 'failed') {
-        assert.deepEqual(logs, [
-          `[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_FAILED stage=runtime errno=${code}`,
-          '[COIN_DB] code=COIN_DB_ESCALATION cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=runtime',
-        ], label);
-        assert.deepEqual(coin.getLedgerEscalations().map((entry) => entry.code), ['COIN_DB_DIRECTORY_SYNC_FAILED'], label);
-        assert.ok(quiet.calls.some(([kind]) => kind === 'rename'), label);
-      } else {
-        assert.deepEqual(logs, [`[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_UNSUPPORTED errno=${code}`], label);
-        assert.deepEqual(coin.getLedgerEscalations(), [], label);
-        assert.deepEqual(quiet.calls, [], label);
-      }
-      coin.setCoinDatabaseDurabilityForTests(null);
-    }
-  });
-
-test('a safety registration write that runs out of space fails, before or after the rename', async (t) => {
-  const { dbPath, directoryName } = await freshCoinDatabase(t, 'enospc');
-  const original = JSON.stringify({ state: 'creating' });
-  await coin.writeSafetyLedgerRegistrations([{ purposeId: 'welcome', expectedValue: null, value: original }]);
-  for (const step of [['write', 'xiaoji.sqlite.tmp'], ['fsync', 'xiaoji.sqlite.tmp'], ['fsync', directoryName]]) {
-    const label = step.join(' ');
-    const failing = recordingFileSystem({ directory: path.dirname(dbPath), fail: { step, code: 'ENOSPC' } });
-    await assert.rejects(coin.writeSafetyLedgerRegistrations(
-      [{ purposeId: 'welcome', expectedValue: original, value: JSON.stringify({ state: 'active', step: label }) }],
-      { filesystem: failing.filesystem, platform: 'linux' }),
-    (error) => error.code === 'SAFETY_REGISTRATION_WRITE_FAILED' && error.cause?.code === 'ENOSPC', label);
-    // Memory is back to the old value; ENOSPC is never taken for an unsupported file system.
-    assert.equal((await coin.readSafetyLedgerRegistrations()).welcome.value, original, label);
-    const inFile = (await coin.inspectSafetyRegistrationsFromFile(dbPath)).registrations.welcome.value;
-    if (step[1] === directoryName) assert.equal(JSON.parse(inFile).step, label);
-    else assert.equal(inFile, original, label);
-    assert.equal(fs.existsSync(`${dbPath}.tmp`), false, label);
-  }
-  assert.deepEqual(coin.getLedgerEscalations(), []);
-});
-
-test('a temporary file left by an earlier crash is overwritten by the next write and never left behind', async (t) => {
-  const { root, dbPath } = await freshCoinDatabase(t, 'leftover');
-  fs.writeFileSync(`${dbPath}.tmp`, 'half a database from a crash');
-  await coin.withCoinTransaction((api) => insertMarker(api, 'after-crash'));
-  assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite']);
-  assert.equal(await fileMetadata(dbPath, 'after-crash'), '1');
-  await assertFileMatchesMemory(dbPath);
-  // The same at a start: the write-back replaces a leftover beside the database.
-  coin.resetCoinDatabaseForTests();
-  fs.writeFileSync(`${dbPath}.tmp`, 'another leftover');
-  await coin.initializeCoinDatabase();
-  assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite']);
-  assert.equal(await fileMetadata(dbPath, 'after-crash'), '1');
-  await assertFileMatchesMemory(dbPath);
-});
-
-test('repeated directory sync failures are logged and escalated once', async (t) => {
-  const { dbPath, directoryName } = await freshCoinDatabase(t, 'repeated');
-  const logs = captureCoinDatabaseLogs(t);
-  for (let index = 0; index < 3; index += 1) await failOneDirectorySync(dbPath, directoryName, `repeat-${index}`);
-  assert.deepEqual(logs, [
-    '[COIN_DB] code=COIN_DB_DIRECTORY_SYNC_FAILED stage=runtime errno=EIO',
-    '[COIN_DB] code=COIN_DB_ESCALATION cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=runtime',
-  ]);
-  assert.deepEqual(coin.getLedgerEscalations().map((entry) => entry.stage), ['runtime']);
-  for (let index = 0; index < 3; index += 1) assert.equal(await fileMetadata(dbPath, `repeat-${index}`), '1');
-});
-
-test('init-coin-db ends with exit code 3 when the directory sync of the new database failed', (t) => {
+test('init-coin-db closes the new database cleanly, and ends with exit code 3 when its directory sync failed', (t) => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-coin-init-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }));
   const script = path.join(__dirname, '..', 'scripts', 'init-coin-db.js');
@@ -731,6 +761,7 @@ test('init-coin-db ends with exit code 3 when the directory sync of the new data
   assert.equal(clean.status, 0, clean.stderr);
   assert.match(clean.stdout, /吉幣資料庫已初次建立/u);
   assert.doesNotMatch(clean.stderr, /LEDGER_ESCALATION/u);
+  assert.deepEqual(fs.readdirSync(path.dirname(cleanPath)), ['xiaoji.sqlite']);
 
   const failingPath = path.join(root, 'failing', 'xiaoji.sqlite');
   const failing = run(failingPath, true);
@@ -739,4 +770,56 @@ test('init-coin-db ends with exit code 3 when the directory sync of the new data
   assert.match(failing.stderr,
     /^\[SIDE_EFFECT_LEDGER\] code=LEDGER_ESCALATION purpose=coin-database cause=COIN_DB_DIRECTORY_SYNC_FAILED stage=open$/mu);
   assert.ok(fs.existsSync(failingPath));
+});
+
+test('a snapshot of the open database is a consistent standalone file, taken between transactions', async (t) => {
+  const { root, dbPath } = await freshCoinDatabase(t, 'snapshot');
+  await coin.withCoinTransaction((api) => insertMarker(api, 'in-snapshot'));
+  const target = path.join(root, 'snapshots', 'coin-snapshot.sqlite');
+  fs.mkdirSync(path.dirname(target));
+  // Queued behind a transaction that is still running: the snapshot waits for its COMMIT.
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const running = coin.withCoinTransaction(async (api) => {
+    insertMarker(api, 'queued-before');
+    await gate;
+  });
+  const snapshot = coin.snapshotCoinDatabase(target);
+  release();
+  await running;
+  const result = await snapshot;
+  assert.equal(result.path, target);
+  assert.equal(result.sha256, sha256File(target));
+  assert.deepEqual(fs.readdirSync(path.dirname(target)), ['coin-snapshot.sqlite']);
+  const copy = new DatabaseSync(target, { readOnly: true });
+  try {
+    assert.equal(copy.prepare('PRAGMA quick_check').get().quick_check, 'ok');
+    assert.equal(copy.prepare("SELECT value FROM coin_metadata WHERE key = 'in-snapshot'").get().value, '1');
+    assert.equal(copy.prepare("SELECT value FROM coin_metadata WHERE key = 'queued-before'").get().value, '1');
+  } finally {
+    copy.close();
+  }
+  await assert.rejects(coin.snapshotCoinDatabase(target), /已存在/u);
+  await assert.rejects(coin.snapshotCoinDatabase(dbPath), /已存在/u);
+  await assert.rejects(coin.snapshotCoinDatabase('relative.sqlite'), /絕對路徑/u);
+  // The database itself is still open and in use.
+  await coin.withCoinTransaction((api) => insertMarker(api, 'after-snapshot'));
+  assert.equal(nextStartValue(dbPath, 'after-snapshot'), '1');
+});
+
+test('the stopped-database readers use an in-memory copy and refuse while a -wal lies beside the file', async (t) => {
+  const { root, dbPath } = await freshCoinDatabase(t, 'readers');
+  await coin.writeSafetyLedgerRegistrations([{ purposeId: 'welcome', expectedValue: null, value: '{"a":1}' }]);
+  await assert.rejects(coin.inspectSafetyRegistrationsFromFile(dbPath), /小吉還在執行或上次沒有正常關閉/u);
+  await assert.rejects(coin.dryRunGlobalEconomyV22({ dbPath }),
+    (error) => /v22 預演失敗/u.test(error.message) && /小吉還在執行/u.test(error.cause?.message));
+  await coin.closeCoinDatabase();
+  const before = sha256File(dbPath);
+  const inspected = await coin.inspectSafetyRegistrationsFromFile(dbPath);
+  assert.equal(inspected.sha256, before);
+  assert.equal(inspected.schemaVersion, 24);
+  assert.equal(inspected.registrations.welcome.value, '{"a":1}');
+  await assert.rejects(coin.dryRunGlobalEconomyV22({ dbPath }), (error) => /requires schema v21, received 24/u.test(error.cause?.message));
+  assert.equal(sha256File(dbPath), before);
+  assert.deepEqual(fs.readdirSync(root), ['xiaoji.sqlite']);
 });

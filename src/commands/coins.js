@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getPlayerBalance } = require('../services/coinService');
-const { formatCoins, formatUser, replyCoinError } = require('../utils/coinPresentation');
+const { getPlayerBalance } = require('../systems/economy/coinService');
+const { formatCoins, formatUser, replyCoinError } = require('../systems/economy/coinPresentation');
 
 // /coins answers about the caller only. It takes no user option: the wallet is one account shared by every server,
 // so looking somebody else up would show a person's money to a server that has nothing to do with them. The

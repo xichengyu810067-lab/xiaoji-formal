@@ -25,8 +25,8 @@ require('../src/utils/moderation').ensureModerationAccess = async () => ({ ok: t
 
 const economyCommand = require('../src/commands/economy');
 const workCommand = require('../src/commands/work');
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinTransaction } = require('../src/services/coinDatabase');
-const workService = require('../src/services/workService');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinTransaction } = require('../src/systems/economy/storage/coinDatabase');
+const workService = require('../src/systems/work/workService');
 const { count, expectNoWrites } = require('./support/coinDatabaseProbe');
 const { createGuild, createSlashInteraction } = require('./support/fakeSlashInteraction');
 

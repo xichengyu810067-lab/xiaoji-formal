@@ -15,19 +15,21 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoji-transaction-reasons-'
 process.env.COIN_DB_PATH = path.join(root, 'transaction-reasons.sqlite');
 process.env.COIN_TIMEZONE = 'Asia/Taipei';
 
-// The admin checks are stand-ins; this file runs in its own process, and the commands load after this.
+// The admin and owner checks are stand-ins (/coin-admin history is owner only); this file runs in its own process,
+// and the commands load after this.
 require('../src/utils/moderation').ensureModerationAccess = async () => ({ ok: true });
+require('../src/utils/ownerOnly').ensureBotOwner = async () => true;
 
 const economyCommand = require('../src/commands/economy');
 const coinAdminCommand = require('../src/commands/coin-admin');
-const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinTransaction } = require('../src/services/coinDatabase');
-const { adjustPlayerBalance, TransactionType } = require('../src/services/coinService');
-const { deposit, getBankRates, setDemandRate } = require('../src/services/bankService');
-const { mutateWalletWithApi } = require('../src/services/coinWalletService');
+const { initializeNewCoinDatabase, resetCoinDatabaseForTests, withCoinTransaction } = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance, TransactionType } = require('../src/systems/economy/coinService');
+const { deposit, getBankRates, setDemandRate } = require('../src/systems/economy/bankService');
+const { mutateWalletWithApi } = require('../src/systems/economy/coinWalletService');
 const { describeTransactionReason } = require('../src/systems/economy/transactionReasons');
 
 const GUILD_ID = 'reason-guild';
-const USER_ID = 'reason-member';
+const USER_ID = '760000000000000201';
 const LEGACY_ROW_TIME = '2026-01-01T00:00:00.000Z';
 
 test.before(async () => {

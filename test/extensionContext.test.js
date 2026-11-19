@@ -35,7 +35,7 @@ const {
 const { writeAssemblyManifest } = require('../src/extensions/assemblyManifest');
 const { loadCommands } = require('../src/loadCommands');
 const interactionCreate = require('../src/events/interactionCreate');
-const { resetCoinDatabaseForTests } = require('../src/services/coinDatabase');
+const { resetCoinDatabaseForTests } = require('../src/systems/economy/storage/coinDatabase');
 const logger = require('../src/utils/logger');
 
 const CONTEXT_MODULE = require.resolve('../src/platform/extensionContext');

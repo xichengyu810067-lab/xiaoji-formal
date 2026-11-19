@@ -32,8 +32,8 @@ function faqs(siteSupportSource) {
 }
 
 function buildKnowledge() {
-  const { PUBLIC_SYSTEM_CATALOG } = require(path.join(ROOT, 'website', 'publicFeatureCatalog.js'));
-  const { COMMAND_CATALOG } = require(path.join(ROOT, 'website', 'commandCatalog.js'));
+  const { PUBLIC_SYSTEM_CATALOG } = require(path.join(ROOT, 'src', 'platform', 'catalogs', 'publicFeatureCatalog.js'));
+  const { COMMAND_CATALOG } = require(path.join(ROOT, 'src', 'platform', 'catalogs', 'commandCatalog.js'));
   const siteSupport = fs.readFileSync(path.join(ROOT, 'website', 'siteSupport.js'), 'utf8');
   const lines = ['# 小吉的公開功能'];
   for (const system of PUBLIC_SYSTEM_CATALOG) {

@@ -25,9 +25,9 @@ const {
   resetCoinDatabaseForTests,
   withCoinDatabase,
   withCoinTransaction,
-} = require('../src/services/coinDatabase');
-const { setGuildEconomyEnabled } = require('../src/services/coinService');
-const { getWalletPlayerWithApi } = require('../src/services/coinWalletService');
+} = require('../src/systems/economy/storage/coinDatabase');
+const { setGuildEconomyEnabled } = require('../src/systems/economy/coinService');
+const { getWalletPlayerWithApi } = require('../src/systems/economy/coinWalletService');
 const { buildSudoku } = require('../src/systems/games/soloGameRules');
 const { createDefaultSoloDiscordRuntime } = require('../src/systems/games/soloDiscordRuntime');
 const { createSoloSessionService } = require('../src/systems/games/soloSessionService');

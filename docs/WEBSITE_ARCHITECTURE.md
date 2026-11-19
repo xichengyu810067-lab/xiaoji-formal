@@ -25,13 +25,13 @@
 | `website/siteSupport.js` | 自助客服、政策彈窗、右下角的小吉陪伴按鈕與泡泡（`say()`）。 |
 | `website/app.js` | 首頁專用：即時概況資料、頭像互動。 |
 | `website/guideSearch.js` | 功能與指令頁的搜尋與篩選；只負責隱藏不符合的項目。 |
-| `website/status.js`、`website/statusData.js` | 狀態頁的即時資料讀取與顯示。 |
+| `website/status.js` | 狀態頁的即時資料讀取與顯示。 |
 | `website/statusHealthCheck.js` | 上次版本的離線健檢結果（由 `scripts/build-status-health-check.js` 產生，不要手動編輯）；狀態頁完全拿不到即時指令狀態時才在指令旁顯示。 |
-| `website/publicFeatureCatalog.js` | 公開功能清冊（系統 → 功能的用途、使用方式、使用限制）。功能說明的唯一來源。 |
-| `website/commandCatalog.js` | 公開指令目錄。指令清單的唯一來源，`/help` 與 `docs/COMMANDS.md` 也用它。 |
-| `scripts/render-website-guide.js` | 把清冊與指令目錄寫進 `website/guide.html` 與 `website/index.html` 的產生區塊。 |
-
-遊戲頁（`website/games/`）有自己的 `game.css`，不使用本文件的設計變數；它們只共用 `support.css` 與 `siteSupport.js`。
+| `website/commandCatalog.js`、`website/gameCatalog.js`、`website/publicFeatureCatalog.js`、`website/statusData.js` | 公開目錄的複本，由 `npm run site:render` 從 `src/platform/catalogs/` 逐位元組複製，不要手動編輯；`npm run check` 與 `test/websiteCatalogCopies.test.js` 會擋下過期的複本。 |
+| `src/platform/catalogs/publicFeatureCatalog.js` | 公開功能清冊（系統 → 功能的用途、使用方式、使用限制）。功能說明的唯一來源。 |
+| `src/platform/catalogs/commandCatalog.js` | 公開指令目錄。指令清單的唯一來源，`/help` 與 `docs/COMMANDS.md` 也用它。 |
+| `src/platform/catalogs/statusData.js`、`src/platform/catalogs/gameCatalog.js` | 狀態頁的功能卡清單與遊戲目錄。 |
+| `scripts/render-website-guide.js` | 把目錄複製到 `website/`，再把清冊與指令目錄寫進 `website/guide.html`、`website/index.html` 與 `website/status.html` 的產生區塊。 |
 
 ## 3. 頁面與區塊
 
@@ -81,10 +81,10 @@ HTML 裡夾在 `<!-- generated:名稱:start -->` 與 `<!-- generated:名稱:end 
 | 產生區塊 | 頁面 | 來源 |
 |---|---|---|
 | `guide-filters` | `website/guide.html` | 清冊的系統名稱（分類）與固定的可用對象（一般成員、需管理權限） |
-| `guide-features` | `website/guide.html` | `website/publicFeatureCatalog.js` 的每一項功能 |
+| `guide-features` | `website/guide.html` | `src/platform/catalogs/publicFeatureCatalog.js` 的每一項功能 |
 | `guide-commands` | `website/guide.html` | `src/commands/help.js` 的 `buildHelpSections()`，與 Discord 的 `/help` 相同；擁有者專用的指令與子指令不會出現 |
-| `status-features` | `website/status.html` | `website/statusData.js` 的 `PUBLIC_FEATURE_CATALOG`，依分類分組 |
-| `status-commands` | `website/status.html` | `src/platform/publicCommandStatus.js` 的 `listPublicCommands()`（`website/commandCatalog.js` 的公開指令與子指令，不含擁有者專用），依 `/help` 分組 |
+| `status-features` | `website/status.html` | `src/platform/catalogs/statusData.js` 的 `PUBLIC_FEATURE_CATALOG`，依分類分組 |
+| `status-commands` | `website/status.html` | `src/platform/publicCommandStatus.js` 的 `listPublicCommands()`（`src/platform/catalogs/commandCatalog.js` 的公開指令與子指令，不含擁有者專用），依 `/help` 分組 |
 | `home-highlights` | `website/index.html` | 腳本裡的 `HOMEPAGE_HIGHLIGHTS`（挑哪些系統、圖示、一句介紹）＋該系統在清冊裡的全部功能名稱 |
 
 修改清冊、指令目錄或首頁亮點設定後，執行 `npm run site:render`。`npm run check` 會比對頁面與產生結果，沒有重新產生時會失敗。
@@ -205,7 +205,7 @@ HTML 裡夾在 `<!-- generated:名稱:start -->` 與 `<!-- generated:名稱:end 
 
 ## 9. 常見修改
 
-- 新增或修改功能說明：改 `website/publicFeatureCatalog.js` → `npm run site:render`。
+- 新增或修改功能說明：改 `src/platform/catalogs/publicFeatureCatalog.js` → `npm run site:render`（同時更新 `website/` 的複本與頁面）。
 - 新增指令：照 `docs/ARCHITECTURE.md` 第 6.1 節，最後執行 `npm run site:render`。
 - 換首頁功能亮點：改 `scripts/render-website-guide.js` 的 `HOMEPAGE_HIGHLIGHTS` → `npm run site:render`。
 - 新增一個頁面區塊：在 HTML 加 `<section id="…" data-scene="…" data-companion="…">`，在本文件第 3 節的表補一列；需要導覽連結就加在 `nav#site-nav`。

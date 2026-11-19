@@ -1,14 +1,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const defaultCommandCatalog = require('../website/commandCatalog');
-const { PUBLIC_SYSTEM_CATALOG } = require('../website/publicFeatureCatalog');
+const defaultCommandCatalog = require('../src/platform/catalogs/commandCatalog');
+const { PUBLIC_SYSTEM_CATALOG } = require('../src/platform/catalogs/publicFeatureCatalog');
 const { ADMIN_MARKER, buildHelpSections } = require('../src/commands/help');
-const { PUBLIC_FEATURE_CATALOG } = require('../website/statusData');
+const { PUBLIC_FEATURE_CATALOG } = require('../src/platform/catalogs/statusData');
 const { listPublicCommands } = require('../src/platform/publicCommandStatus');
 
 // The website writes its feature and command lists into the HTML ahead of time, so the lists can be
 // read without JavaScript (search engines, link previews and AI readers). The parts between the
-// "generated" markers below come from website/publicFeatureCatalog.js and website/commandCatalog.js;
+// "generated" markers below come from src/platform/catalogs/publicFeatureCatalog.js and src/platform/catalogs/commandCatalog.js;
 // edit those catalogs and run `npm run site:render`, never the generated HTML.
 // scripts/check-project.js fails when a page no longer matches what this script renders.
 
@@ -240,7 +240,7 @@ function renderHighlights(model) {
 }
 
 // The status page lists every feature and every public command with an unknown status; status.js fills in the live
-// one. Feature groups follow the categories of website/statusData.js, command groups the /help groups.
+// one. Feature groups follow the categories of src/platform/catalogs/statusData.js, command groups the /help groups.
 const UNKNOWN_PILL = '<span class="status-pill is-unknown" data-status-pill>未知</span><span class="status-reason" data-status-reason></span>';
 
 function renderStatusGroup(title, kind, items) {
@@ -328,19 +328,45 @@ function renderWebsitePages({ websiteRoot = WEBSITE_ROOT, systems, catalog } = {
   });
 }
 
+// The catalogs the bot loads from src/platform/catalogs and the status page loads as plain scripts from website/. The
+// website files are byte-for-byte copies, written here, so the two can never disagree.
+const CATALOG_ROOT = path.resolve(__dirname, '..', 'src', 'platform', 'catalogs');
+const CATALOG_FILES = Object.freeze(['commandCatalog.js', 'gameCatalog.js', 'publicFeatureCatalog.js', 'statusData.js']);
+
+function readCatalogCopies({ websiteRoot = WEBSITE_ROOT, catalogRoot = CATALOG_ROOT } = {}) {
+  return CATALOG_FILES.map((file) => {
+    const target = path.join(websiteRoot, file);
+    return {
+      file,
+      source: fs.readFileSync(path.join(catalogRoot, file)),
+      current: fs.existsSync(target) ? fs.readFileSync(target) : null,
+    };
+  });
+}
+
 function findWebsiteGuideIssues(options = {}) {
+  const issues = [];
   try {
-    return renderWebsitePages(options)
+    issues.push(...readCatalogCopies(options)
+      .filter((copy) => !copy.current || !copy.current.equals(copy.source))
+      .map((copy) => `website/${copy.file} is not a copy of src/platform/catalogs/${copy.file}; run npm run site:render.`));
+    issues.push(...renderWebsitePages(options)
       .filter((page) => page.current.replace(/\r\n/gu, '\n') !== page.rendered)
-      .map((page) => `website/${page.file} is out of date with the public catalogs; run npm run site:render.`);
+      .map((page) => `website/${page.file} is out of date with the public catalogs; run npm run site:render.`));
   } catch (error) {
-    return [error.message];
+    issues.push(error.message);
   }
+  return issues;
 }
 
 function synchronizeWebsitePages(options = {}) {
-  const pages = renderWebsitePages(options);
   const websiteRoot = options.websiteRoot || WEBSITE_ROOT;
+  for (const copy of readCatalogCopies(options)) {
+    if (copy.current && copy.current.equals(copy.source)) continue;
+    fs.writeFileSync(path.join(websiteRoot, copy.file), copy.source);
+    console.log(`Copied src/platform/catalogs/${copy.file} to website/${copy.file}.`);
+  }
+  const pages = renderWebsitePages(options);
   for (const page of pages) {
     if (page.current.replace(/\r\n/gu, '\n') === page.rendered) continue;
     fs.writeFileSync(path.join(websiteRoot, page.file), page.rendered, 'utf8');
@@ -353,6 +379,8 @@ if (require.main === module) synchronizeWebsitePages();
 
 module.exports = {
   AUDIENCE_LABELS,
+  CATALOG_FILES,
+  CATALOG_ROOT,
   GROUP_FALLBACK_CATEGORY,
   HOMEPAGE_HIGHLIGHTS,
   UNMENTIONED_COMMAND_CATEGORY,

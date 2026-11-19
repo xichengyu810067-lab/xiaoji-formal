@@ -6,7 +6,7 @@ const {
   getCasinoLobby,
   listLodging,
 } = require('../services/casinoFacilityService');
-const { formatChips, replyCoinError } = require('../utils/coinPresentation');
+const { formatChips, replyCoinError } = require('../systems/economy/coinPresentation');
 
 const roomChoices = Object.values(RoomTypes).map((room) => ({
   name: `${room.name}｜每晚 ${room.nightlyRate.toLocaleString('zh-TW')} 籌碼`,

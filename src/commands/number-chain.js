@@ -3,7 +3,7 @@ const {
   describeNumberChainStatus,
   getNumberChainStatus,
   stopNumberChain,
-} = require('../services/numberChainService');
+} = require('../systems/community/chains/numberChainService');
 const {
   ensureNumberChainAccess,
   replyNumberChainFailure,

@@ -1,4 +1,3 @@
-const OpenAI = require('openai');
 const {
   BLOCK_REASONS,
   QUOTA_NAMESPACES,
@@ -6,6 +5,15 @@ const {
   providerCallGuard,
 } = require('../../../conversation/providerGuard');
 const { turtleSoupSpamGuard } = require('../../../conversation/aiSpamGuard');
+const {
+  DEFAULT_GROQ_BASE_URL,
+  DEFAULT_GROQ_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_PROVIDER_TIMEOUT_MS: DEFAULT_TIMEOUT_MS,
+  createOpenAICompatibleClient,
+  isProviderRateLimitResponse: isProviderRateLimit,
+  selectOpenAICompatibleProvider,
+} = require('../../../conversation/providerSelection');
 const defaultLogger = require('../../../../utils/logger');
 const { TurtleSoupError } = require('./errors');
 const { parseJudgeOutput } = require('./judgeOutput');
@@ -17,18 +25,6 @@ const JUDGE_TIMEOUT_LOG_CODE = 'TURTLE_SOUP_JUDGE_TIMEOUT';
 const JUDGE_UNATTRIBUTED_LOG_CODE = 'TURTLE_SOUP_JUDGE_UNATTRIBUTED';
 const KNOWN_BLOCK_REASONS = new Set(Object.values(BLOCK_REASONS));
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4.1-mini';
-const DEFAULT_GROQ_MODEL = 'openai/gpt-oss-120b';
-const DEFAULT_GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
-const DEFAULT_TIMEOUT_MS = 15000;
-const RATE_LIMIT_MARKERS = new Set([
-  'rate_limit',
-  'rate_limit_error',
-  'rate_limit_exceeded',
-  'model_rate_limit_exceeded',
-  'insufficient_quota',
-  'quota_exceeded',
-]);
 
 const SYSTEM_INSTRUCTIONS = [
   '你是海龜湯遊戲的專用裁判，不是聊天助手。',
@@ -70,14 +66,6 @@ function createRequest({ kind, input, evidence }) {
   };
 }
 
-function isProviderRateLimit(error) {
-  const statuses = [error?.status, error?.statusCode, error?.response?.status].map(Number);
-  if (statuses.includes(429)) return true;
-  const details = [error, error?.error, error?.rawError, error?.response?.data?.error];
-  return details.flatMap((detail) => [detail?.code, detail?.type])
-    .some((value) => RATE_LIMIT_MARKERS.has(String(value || '').trim().toLowerCase()));
-}
-
 function normalizeProviderError(error) {
   // The shared chat guard refused or cut off the call before the provider answered. Nothing was
   // judged, so the caller keeps the session and tells the player to try again shortly.
@@ -101,20 +89,18 @@ function resolveProvider(options = {}) {
   if (options.client) {
     return { client: options.client, model: options.model || DEFAULT_OPENAI_MODEL, provider: options.provider || 'injected' };
   }
-  const groqKey = options.groqApiKey ?? process.env.GROQ_API_KEY;
-  if (groqKey) {
+  // The same choice as chat (providerSelection.js): Groq, then OpenAI; a key or model in options wins over the env.
+  const selected = selectOpenAICompatibleProvider({
+    groqApiKey: options.groqApiKey,
+    openaiApiKey: options.openaiApiKey,
+    groqModel: options.groqModel,
+    openaiModel: options.openaiModel,
+  });
+  if (selected) {
     return {
-      client: new OpenAI({ apiKey: groqKey, baseURL: DEFAULT_GROQ_BASE_URL, maxRetries: 1, timeout: options.timeoutMs || DEFAULT_TIMEOUT_MS }),
-      model: options.groqModel || DEFAULT_GROQ_MODEL,
-      provider: 'groq',
-    };
-  }
-  const openaiKey = options.openaiApiKey ?? process.env.OPENAI_API_KEY;
-  if (openaiKey) {
-    return {
-      client: new OpenAI({ apiKey: openaiKey, maxRetries: 1, timeout: options.timeoutMs || DEFAULT_TIMEOUT_MS }),
-      model: options.openaiModel || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
-      provider: 'openai',
+      client: createOpenAICompatibleClient(selected, { timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS }),
+      model: selected.model,
+      provider: selected.provider,
     };
   }
   throw new TurtleSoupError('JUDGE_NOT_CONFIGURED', 'No turtle soup judge provider is configured.', { retryable: true });

@@ -14,7 +14,7 @@ process.env.COIN_DB_PATH = path.join(dataRoot, 'coin.sqlite');
 
 const { createConversationPorts } = require('../src/coordinators/conversationCoordinator');
 const { handleMentionMessage } = require('../src/systems/conversation/chatFlow');
-const { clearConversationStateForTests } = require('../src/services/conversationModeService');
+const { clearConversationStateForTests } = require('../src/systems/conversation/conversationMode');
 
 test.after(() => {
   for (const name of environmentNames) {

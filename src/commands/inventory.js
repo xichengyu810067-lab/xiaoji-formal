@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getInventory } = require('../services/coinService');
-const { replyCoinError } = require('../utils/coinPresentation');
+const { getInventory } = require('../systems/economy/coinService');
+const { replyCoinError } = require('../systems/economy/coinPresentation');
 const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 
 module.exports = {

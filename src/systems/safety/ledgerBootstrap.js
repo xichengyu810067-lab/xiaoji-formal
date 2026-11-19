@@ -82,7 +82,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const defaultLogger = require('../../utils/logger');
-const coinDatabase = require('../../services/coinDatabase');
+const coinDatabase = require('../economy/storage/coinDatabase');
 const { assertTestDataRootMarker } = require('../../platform/testControlPolicy');
 const { LedgerStoreError, assertTestOnlyOption, inspectWitnessFile, witnessIdentityDigest } = require('./ledgerStore');
 const {

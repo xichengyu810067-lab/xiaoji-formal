@@ -1,7 +1,7 @@
 const { createHash, randomBytes } = require('node:crypto');
 const { GameError } = require('./soloGameError');
 const { MAX_ACTIONS, applyNumberMatchAction, applySudokuAction, applyTetrisAction, initialState } = require('./soloGameRules');
-const { DIFFICULTIES, GAME_TYPES, MAX_TETRIS_SCORE, deriveServerGameReward } = require('../../services/gameRewardPolicy');
+const { DIFFICULTIES, GAME_TYPES, MAX_TETRIS_SCORE, deriveServerGameReward } = require('./gameRewardPolicy');
 const { applyGameLaunchOnce } = require('./gameLaunchReceipt');
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
@@ -79,7 +79,7 @@ function nextGameState(row, action) {
 // Callers may inject another reader. The require stays lazy so that creating a session
 // service does not load the economy system until a completed game needs the switch.
 function defaultReadGuildEconomyEnabledWithApi(api, guildId) {
-  return require('../../services/coinService').readGuildEconomyEnabledWithApi(api, guildId);
+  return require('../economy/coinService').readGuildEconomyEnabledWithApi(api, guildId);
 }
 
 // Reward receipts belong to the reward ledger, so a finished game reads the debt split of

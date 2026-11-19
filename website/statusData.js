@@ -1,3 +1,6 @@
+// Source of truth: src/platform/catalogs/statusData.js, loaded by the bot with require(). website/statusData.js is a byte-for-byte
+// copy that the status page loads with a <script> tag; `npm run site:render` writes it and `npm run check` refuses a stale
+// copy. Edit this file, never the copy.
 (function exposeStatusData(root, factory) {
   const gameCatalog = typeof module === 'object' && module.exports
     ? require('./gameCatalog')

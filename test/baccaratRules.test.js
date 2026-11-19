@@ -10,9 +10,9 @@ process.env.COIN_TIMEZONE = 'Asia/Taipei';
 process.env.XIAOJI_MEMORY_PATH = path.join(tempDirectory, 'memory.json');
 
 const { drawBaccaratHands, playBaccarat } = require('../src/services/casinoService');
-const { resetCoinDatabaseForTests, withCoinDatabase } = require('../src/services/coinDatabase');
-const { adjustPlayerBalance } = require('../src/services/coinService');
-const { buyChips, getChipBalance } = require('../src/services/chipService');
+const { resetCoinDatabaseForTests, withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
+const { adjustPlayerBalance } = require('../src/systems/economy/coinService');
+const { buyChips, getChipBalance } = require('../src/systems/economy/chipService');
 
 test.after(() => {
   resetCoinDatabaseForTests();

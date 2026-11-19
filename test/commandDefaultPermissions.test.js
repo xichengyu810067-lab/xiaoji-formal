@@ -20,7 +20,7 @@ const { PermissionFlagsBits } = require('discord.js');
 const { deployCommands } = require('../deploy-commands');
 const { createExtensionHost } = require('../src/extensions/extensionHost');
 const { loadCommandData } = require('../src/loadCommands');
-const { COMMAND_CATALOG } = require('../website/commandCatalog');
+const { COMMAND_CATALOG } = require('../src/platform/catalogs/commandCatalog');
 
 const SYNTHETIC_CLIENT_ID = '123456789012345678';
 const SYNTHETIC_OWNER_GUILD_ID = '223456789012345678';

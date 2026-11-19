@@ -62,7 +62,7 @@ const {
   clearConversationStateForTests,
   isConversationSilenced,
   validateChatInput,
-} = require('../src/services/conversationModeService');
+} = require('../src/systems/conversation/conversationMode');
 const {
   getRecentConversationTurns,
   resetConversationHistoryForTests,
@@ -590,8 +590,10 @@ test('documented false positives keep their current behaviour', () => {
   assert.equal(outputDecision('我覺得 gpt-4.1-mini 很適合', {
     userText: 'gpt-4.1-mini 好用嗎？', protectedModelIds: getDeployedModelIds(),
   }).kind, 'refusal');
-  // A generic how-to whose object is an assistant topic now reads as a question about 小吉.
-  assert.equal(decideRequestIngress({ userText: '怎麼保護你的資料庫？' }).kind, 'refusal');
+  // A generic how-to whose object is an assistant topic reads as a generic "you", like the English one ("How should you
+  // protect your database?"); asking how to get one of 小吉's things still reads as a question about 小吉.
+  assert.equal(decideRequestIngress({ userText: '怎麼保護你的資料庫？' }).kind, 'general');
+  assert.equal(decideRequestIngress({ userText: '如何取得你的模型？' }).kind, 'refusal');
   // Without the user's display name the policy cannot tell that "測試者" is a name; chatFlow always passes
   // it, and then the greeting is delivered (see the R5 entries in aiConfidentialityCorpus).
   const greeting = '你好呀，測試者～我是小吉！今天也來陪你聊聊天 ✨';

@@ -13,8 +13,9 @@ const src = (...parts) => path.join(__dirname, '..', 'src', ...parts);
 function loadCoinAdmin(t, { transactions = [] } = {}) {
   const lookups = [];
   const patches = [
-    [require(src('utils', 'moderation.js')), 'ensureModerationAccess', async () => ({ ok: true })],
-    [require(src('services', 'coinService.js')), 'getTransactions', async (...args) => {
+    // history is owner only; the owner check itself is tested in securityAttackPermissions.test.js.
+    [require(src('utils', 'ownerOnly.js')), 'ensureBotOwner', async () => true],
+    [require(src('systems', 'economy', 'coinService.js')), 'getTransactions', async (...args) => {
       lookups.push(args);
       return transactions;
     }],
@@ -38,7 +39,7 @@ async function runHistory(command, values = {}) {
     id: 'history-interaction',
     guildId: 'history-guild',
     guild: { id: 'history-guild' },
-    user: { id: 'history-admin' },
+    user: { id: 'history-owner' },
     replied: false,
     deferred: false,
     inGuild: () => true,
@@ -90,7 +91,7 @@ test('every campaign-only history option, given without campaign-id, is named in
   const campaignOnly = history.options.filter((option) => !['user', 'limit', 'campaign-id'].includes(option.name));
   assert.deepEqual(campaignOnly.map((option) => option.name), ['action', 'audience', 'role', 'page', 'review-token',
     'reason', 'confirm', 'record-type', 'record-id', 'evidence-mode', 'source-reference', 'transaction-id']);
-  const member = { id: 'member-1', username: 'member' };
+  const member = { id: '760000000000000101', username: 'member' };
   for (const option of campaignOnly) {
     // Alone, and next to a member, which would otherwise run the transaction lookup.
     for (const values of [{ [option.name]: sampleValue(option) }, { [option.name]: sampleValue(option), user: member }]) {
@@ -104,8 +105,8 @@ test('every campaign-only history option, given without campaign-id, is named in
 
 test('/coin-admin history with a member still lists that member\'s transactions', async (t) => {
   const { command, lookups } = loadCoinAdmin(t);
-  const target = { id: 'member-1', username: 'member', globalName: '成員甲' };
+  const target = { id: '760000000000000101', username: 'member', globalName: '成員甲' };
   const replies = await runHistory(command, { user: target, limit: 5 });
-  assert.deepEqual(lookups, [['history-guild', 'member-1', { limit: 5 }]]);
+  assert.deepEqual(lookups, [['history-guild', '760000000000000101', { limit: 5 }]]);
   assert.deepEqual(replies, [{ content: '成員甲 目前沒有吉幣交易紀錄。', ephemeral: true }]);
 });

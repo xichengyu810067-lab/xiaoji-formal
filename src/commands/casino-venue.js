@@ -15,11 +15,11 @@ const {
   serveVenueOrder,
   splitSteps,
 } = require('../services/venueService');
-const { CoinServiceError } = require('../services/coinService');
-const { formatChips, replyCoinError } = require('../utils/coinPresentation');
+const { CoinServiceError } = require('../systems/economy/coinService');
+const { formatChips, replyCoinError } = require('../systems/economy/coinPresentation');
 const { ensureModerationAccess } = require('../utils/moderation');
 const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
-const { verifyVenueMembers } = require('../platform/venueMembership');
+const { verifyVenueMembers } = require('../systems/casino/venueMembership');
 
 const itemTypeChoices = [
   { name: '餐點', value: VenueItemType.MEAL },

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const go = require('../src/games/engines/go');
-const { createTrustedSystemAction } = require('../src/games/trustedSystemActions');
+const go = require('../src/systems/games/board/engines/go');
+const { createTrustedSystemAction } = require('../src/systems/games/board/core/trustedSystemActions');
 
 function game() { return go.createInitialState({ players: ['black-player', 'white-player'], rules: {}, seed: 'test-seed' }); }
 function context(actorId) { return { actorId, players: ['black-player', 'white-player'], activePlayers: ['black-player', 'white-player'], retiredPlayers: [], revision: 0, now: '2026-09-22T00:00:00.000Z' }; }

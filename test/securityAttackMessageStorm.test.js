@@ -24,12 +24,12 @@ const attack = require('./support/attackSession');
 
 const session = attack.createAttackSession({ prefix: 'xiaoji-attack-storm-', liveEgress: true });
 
-const coinService = require('../src/services/coinService');
+const coinService = require('../src/systems/economy/coinService');
 const { setGuildFeatureSetting } = require('../src/services/featurePlatformService');
-const { corpusVersion } = require('../src/services/dailyRiddleCorpus');
+const { corpusVersion } = require('../src/systems/community/daily/dailyRiddleCorpus');
 const { registerEvents } = require('../src/handlers/registerEvents');
-const { withCoinDatabase } = require('../src/services/coinDatabase');
-const { getSuccessors } = require('../src/services/wordChainLexicon');
+const { withCoinDatabase } = require('../src/systems/economy/storage/coinDatabase');
+const { getSuccessors } = require('../src/systems/community/chains/wordChainLexicon');
 
 const { IDS } = session;
 const HOME = IDS.approvedGuild;

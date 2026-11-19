@@ -2,7 +2,7 @@
 
 // The status of every public slash command and subcommand on the public status page.
 //
-// Only the commands of website/commandCatalog.js are listed, so a command of an optional extension never appears, not
+// Only the commands of src/platform/catalogs/commandCatalog.js are listed, so a command of an optional extension never appears, not
 // even by name. Owner-only subcommands are left out, as in /help and the website guide.
 //
 // Each command and subcommand takes the worst of these, in this order:
@@ -15,7 +15,7 @@
 // A command is as bad as its worst subcommand. Only the status and this one word are published: never when a command
 // ran, how often, by whom, or any error text.
 
-const defaultCatalog = require('../../website/commandCatalog');
+const defaultCatalog = require('./catalogs/commandCatalog');
 const { commandOutcomeStatus } = require('./commandHealth');
 const { serviceStatus } = require('./serviceHealth');
 

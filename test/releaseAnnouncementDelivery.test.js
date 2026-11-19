@@ -23,7 +23,7 @@ const {
   initializeNewCoinDatabase,
   resetCoinDatabaseForTests,
   withCoinDatabase,
-} = require('../src/services/coinDatabase');
+} = require('../src/systems/economy/storage/coinDatabase');
 const {
   DEFAULT_REPOSITORY,
   FEATURE_KEY,

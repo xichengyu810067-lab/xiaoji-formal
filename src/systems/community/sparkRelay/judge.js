@@ -7,7 +7,7 @@
 // passes the disclosure check (disclosurePolicy.js) before a member sees it, and a task or a remark that does not
 // is replaced or dropped. Nothing about the member (name, ID) is sent.
 
-const { getAnthropicClient, getAnthropicModel, recordClaudeOutcome } = require('../../../services/aiService');
+const { getAnthropicClient, getAnthropicModel, recordClaudeOutcome } = require('../../conversation/provider');
 const { tryConsumeGuildQuota } = require('../../../services/quotaService');
 const { IMAGE_QUOTA_UNITS } = require('../../conversation/imageInput');
 const { containsInternalDisclosure, sanitizeUntrustedText } = require('../../conversation/disclosurePolicy');

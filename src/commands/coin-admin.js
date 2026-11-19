@@ -12,22 +12,24 @@ const {
   getTransactions,
   resetPlayerData,
   setGuildEconomyEnabled,
-} = require('../services/coinService');
+} = require('../systems/economy/coinService');
 const { ensureBotOwner } = require('../utils/ownerOnly');
 const { ensureModerationAccess } = require('../utils/moderation');
 const {
   formatCoins, formatMemberName, formatTransactionReason, formatTransactionType, replyCoinError,
-} = require('../utils/coinPresentation');
+} = require('../systems/economy/coinPresentation');
 const { clipText, fitListText, omittedLine } = require('../utils/replyLengthGuard');
 const { CoinCampaignError, applyOwnerCampaign, classifyOwnerCampaignHistoryRecord,
   getOwnerCampaignHistoryReviewPlan, getOwnerCampaignPreview, importOwnerCampaignHistory,
-  previewOwnerCampaign, reviewOwnerCampaignHistory } = require('../services/coinCampaignService');
+  previewOwnerCampaign, reviewOwnerCampaignHistory } = require('../systems/economy/coinCampaignService');
 const { authorizeRoleAdd, cancelAddConfirmation, confirmUserAdd, createAddConfirmation,
   recordRoleAddResult, roleAddPaymentGate } = require('../services/coinAdminAddService');
 
 const ADD_COMPONENT_PREFIX = 'coin-admin|1|add|';
 const ADD_PREVIEW_TTL_SECONDS = 15 * 60;
 const MAX_COIN_AMOUNT = 9_000_000_000;
+const SNOWFLAKE = /^\d{17,20}$/u;
+const INVALID_USER_REPLY = '指定的使用者不是有效的 Discord 使用者，未做任何變更。';
 const HISTORY_USER_REQUIRED =
   '請用 user 選項指定要查詢交易紀錄的成員（可用 limit 調整筆數）。要看全伺服器最近的交易請用 /economy audit；活動歷史對帳請填 campaign-id。';
 // The history options that only campaign reconciliation reads, by how each one is read. Without
@@ -275,15 +277,20 @@ function buildPreviewComponents(preview) {
   )];
 }
 
+// Discord custom IDs are at most 100 characters; a longer one was not made by this command.
+const MAX_CUSTOM_ID_LENGTH = 100;
+
 function parseAddCustomId(customId) {
-  const parts = String(customId || '').split('|');
+  const text = String(customId || '');
+  const parts = text.length <= MAX_CUSTOM_ID_LENGTH ? text.split('|') : [];
+  const expiresAt = /^\d+$/.test(parts[6] || '') ? Number(parts[6]) : NaN;
   if (parts.length !== 8 || parts[0] !== 'coin-admin' || parts[1] !== '1' || parts[2] !== 'add' ||
       !['confirm', 'cancel'].includes(parts[3]) || !['u', 'r'].includes(parts[4]) ||
-      !parts[5] || !/^\d+$/.test(parts[6]) || !/^[a-f0-9]{24}$/.test(parts[7])) {
+      !parts[5] || !Number.isSafeInteger(expiresAt) || !/^[a-f0-9]{24}$/.test(parts[7])) {
     throw new CoinCampaignError('PREVIEW_CHANGED', 'Add preview button is invalid.');
   }
   return { action: parts[3], mode: parts[4] === 'u' ? 'user' : 'role',
-    operationId: parts[5], expiresAt: Number(parts[6]), digest: parts[7] };
+    operationId: parts[5], expiresAt, digest: parts[7] };
 }
 
 function componentControl(interaction, decoded) {
@@ -611,7 +618,7 @@ const data = new SlashCommandBuilder()
   .addSubcommand((subcommand) =>
     addUserAmountReasonOptions(subcommand.setName('set').setDescription('設定使用者全域吉幣餘額（限 owner）'), '新的餘額', 0).setName('set'))
   .addSubcommand((subcommand) => addHistoryOptions(subcommand.setName('history')
-    .setDescription('查詢交易或執行活動歷史對帳')))
+    .setDescription('查詢交易或執行活動歷史對帳（限 owner）')))
   .addSubcommand((subcommand) => subcommand
     .setName('reset-user').setDescription('重置單一使用者吉幣資料，限 owner')
     .addUserOption((option) => option.setName('user').setDescription('目標使用者').setRequired(true))
@@ -628,7 +635,8 @@ async function execute(interaction) {
     }
     const subcommand = interaction.options.getSubcommand();
     const campaignHistory = subcommand === 'history' && Boolean(interaction.options.getString('campaign-id'));
-    if (['add', 'remove', 'set', 'reset-user'].includes(subcommand) || campaignHistory) {
+    // history is owner only in both forms: the member lookup as well as the campaign reconciliation.
+    if (['add', 'remove', 'set', 'reset-user', 'history'].includes(subcommand)) {
       if (!(await ensureBotOwner(interaction))) return;
     } else {
       const access = await ensureModerationAccess(interaction, {
@@ -636,6 +644,14 @@ async function execute(interaction) {
         userPermissionName: 'Administrator',
       });
       if (!access.ok) return;
+    }
+
+    // Discord only sends real user IDs, but every path below writes under the ID it is given, so anything that is not
+    // a snowflake is refused here instead of getting a wallet or a stored preview.
+    const target = interaction.options.getUser('user');
+    if (target && !SNOWFLAKE.test(String(target.id ?? ''))) {
+      await interaction.reply({ content: INVALID_USER_REPLY, ephemeral: true });
+      return;
     }
 
     if (subcommand === 'add') {
