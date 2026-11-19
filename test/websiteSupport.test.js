@@ -130,4 +130,12 @@ test('the worker declares every package it imports, at the version the bot uses'
   }
   assert.deepEqual([...imported].sort(), Object.keys(workerPackage.dependencies).sort());
   for (const name of imported) assert.equal(workerPackage.dependencies[name], rootPackage.dependencies[name], name);
+
+  // Workers Builds runs `npm clean-install` in this folder, which refuses to install without a lockfile.
+  const lock = JSON.parse(fs.readFileSync(path.join(workerRoot, 'package-lock.json'), 'utf8'));
+  assert.equal(lock.name, workerPackage.name);
+  assert.deepEqual(lock.packages[''].dependencies, workerPackage.dependencies, 'run npm install --package-lock-only in cloudflare/status-worker');
+  for (const [name, version] of Object.entries(workerPackage.dependencies)) {
+    assert.equal(lock.packages[`node_modules/${name}`].version, version, name);
+  }
 });
