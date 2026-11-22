@@ -5,7 +5,7 @@ The public core may load one local CommonJS extension only when `XIAOJI_PRIVATE_
 An extension exports `apiVersion: 1`, a stable `id`, optional command directories, deployment targets, interaction guards, and hooks. The host currently supports:
 
 - `guards.interaction`
-- `hooks.interactionCreate` and `hooks.messageCreate` (reserved for board and other isolated routers)
+- `hooks.interactionCreate` and `hooks.messageCreate` (reserved for board and other isolated routers). `messageCreate` also receives direct messages (the client has the DirectMessages intent and Channel partials, `src/index.js`), and it is the only step that does: after it, a direct message stops, so chat, `/student`, the server features and channel memory never see one (`src/events/messageCreate.js`, `test/directMessageRouting.test.js`). An extension that answers in direct messages must check who wrote. In test-control a direct message is denied before the hook.
 - `hooks.guildMemberAdd`, `hooks.ready`, and `hooks.shutdown`
 - `hooks.channelDelete` and `hooks.voiceStateUpdate`
 - `hooks.publicCommandCompleted`

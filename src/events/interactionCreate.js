@@ -179,7 +179,13 @@ module.exports = {
     } catch (error) {
       recordCommandOutcome(interaction.commandName, subcommand, false);
       logger.error(`/${interaction.commandName} failed`, error);
-      await replyEphemeral(interaction, '指令執行失敗，請稍後再試。');
+      // The interaction may already be gone (10062, "Unknown interaction") or answered; the failure
+      // notice must not escape as an uncaught exception, so only its code is logged.
+      try {
+        await replyEphemeral(interaction, '指令執行失敗，請稍後再試。');
+      } catch (replyError) {
+        logger.warn(`/${interaction.commandName} 失敗通知無法送出。code=${replyError?.code ?? replyError?.name ?? 'unknown'}`);
+      }
     }
   },
 };

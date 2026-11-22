@@ -115,15 +115,52 @@ const BOARD = createBoard();
 const POINT_BY_ID = BOARD.pointById;
 const CAMP_BY_ID = new Map(BOARD.camps.map((camp) => [camp.id, camp]));
 
+// Where each camp sits in the rendered star, for the panel text ("從右上角出發，目標左下角").
+const CAMP_DIRECTIONS = Object.freeze({
+  xp: '右上角',
+  xn: '左下角',
+  yp: '左上角',
+  yn: '右下角',
+  zp: '下方',
+  zn: '上方',
+});
+
+// The short names players read on the image and type in the move box: a row letter from the top (A to Q) and the
+// point's place in that row counted from the left, e.g. E1. The axial q…r… IDs stay the engine's point IDs.
+function createPointLabels(points) {
+  const rows = new Map();
+  for (const point of points) {
+    if (!rows.has(point.r)) rows.set(point.r, []);
+    rows.get(point.r).push(point);
+  }
+  const labelByPointId = new Map();
+  for (const [r, row] of rows) {
+    const letter = String.fromCharCode(65 + r + 8);
+    row.sort((left, right) => left.x - right.x).forEach((point, index) => {
+      labelByPointId.set(point.id, `${letter}${index + 1}`);
+    });
+  }
+  const pointIdByLabel = new Map([...labelByPointId].map(([id, label]) => [label, id]));
+  if (labelByPointId.size !== points.length || pointIdByLabel.size !== points.length) {
+    throw new Error('Chinese checkers point labels are invalid.');
+  }
+  return { labelByPointId, pointIdByLabel };
+}
+
+const { labelByPointId: LABEL_BY_POINT_ID, pointIdByLabel: POINT_ID_BY_LABEL } = createPointLabels(BOARD.points);
+
 module.exports = {
   AXIAL_DIRECTIONS,
   BOARD_POINTS: BOARD.points,
   CAMP_ASSIGNMENTS,
   CAMP_BY_ID,
+  CAMP_DIRECTIONS,
   CAMPS: BOARD.camps,
   CAMP_IDS,
   CAMP_LABELS,
+  LABEL_BY_POINT_ID,
   OPPOSITE_CAMP,
   POINT_BY_ID,
+  POINT_ID_BY_LABEL,
   pointId,
 };

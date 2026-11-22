@@ -33,7 +33,7 @@ THEMES = {
 }
 
 # The README's picture titles: (file name, text). Sections are 48px, features 32px.
-SECTION_TITLES = [('toc', '目錄'), ('new', '30 秒看懂 1.3.1 大更新'), ('features', '小吉能做什麼'),
+SECTION_TITLES = [('toc', '目錄'), ('new', '30 秒看懂 1.3.4 更新'), ('features', '小吉能做什麼'),
                   ('how', '小吉怎麼回你的話'), ('privacy', '隱私與安全'), ('more', '想知道更多')]
 FEATURE_TITLES = [('chat', '聊天'), ('memory', '記憶'), ('stock-food', '股票與美食'), ('games', '遊戲'),
                   ('coins', '吉幣'), ('weather', '查天氣'), ('daily-topic', '每日議題'), ('reminders', '小提醒與行事曆')]

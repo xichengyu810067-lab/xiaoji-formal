@@ -36,11 +36,22 @@ function nameOf(user, userId) {
 // Coin balances, paged: the board is public, an empty board is a private notice.
 async function replyCoinBoard(interaction) {
   const page = interaction.options.getInteger('page') || 1;
+  // A guild with the coin system off is refused here, privately, before anything is acknowledged.
   const leaderboard = await getLeaderboard(interaction.guildId, { page, limit: COIN_PAGE_SIZE });
+
+  if (leaderboard.players.length === 0) {
+    await interaction.reply(boardReply('目前還沒有吉幣排行榜資料。', { ephemeral: true }));
+    return;
+  }
+
+  // withoutBots looks up every user on the page; with a cold cache that outlasts the three seconds
+  // Discord gives a command to answer (the same reason as the assets board below). Acknowledge first,
+  // publicly like the board itself; from here on the answer is an editReply.
+  await interaction.deferReply();
   const visible = await withoutBots(interaction, leaderboard.players);
 
   if (visible.length === 0) {
-    await interaction.reply(boardReply('目前還沒有吉幣排行榜資料。', { ephemeral: true }));
+    await interaction.editReply(boardReply('目前還沒有吉幣排行榜資料。'));
     return;
   }
 
@@ -49,7 +60,7 @@ async function replyCoinBoard(interaction) {
   const lines = visible.map(({ row, user, position }) =>
     `${offset + position + 1}. ${nameOf(user, row.userId)} - ${formatCoins(row.balance)}（連續 ${row.dailyStreak} 天）`);
 
-  await interaction.reply(boardReply([`**${interaction.guild.name} 吉幣排行榜**`, ...lines].join('\n')));
+  await interaction.editReply(boardReply([`**${interaction.guild.name} 吉幣排行榜**`, ...lines].join('\n')));
 }
 
 // Total assets (wallet, bank and fixed deposits), top 25 only: the board is public, and so is the

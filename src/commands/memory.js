@@ -1,13 +1,17 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder } = require('discord.js');
 const {
   CATEGORY_LABELS,
+  MAX_PREFERRED_NAME_LENGTH,
+  clearPreferredName,
   describeScope,
   forgetAllOwnPreferences,
   forgetOwnPreference,
   getConsent,
+  getPreferredName,
   isMemoryConfigured,
   listOwnPreferences,
   rememberPreferences,
+  setPreferredName,
   updateConsent,
 } = require('../systems/conversation/preferenceMemory');
 const { describeOwnUsage, forgetCachedConsent, forgetOwnMessages } = require('../systems/conversation/channelMemory');
@@ -53,6 +57,55 @@ async function sendLines(interaction, lines) {
   for (const part of rest) await interaction.followUp(privateReply(part));
 }
 
+// Where a name applies, in words, from the member's sharing choice (preferenceMemory.js keeps one name per scope).
+function nicknameScopeLine(consent, guildId) {
+  if (consent?.choice === 'public') return '你公開了聊天記憶，這個稱呼在所有伺服器都會使用。';
+  return guildId
+    ? '你的聊天記憶不公開，這個稱呼只用在這個伺服器；其他伺服器可以各自設定。'
+    : '你的聊天記憶不公開，這個稱呼只用在私訊；每個伺服器可以各自設定。';
+}
+
+const NICKNAME_REFUSALS = Object.freeze({
+  stopped: '你已經停止記憶，請先用 /memory on 恢復，才能設定稱呼。',
+  refused: `這個名字不能當稱呼（請用 ${MAX_PREFERRED_NAME_LENGTH} 個字以內，不含連結、提及、符號標記或個人資料），請換一個。`,
+  unavailable: '小吉暫時記不住，請稍後再試。',
+  not_configured: NOT_CONFIGURED,
+});
+
+async function handleNickname(interaction, userId, guildId) {
+  const name = interaction.options.getString('name');
+  const clear = interaction.options.getBoolean('clear') === true;
+  if (clear && name) {
+    await interaction.reply(privateReply('name 與 clear 只能擇一使用，沒有變更任何設定。'));
+    return;
+  }
+  if (clear) {
+    const removed = await clearPreferredName({ userId, guildId });
+    await interaction.reply(privateReply(removed === null
+      ? NICKNAME_REFUSALS.unavailable
+      : removed ? '已清除稱呼，小吉會改用你的 Discord 名稱。' : '你目前沒有設定稱呼，小吉會用你的 Discord 名稱。'));
+    return;
+  }
+  if (!name) {
+    const current = await getPreferredName({ userId, guildId });
+    if (!current) {
+      await interaction.reply(privateReply(NICKNAME_REFUSALS.unavailable));
+      return;
+    }
+    await interaction.reply(privateReply(current.name
+      ? `小吉目前稱呼你「${current.name}」。\n${nicknameScopeLine(current.consent, guildId)}`
+      : `你還沒有設定稱呼，小吉會用你的 Discord 名稱。用 /memory nickname name:<名字> 設定。\n${nicknameScopeLine(current.consent, guildId)}`));
+    return;
+  }
+  const result = await setPreferredName({ userId, guildId, name });
+  if (!result.ok) {
+    await interaction.reply(privateReply(NICKNAME_REFUSALS[result.reason] || NICKNAME_REFUSALS.unavailable));
+    return;
+  }
+  const consent = await getConsent(userId).catch(() => null);
+  await interaction.reply(privateReply(`好的，之後小吉會稱呼你「${result.name}」。\n${nicknameScopeLine(consent, guildId)}`));
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('memory')
@@ -63,6 +116,12 @@ module.exports = {
       subcommand.setName('add').setDescription('補充一條你的喜好')
         .addStringOption((option) => option.setName('text').setDescription('例如：喜歡豚骨拉麵').setRequired(true)
           .setMaxLength(100))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand.setName('nickname').setDescription('設定小吉怎麼稱呼你；不填名字就查看目前的稱呼')
+        .addStringOption((option) => option.setName('name').setDescription('想被小吉稱呼的名字')
+          .setMaxLength(MAX_PREFERRED_NAME_LENGTH))
+        .addBooleanOption((option) => option.setName('clear').setDescription('設為 True 時清除稱呼，改回使用 Discord 名稱'))
     )
     .addSubcommand((subcommand) =>
       subcommand.setName('forget').setDescription('刪除或更正其中一條喜好')
@@ -123,6 +182,11 @@ module.exports = {
       await interaction.reply(privateReply(kept
         ? '記住了！'
         : '這條內容小吉不能記（可能含有個人資料、敏感話題、連結或太長），請換個說法。'));
+      return;
+    }
+
+    if (subcommand === 'nickname') {
+      await handleNickname(interaction, userId, guildId);
       return;
     }
 

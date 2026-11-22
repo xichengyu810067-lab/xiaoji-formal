@@ -16,7 +16,7 @@ export const PUBLIC_COMMANDS = Object.freeze({
   "status": [],
   "chat-style": ["current","set"],
   "romance": ["start","stop","status"],
-  "memory": ["view","export","add","forget","off","on","delete","share"],
+  "memory": ["view","export","add","nickname","forget","off","on","delete","share"],
   "student": [],
   "about": [],
   "help": [],

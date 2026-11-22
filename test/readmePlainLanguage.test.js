@@ -16,7 +16,7 @@ const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8').replace(/\r
 test('the README opens with the 30-second summary of the current release and a table of contents', () => {
   // The section titles are pictures in the website's handwriting font (scripts/build-readme-art.py); their alt
   // text carries the words.
-  assert.match(readme, /<h2><a id="new"><\/a><img src="docs\/images\/readme\/titles\/new\.svg" alt="30 秒看懂 1\.3\.1 大更新"><\/h2>/u);
+  assert.match(readme, /<h2><a id="new"><\/a><img src="docs\/images\/readme\/titles\/new\.svg" alt="30 秒看懂 1\.3\.4 更新"><\/h2>/u);
   assert.match(readme, /<h2><a id="toc"><\/a><img src="docs\/images\/readme\/titles\/toc\.svg" alt="目錄"><\/h2>/u);
 });
 

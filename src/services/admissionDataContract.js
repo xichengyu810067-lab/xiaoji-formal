@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { getRetainedDataSourceRoot } = require('../platform/retainedDataSource');
 
 const AUDIT_ENV_NAME = 'XIAOJI_AUDIT_DATA_PATH';
 const WHITELIST_ENV_NAME = 'XIAOJI_INVITER_WHITELIST_PATH';
@@ -18,9 +19,11 @@ function cleanEnvValue(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+// Without a path variable the two files are kept with the other JSON stores, in src/data of the retained data source
+// (retainedDataSource.js): the program folder, or the folder a host launcher names.
 function getAdmissionDataConfiguration({
   env = process.env,
-  projectRoot = path.resolve(__dirname, '..', '..'),
+  projectRoot = getRetainedDataSourceRoot(),
   cwd = process.cwd(),
 } = {}) {
   const auditOverride = cleanEnvValue(env[AUDIT_ENV_NAME]);

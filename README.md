@@ -7,7 +7,7 @@
 
 <br>
 
-<a href="https://github.com/xichengyu810067-lab/xiaoji-formal/releases"><img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC-1.3.3-e8789f?style=for-the-badge" alt="版本 1.3.3"></a>
+<a href="https://github.com/xichengyu810067-lab/xiaoji-formal/releases"><img src="https://img.shields.io/badge/%E7%89%88%E6%9C%AC-1.3.4-e8789f?style=for-the-badge" alt="版本 1.3.4"></a>
 <a href="https://xiaoji-zeta.vercel.app"><img src="https://img.shields.io/badge/%E5%AE%98%E7%B6%B2-%E9%BB%9E%E6%88%91%E9%80%B2%E5%85%A5-f19a84?style=for-the-badge" alt="官網"></a>
 <a href="https://discord.gg/TqkCx9kYmk"><img src="https://img.shields.io/badge/%E5%AE%98%E6%96%B9%E7%A4%BE%E7%BE%A4-%E5%8A%A0%E5%85%A5-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="官方社群"></a>
 <a href="https://xiaoji-zeta.vercel.app/status.html"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fxiaoji-public-status.xichengyu810067.workers.dev%2Fapi%2Fpublic%2Fbadge&style=for-the-badge" alt="小吉現在的狀態"></a>
@@ -23,7 +23,7 @@
 
 <table>
 <tr>
-<td width="50%"><h4><a href="#new">1　30 秒看懂 1.3.1 大更新</a></h4></td>
+<td width="50%"><h4><a href="#new">1　30 秒看懂 1.3.4 更新</a></h4></td>
 <td width="50%"><h4><a href="#weather">　2.6　查天氣</a></h4></td>
 </tr>
 <tr>
@@ -54,58 +54,57 @@
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/divider-dark.svg"><img src="docs/images/readme/divider-light.svg" alt="" width="100%"></picture>
 
-<h2><a id="new"></a><img src="docs/images/readme/titles/new.svg" alt="30 秒看懂 1.3.1 大更新"></h2>
+<h2><a id="new"></a><img src="docs/images/readme/titles/new.svg" alt="30 秒看懂 1.3.4 更新"></h2>
 
-<div align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/chat-dark.svg">
-  <img src="docs/images/readme/chat-light.svg" alt="對話示範：問小吉天氣，小吉先回「小吉思考中…」，想好再換成回答" width="90%">
-</picture>
-</div>
+<table>
+<tr>
+<td width="50%" align="center"><img src="docs/images/turtle-soup-start.png" alt="海龜湯：題目完整顯示在卡片上，按「提問」或「猜答案」" width="100%"></td>
+<td width="50%" align="center"><img src="docs/images/checkers-board.png" alt="六角星跳棋：卡片標出每位玩家的棋色與座位，棋盤上每個點都有名稱" width="100%"></td>
+</tr>
+</table>
 
 <table>
 <tr>
 <td width="33%" valign="top">
 
-### 💭 小吉思考中…
-想答案時先回一聲「小吉思考中…」，想好再換成回答，不用乾等。
+### 🐢 海龜湯有 AI 裁判
+你提問，小吉用 Claude 回答「是、否、無關」；猜答案時回「答對」或「未答對，再想想看！」。答對後按「查看湯底」，只有你看得到完整湯底。
 
 </td>
 <td width="33%" valign="top">
 
-### 🧠 記得聊過的話
-記住大家在伺服器裡說過的話，問「小吉你知道我是誰嗎？」會照記憶回答。私訊一律不記。
+### 🧭 六角星跳棋看得懂了
+大廳和對局卡片會列出每位玩家的棋色與座位，並說明座標怎麼輸入；棋盤上每個點都標了名稱，走子照著輸入就好。
 
 </td>
 <td width="33%" valign="top">
 
-### 📈 股票與美食
-/stock 看台股、美股、ETF 和加密貨幣的報價與走勢圖；/food 查食譜、找附近美食（美食地圖測試中，限授權伺服器）。
+### 🏁 棋局怎麼結束，一眼看懂
+西洋棋、五子棋、圍棋、象棋、六角星跳棋結束時，畫面底部用中文寫明結果，例如「將死，白方獲勝」「雙方同意和局」。
 
 </td>
 </tr>
 <tr>
 <td valign="top">
 
-### 🌾 新遊戲
-/farm 種田、/kitchen 做料理、狼人殺（小吉當法官）、/spark-relay 星火接續。
+### 📛 想被叫什麼，自己決定
+用 /memory nickname 設定小吉怎麼稱呼你，不想用了隨時清除。
 
 </td>
 <td valign="top">
 
-### 🔤 文字接龍更聰明
-字典查不到的詞，小吉會幫忙判斷能不能接。
+### 🧩 每日猜謎與議題由 Claude 出題
+每天寫一則新的（Claude 暫時無法出題時改用內建題庫）；出題時不會送出任何成員或伺服器的資料。
 
 </td>
 <td valign="top">
 
-### 🌐 官網更好用
-搜尋功能和指令、看每個功能現在正不正常，客服會直接回答問題。
+### 📊 狀態頁更準
+服務要持續出問題一段時間才會標成異常，不會再為一下子的卡頓誤報。
 
 </td>
 </tr>
 </table>
-
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/divider-dark.svg"><img src="docs/images/readme/divider-light.svg" alt="" width="100%"></picture>
 
@@ -138,6 +137,7 @@
 - 伺服器裡的發言每人每天最多記 30 則，台北時間每月 1 號中午清空上個月的紀錄；私訊一律不記。
 - 第一次聊天時由你決定記憶要不要公開：公開時，小吉所在的伺服器都能用；不公開時只在同一個伺服器裡用。
 - 用 /memory 隨時查看用量、刪除紀錄或改設定，回覆只有你自己看得到。
+- 想被小吉怎麼稱呼，用 /memory nickname 設定（20 字以內）；公開記憶時所有伺服器共用一個稱呼，不公開時各伺服器各自設定。
 
 </details>
 
@@ -167,6 +167,8 @@
 <br>
 
 - 抽籤、擲骰子，也能開海龜湯、棋類、俄羅斯方塊、數獨、文字接龍等遊戲，輸入 /board status 看有哪些可以玩。
+- 海龜湯：小吉用 AI 當裁判，回答「是、否、無關」；猜中後用「查看湯底」私下看完整湯底。你的提問與猜測會送到 AI 判定，詳見隱私權政策。
+- 棋類（西洋棋、五子棋、圍棋、象棋、六角星跳棋）：開桌後由「加入」按鈕入座，卡片會寫明誰是哪一方，結束時用中文說明結果。
 - 狼人殺：用 /board start 開局，小吉當法官。
 - /farm 種作物、/kitchen 做料理，可以出售、品嚐或送人。
 - /spark-relay 星火接續：小吉隨機分組，每天輪一個人完成小任務，全組都有參與才發獎金。
@@ -175,6 +177,10 @@
 <tr>
 <td><img src="docs/images/entertainment-fortune.jpg" alt="娛樂：抽一則小吉籤"></td>
 <td><img src="docs/images/games-catalog.jpg" alt="遊戲目錄"></td>
+</tr>
+<tr>
+<td><img src="docs/images/checkers-lobby.png" alt="六角星跳棋大廳：依加入順序分配棋色，列出已加入的玩家"></td>
+<td><img src="docs/images/turtle-soup-result.png" alt="海龜湯：猜錯會提示再想想，猜中後按「查看湯底」"></td>
 </tr>
 </table>
 
@@ -210,7 +216,7 @@
 <summary><h3><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/icons/topic-dark.svg"><img src="docs/images/readme/icons/topic-light.svg" alt="" width="28" align="absmiddle"></picture> 每天一個話題，大家在討論串裡聊</h3></summary>
 <br>
 
-管理員開啟後，小吉每天自動發起一個話題，認真發言還有吉幣。
+管理員開啟後，小吉每天自動發起一個話題，認真發言還有吉幣。每日猜謎和每日議題的題目由 Claude 每天寫一則新的（暫時無法出題時改用內建題庫），全部伺服器看到的是同一題。
 
 <img src="docs/images/community-daily-discussion.jpg" alt="每日議題：到點自動發布" width="70%">
 
@@ -253,6 +259,7 @@ flowchart LR
 > 你的吉幣、提醒和行事曆只有你自己看得到，小吉也不會亂管你的伺服器。
 
 - 小吉需要哪些權限、哪些功能不會出現在你的伺服器：[管理功能隔離說明](docs/MANAGEMENT_ISOLATION.md)
+- 海龜湯、文字接龍、星火接續等遊戲會用到 AI，相關輸入會送到 AI 服務處理；海龜湯只保存判定結果、不保存你輸入的文字，星火只保存主題、任務與完成狀態。
 - 隱私權政策與服務條款：見[官網](https://xiaoji-zeta.vercel.app/policies.html)
 
 
@@ -260,7 +267,7 @@ flowchart LR
 
 <h2><a id="more"></a><img src="docs/images/readme/titles/more.svg" alt="想知道更多"></h2>
 
-- 這次更新的完整內容：[1.3.3 版本說明](docs/releases/1.3.3.md)、[1.3.2 版本說明](docs/releases/1.3.2.md)
+- 這次更新的完整內容：[1.3.4 版本說明](docs/releases/1.3.4.md)、[1.3.3 版本說明](docs/releases/1.3.3.md)
 - 使用說明：[使用指南](docs/USER_GUIDE.md)
 
 <details>

@@ -1,6 +1,7 @@
 const { BoardCoreError, cloneJson } = require('../core/contracts');
 const { buildBoardCustomId } = require('./boardCustomId');
-const { GAME_LABELS } = require('../renderer/svgBoardRenderer');
+const { CAMP_DIRECTIONS } = require('../engines/checkers/board');
+const { GAME_LABELS, seatSide } = require('../renderer/svgBoardRenderer');
 
 const BUTTON_LABELS = Object.freeze({
   join: '加入',
@@ -8,6 +9,7 @@ const BUTTON_LABELS = Object.freeze({
   begin: '開始遊戲',
   stop: '取消／結束',
   status: '重新整理',
+  reveal: '查看湯底',
 });
 
 function button(session, verb, style = 'secondary', disabled = false) {
@@ -63,6 +65,70 @@ function buildBoardComponents(result) {
   return rows.slice(0, 5);
 }
 
+const STATUS_LABELS = Object.freeze({
+  lobby: '等待玩家', active: '進行中', completed: '已結束', cancelled: '已取消', expired: '已逾時',
+});
+const DISCORD_ID_PATTERN = /^\d{17,20}$/u;
+
+// A player as the panel names them: a mention (which shows the name and, with allowedMentions empty, pings no one),
+// or the seat number when the ID is not a Discord ID.
+function playerLabel(userId, seat) {
+  return DISCORD_ID_PATTERN.test(String(userId)) ? `<@${userId}>` : `玩家 ${seat + 1}`;
+}
+
+// Who plays which side, for the games whose pieces have a colour (chess, go, gomoku, xiangqi, Chinese checkers): the
+// board image only shows the colours and the seat numbers, so without this a player cannot tell which side is theirs.
+// In the lobby the order of joining decides the sides, and the panel says so and lists who has joined; once the game
+// runs it names each side's player and whose turn it is. Chinese checkers also says where each player starts and
+// where they are heading, read from the game's public view, and how to write a move.
+const CHECKERS_MOVE_HELP = '座標：英文字母是第幾列（由上而下 A～Q），數字是該列由左數第幾個點，棋盤圖上每個點都標有名稱。' +
+  '移動輸入「起點 終點」，例如 E5 F5；連跳請依序寫出每個落點，例如 E5 G5 I5。';
+
+function sidesFor(gameKey) {
+  const sides = [];
+  for (let seat = 0; seatSide(gameKey, seat); seat += 1) sides.push(seatSide(gameKey, seat));
+  return sides;
+}
+
+function campText(game, userId) {
+  const player = Array.isArray(game?.players) ? game.players.find((entry) => entry?.id === userId) : null;
+  const from = CAMP_DIRECTIONS[player?.campId];
+  const to = CAMP_DIRECTIONS[player?.targetCampId];
+  return from && to ? `｜從${from}出發，目標${to}` : '';
+}
+
+function buildSideLines(session, game = null) {
+  const sides = sidesFor(session.gameKey);
+  if (sides.length < 2) return [];
+  const [first, second] = sides;
+  const players = Array.isArray(session.players) ? session.players : [];
+  const checkers = session.gameKey === 'checkers';
+  if (session.status === 'lobby') {
+    const joined = players.slice(0, sides.length).map((player, seat) => {
+      const side = sides[seat];
+      return `${side.mark} ${side.name}：${playerLabel(player.userId, seat)}`;
+    });
+    const intro = sides.length === 2
+      ? `先加入的是${first.mark} ${first.name}，第二位加入的是${second.mark} ${second.name}。`
+      : `依加入順序分配棋色：${sides.map((side) => `${side.mark} ${side.name}`).join('、')}。`;
+    const count = checkers ? [`已加入 ${players.length} 人；2、3、4 或 6 人時房主可以開始。`] : [];
+    return [intro, ...count, ...joined];
+  }
+  const lines = players.slice(0, sides.length).map((player, seat) => {
+    const side = sides[seat];
+    const left = player.status && player.status !== 'active' ? '（已離開）' : '';
+    const camp = checkers ? campText(game, player.userId) : '';
+    return `${side.mark} ${side.name}（座位 ${seat + 1}）：${playerLabel(player.userId, seat)}${left}${camp}`;
+  });
+  if (session.status === 'active' && session.turn?.playerId) {
+    const seat = players.findIndex((player) => player.userId === session.turn.playerId);
+    const side = sides[seat];
+    if (side) lines.push(`輪到：${side.mark} ${side.name} ${playerLabel(session.turn.playerId, seat)}`);
+  }
+  if (checkers && session.status === 'active') lines.push(CHECKERS_MOVE_HELP);
+  return lines;
+}
+
 async function buildBoardMessagePayload(result, { renderPng }) {
   if (typeof renderPng !== 'function') throw new BoardCoreError('INVALID_PRESENTER', 'renderPng is required.');
   const publicResult = cloneJson(result, 'board presentation result');
@@ -85,7 +151,8 @@ async function buildBoardMessagePayload(result, { renderPng }) {
     embeds: [{
       title: gameLabel,
       description: [
-        `狀態：${publicResult.session.status}｜版本：${publicResult.session.revision}`,
+        `狀態：${STATUS_LABELS[publicResult.session.status] || publicResult.session.status}｜版本：${publicResult.session.revision}`,
+        ...buildSideLines(publicResult.session, publicResult.game),
         typeof publicResult.game?.embedText === 'string' ? publicResult.game.embedText : '',
       ].filter(Boolean).join('\n').slice(0, 4000),
       image: { url: `attachment://${fileName}` },
@@ -116,6 +183,7 @@ function createDiscordBoardPresenter({ renderPng, transport }) {
 
 module.exports = {
   buildBoardComponents,
+  buildSideLines,
   buildBoardMessagePayload,
   createDiscordBoardPresenter,
 };

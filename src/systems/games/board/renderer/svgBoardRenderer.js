@@ -149,17 +149,27 @@ function semanticSeatFill(gameKey, seat, piece) {
   return SEAT_COLORS[(seat < 0 ? 0 : seat) % SEAT_COLORS.length];
 }
 
-function drawPiece({ piece, x, y, radius, playerOrder, colors, gameKey }) {
+// label: a point name to print on the piece instead of its symbol (Chinese checkers), so a player can read the
+// start point of a move straight off the piece; the colour already says whose piece it is, so no seat badge.
+function drawPiece({ piece, x, y, radius, playerOrder, colors, gameKey, label = null }) {
   const seat = seatIndex(piece.ownerId, playerOrder);
   const fill = semanticSeatFill(gameKey, seat, piece);
   const darkText = ['#f7f4ea', '#f0b429'].includes(fill);
   const hideStoneSymbol = ['go', 'gomoku'].includes(gameKey) && ['●', '○', ''].includes(String(piece.symbol || ''));
   const symbol = hideStoneSymbol ? '' : escapeXml(piece.symbol || '●');
   const dash = seat < 1 ? 'none' : `${2 + (seat % 3) * 2} ${2 + ((seat + 1) % 3) * 2}`;
+  if (label !== null) {
+    return `<g data-piece-id="${escapeXml(piece.id)}" data-seat="${seat}"><circle cx="${x}" cy="${y}" r="${radius}" fill="${escapeXml(fill)}" stroke="${colors.pieceStroke}" stroke-width="3" stroke-dasharray="${dash}"/><text data-point-label="${escapeXml(label)}" x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Cubic 11" font-size="${pointLabelSize(radius)}" fill="${darkText ? '#111111' : '#ffffff'}">${escapeXml(label)}</text></g>`;
+  }
   const badge = seat >= 0
     ? `<circle cx="${x + radius * 0.68}" cy="${y - radius * 0.68}" r="${Math.max(7, radius * 0.28)}" fill="${colors.canvas}" stroke="${colors.line}" stroke-width="2"/><text x="${x + radius * 0.68}" y="${y - radius * 0.68}" text-anchor="middle" dominant-baseline="central" font-family="Cubic 11" font-size="${Math.max(10, radius * 0.32)}" fill="${colors.text}">${seat + 1}</text>`
     : '';
   return `<g data-piece-id="${escapeXml(piece.id)}" data-seat="${seat}"><circle cx="${x}" cy="${y}" r="${radius}" fill="${escapeXml(fill)}" stroke="${colors.pieceStroke}" stroke-width="3" stroke-dasharray="${dash}"/><text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-family="Noto Sans Symbols 2, Noto Sans Symbols, Cubic 11" font-size="${radius * 1.15}" fill="${darkText ? '#111111' : '#ffffff'}">${symbol}</text>${badge}</g>`;
+}
+
+// Cubic 11 is a pixel font drawn on an 11-pixel grid; whole multiples of 11 stay sharp.
+function pointLabelSize(radius) {
+  return Math.max(11, Math.round((radius * 0.62) / 11) * 11);
 }
 
 function drawDecorations(board, geometry, colors, layer = 'foreground') {
@@ -246,14 +256,17 @@ function renderGraph(board, frame, playerOrder, colors, gameKey) {
   const ys = board.points.map((point) => Number(point.y));
   const minX = Math.min(...xs); const maxX = Math.max(...xs);
   const minY = Math.min(...ys); const maxY = Math.max(...ys);
-  const showPointIds = gameKey === 'checkers';
-  const inset = showPointIds ? 32 : 0;
+  // Chinese checkers moves are typed as point names, so every point carries its name: printed inside the empty point,
+  // and on the piece that stands on it.
+  const showPointLabels = gameKey === 'checkers';
+  const inset = showPointLabels ? Math.round(frame.width * 0.05) : 0;
   const scale = Math.min((frame.width - inset * 2) / Math.max(1, maxX - minX), (frame.height - inset * 2) / Math.max(1, maxY - minY));
   const left = frame.left + (frame.width - (maxX - minX) * scale) / 2;
   const top = frame.top + (frame.height - (maxY - minY) * scale) / 2;
   const pointMap = new Map(board.points.map((point) => [point.id, {
     x: left + (point.x - minX) * scale,
     y: top + (point.y - minY) * scale,
+    label: String(point.label ?? point.id),
   }]));
   const resolvePosition = (position) => pointMap.get(position.pointId);
   let result = `<rect x="${frame.left}" y="${frame.top}" width="${frame.width}" height="${frame.height}" rx="24" fill="${colors.boardAlt}" stroke="${colors.line}" stroke-width="4"/>`;
@@ -263,45 +276,160 @@ function renderGraph(board, frame, playerOrder, colors, gameKey) {
     result += `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${colors.line}" stroke-width="2"/>`;
   }
   result += drawDecorations(board, { resolvePosition }, colors, 'foreground');
-  const radius = showPointIds ? Math.max(10, Math.min(16, scale * 0.25)) : Math.max(12, Math.min(28, scale * 0.32));
-  for (const point of pointMap.values()) result += `<circle cx="${point.x}" cy="${point.y}" r="${Math.max(2, radius * 0.12)}" fill="${colors.line}"/>`;
+  const radius = showPointLabels ? Math.max(12, scale * 0.42) : Math.max(12, Math.min(28, scale * 0.32));
+  const occupied = new Set(board.pieces.map((piece) => String(piece.position.pointId)));
+  for (const [id, point] of pointMap) {
+    if (!showPointLabels) {
+      result += `<circle cx="${point.x}" cy="${point.y}" r="${Math.max(2, radius * 0.12)}" fill="${colors.line}"/>`;
+    } else if (!occupied.has(id)) {
+      result += `<circle cx="${point.x}" cy="${point.y}" r="${radius}" fill="${colors.board}" stroke="${colors.line}" stroke-width="2"/><text data-point-label="${escapeXml(point.label)}" x="${point.x}" y="${point.y}" text-anchor="middle" dominant-baseline="central" font-family="Cubic 11" font-size="${pointLabelSize(radius)}" fill="${colors.text}">${escapeXml(point.label)}</text>`;
+    }
+  }
   for (const piece of board.pieces) {
     const point = resolvePosition(piece.position);
-    result += drawPiece({ piece, ...point, radius, playerOrder, colors, gameKey });
-  }
-  if (showPointIds) {
-    for (const [id, point] of pointMap) {
-      result += `<text data-point-label="${escapeXml(id)}" x="${point.x}" y="${point.y + radius + 11}" text-anchor="middle" font-family="Cubic 11" font-size="10" fill="${colors.text}">${escapeXml(id)}</text>`;
-    }
+    result += drawPiece({ piece, x: point.x, y: point.y, radius, playerOrder, colors, gameKey, label: showPointLabels ? point.label : null });
   }
   return result;
 }
 
+// Roughly how wide a character is in Cubic 11, in em: CJK and full-width forms are square, the rest about half.
+function charWidth(character) {
+  return /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/u.test(character) ? 1 : 0.55;
+}
+
+// Closing punctuation never starts a line: it stays at the end of the line before, a little past the width.
+const NO_LINE_START = new Set([...'。，、；：？！」』）》〉】〕…—．,.;:?!)]}%']);
+
+// Breaks a text into lines no wider than maxEm (in em of the font size).
+function wrapText(text, maxEm) {
+  const lines = [];
+  let line = '';
+  let width = 0;
+  for (const character of String(text ?? '').replace(/\s+/gu, ' ').trim()) {
+    const next = charWidth(character);
+    if (line && width + next > maxEm && !NO_LINE_START.has(character)) {
+      lines.push(line.trimEnd());
+      line = '';
+      width = 0;
+      if (character === ' ') continue;
+    }
+    line += character;
+    width += next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// A text-only board (turtle soup, the lobby): the title, then each prompt wrapped to the frame's width so a long
+// scenario reads in full. Lines that do not fit in the frame are cut, the last one ending in "…".
 function renderNarrative(view, frame, colors) {
-  const prompts = (view.prompts || []).slice(0, 5);
+  const fontSize = 24;
+  const lineHeight = 34;
+  const padding = 40;
+  // One em is kept free for closing punctuation hanging at the end of a line.
+  const maxEm = (frame.width - padding * 2) / fontSize - 1;
+  const firstLine = frame.top + 130;
+  const maxLines = Math.max(1, Math.floor((frame.top + frame.height - padding - firstLine) / lineHeight) + 1);
+  const lines = [];
+  for (const prompt of (view.prompts || []).slice(0, 5)) {
+    if (lines.length) lines.push({ gap: true });
+    for (const text of wrapText(prompt?.text, maxEm)) lines.push({ text });
+  }
+  while (lines.length && lines[0].gap) lines.shift();
+  const shown = lines.slice(0, maxLines);
+  while (shown.length && shown.at(-1).gap) shown.pop();
+  if (lines.length > shown.length && shown.length) {
+    const last = shown.at(-1);
+    last.text = `${[...last.text].slice(0, Math.max(1, [...last.text].length - 1)).join('')}…`;
+  }
   let result = `<rect x="${frame.left}" y="${frame.top}" width="${frame.width}" height="${frame.height}" rx="28" fill="${colors.boardAlt}" stroke="${colors.line}" stroke-width="4"/>`;
-  result += `<text x="${frame.left + 40}" y="${frame.top + 70}" font-family="Cubic 11" font-size="34" fill="${colors.text}">${escapeXml(view.title || GAME_LABELS[view.gameKey] || '桌遊')}</text>`;
-  prompts.forEach((prompt, index) => {
-    result += `<text x="${frame.left + 40}" y="${frame.top + 130 + index * 52}" font-family="Cubic 11" font-size="24" fill="${colors.text}">${escapeXml(prompt.text).slice(0, 80)}</text>`;
-  });
+  result += `<text x="${frame.left + padding}" y="${frame.top + 70}" font-family="Cubic 11" font-size="34" fill="${colors.text}">${escapeXml(view.title || GAME_LABELS[view.gameKey] || '桌遊')}</text>`;
+  let y = firstLine;
+  for (const line of shown) {
+    if (line.gap) {
+      y += lineHeight * 0.5;
+      continue;
+    }
+    result += `<text x="${frame.left + padding}" y="${y}" font-family="Cubic 11" font-size="${fontSize}" fill="${colors.text}">${escapeXml(line.text)}</text>`;
+    y += lineHeight;
+  }
   return result;
+}
+
+// The sides of the games whose pieces have a colour, by seat (the order the players joined in): the mark and the name
+// the panel text and the image both use, matching the piece colours of semanticSeatFill (Chinese checkers uses
+// SEAT_COLORS in seat order, for up to six players). Other games have no sides.
+const GAME_SIDES = Object.freeze({
+  checkers: Object.freeze([
+    Object.freeze({ mark: '⚪', name: '白方' }),
+    Object.freeze({ mark: '⚫', name: '黑方' }),
+    Object.freeze({ mark: '🔴', name: '紅方' }),
+    Object.freeze({ mark: '🔵', name: '藍方' }),
+    Object.freeze({ mark: '🟢', name: '綠方' }),
+    Object.freeze({ mark: '🟡', name: '黃方' }),
+  ]),
+  chess: Object.freeze([Object.freeze({ mark: '⚪', name: '白方' }), Object.freeze({ mark: '⚫', name: '黑方' })]),
+  go: Object.freeze([Object.freeze({ mark: '⚫', name: '黑方' }), Object.freeze({ mark: '⚪', name: '白方' })]),
+  gomoku: Object.freeze([Object.freeze({ mark: '⚫', name: '黑方' }), Object.freeze({ mark: '⚪', name: '白方' })]),
+  xiangqi: Object.freeze([Object.freeze({ mark: '🔴', name: '紅方' }), Object.freeze({ mark: '⚫', name: '黑方' })]),
+});
+
+function seatSide(gameKey, seat) {
+  return Object.hasOwn(GAME_SIDES, gameKey) ? GAME_SIDES[gameKey][seat] || null : null;
+}
+
+// How a finished game ended, in the words the image's bottom line uses. The engines' reason codes are English
+// identifiers; a code with no entry here still reads as a plain "對局已結束".
+const OUTCOME_REASONS = Object.freeze({
+  checkmate: '將死',
+  stalemate: '逼和',
+  'insufficient-material': '子力不足，和局',
+  'threefold-repetition': '同一局面重複三次，和局',
+  'fivefold-repetition': '同一局面重複五次，和局',
+  'fifty-move-rule': '五十步規則，和局',
+  'seventy-five-move-rule': '七十五步規則，和局',
+  'agreed-draw': '雙方同意和局',
+  resignation: '對手認輸',
+  'five-in-a-row': '五子連線',
+  'board-full': '棋盤已滿，和局',
+  'area-score': '數子計分',
+  'area-score-tie': '數子計分平手',
+  'all-pieces-in-target-camp': '全部棋子進入目標營地',
+  'last-active-player': '其他玩家都已離開',
+  'turtle-soup-solved': '湯底已被猜中',
+  'host-ended': '房主結束了對局',
+  'werewolf-village-win': '好人陣營獲勝',
+  'werewolf-wolves-win': '狼人陣營獲勝',
+});
+
+function describeOutcome(publicView, playerOrder) {
+  const outcome = publicView.outcome;
+  // In xiangqi a player with no legal move loses (困斃), unlike chess where it is a draw.
+  const reason = publicView.gameKey === 'xiangqi' && outcome.reason === 'stalemate'
+    ? '困斃'
+    : (Object.hasOwn(OUTCOME_REASONS, outcome.reason) ? OUTCOME_REASONS[outcome.reason] : null);
+  const winners = Array.isArray(outcome.winnerIds) ? outcome.winnerIds : [];
+  const side = outcome.type === 'win' && winners.length === 1
+    ? seatSide(publicView.gameKey, playerOrder.indexOf(String(winners[0])))
+    : null;
+  const parts = [reason, side ? `${side.name}獲勝` : null].filter(Boolean);
+  return parts.length ? `對局已結束：${parts.join('，')}` : '對局已結束';
 }
 
 function describeTurn(publicView, playerOrder) {
-  if (!publicView.turn?.playerId) return publicView.outcome?.reason || '等待中';
+  if (!publicView.turn?.playerId) return publicView.outcome ? describeOutcome(publicView, playerOrder) : '等待中';
   const seat = playerOrder.indexOf(publicView.turn.playerId);
   const seatNumber = seat >= 0 ? seat + 1 : null;
-  let side = '玩家';
-  if (['go', 'gomoku'].includes(publicView.gameKey)) side = seat === 0 ? '黑方' : seat === 1 ? '白方' : '玩家';
-  else if (publicView.gameKey === 'chess') side = seat === 0 ? '白方' : seat === 1 ? '黑方' : '玩家';
-  else if (publicView.gameKey === 'xiangqi') side = seat === 0 ? '紅方' : seat === 1 ? '黑方' : '玩家';
+  const side = seatSide(publicView.gameKey, seat)?.name || '玩家';
   return `輪到：${side}${seatNumber ? `（座位 ${seatNumber}）` : ''}`;
 }
 
 function renderBoardSvg(view, options = {}) {
   const publicView = normalizeRendererView(view);
-  const width = Number.isInteger(options.width) && options.width >= 480 ? options.width : 960;
-  const height = Number.isInteger(options.height) && options.height >= 480 ? options.height : 960;
+  // The 121-point star needs a larger image than the other boards for its point names to stay readable.
+  const defaultSize = publicView.gameKey === 'checkers' && publicView.board.kind === 'graph' ? 1440 : 960;
+  const width = Number.isInteger(options.width) && options.width >= 480 ? options.width : defaultSize;
+  const height = Number.isInteger(options.height) && options.height >= 480 ? options.height : defaultSize;
   const colors = THEMES[options.theme] || THEMES.light;
   const playerOrder = Array.isArray(options.playerOrder) ? options.playerOrder.map(String) : [];
   const frame = { left: 84, top: 130, width: width - 168, height: height - 230 };
@@ -360,14 +488,17 @@ function renderBoardPng(view, options = {}) {
 module.exports = {
   FONT_FILES,
   GAME_LABELS,
+  GAME_SIDES,
   RESVG_VERSION,
   SEAT_COLORS,
   THEMES,
   escapeXml,
   describeTurn,
+  wrapText,
   loadBundledFontBuffers,
   normalizeRendererView,
   renderBoardPng,
   renderBoardSvg,
+  seatSide,
   validatePublicBoard,
 };

@@ -547,6 +547,7 @@ async function loadMemoryContext({ userId, guildId = null, now = Date.now() } = 
         available: true,
         enabled: true,
         preferences: preferences.map(({ category, value }) => ({ category, value })),
+        preferredName: latestPreferredName(preferences),
         consent,
       };
     });
@@ -574,6 +575,89 @@ async function rememberPreferences({ userId, guildId = null, entries = [], now =
   } catch (error) {
     reportStoreFailure(error);
     return 0;
+  }
+}
+
+// The name a member wants 小吉 to call them by: the newest 稱呼 (nickname) preference of the scope their sharing choice
+// reads (preferenceMemory's own rule): a member who shares their memory has one name for every server, one who does not
+// has one per server (and one for direct messages). With none, 小吉 uses the Discord display name as before.
+const MAX_PREFERRED_NAME_LENGTH = 20;
+const PREFERRED_NAME_REFUSED = /[@<>#`*_~|\\[\]{}\r\n]|https?:|www\.|discord\.(?:gg|com)/iu;
+
+function latestPreferredName(preferences) {
+  const names = preferences.filter((entry) => entry.category === 'nickname')
+    .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0) || Number(right.id ?? 0) - Number(left.id ?? 0));
+  return names.length ? names[0].value : null;
+}
+
+// The cleaned name, or null when it cannot be a name to call someone by (empty, too long, a link, a mention, markup,
+// personal data or anything acceptPreference refuses).
+function acceptPreferredName(name) {
+  const value = String(name ?? '').normalize('NFC').replace(/\s+/gu, ' ').trim();
+  if (!value || [...value].length > MAX_PREFERRED_NAME_LENGTH || PREFERRED_NAME_REFUSED.test(value)) return null;
+  const accepted = acceptPreference({ category: 'nickname', preference: value });
+  return accepted && accepted.value === value ? value : null;
+}
+
+// Sets the member's name for the scope their sharing choice writes to, replacing the names kept there before.
+// { ok: true, name, scope } or { ok: false, reason: 'not_configured' | 'stopped' | 'refused' | 'unavailable' }.
+async function setPreferredName({ userId, guildId = null, name, now = Date.now() } = {}) {
+  const store = getMemoryStore();
+  if (!store || !userId) return { ok: false, reason: 'not_configured' };
+  const value = acceptPreferredName(name);
+  if (!value) return { ok: false, reason: 'refused' };
+  try {
+    return await withStoreTimeout(async () => {
+      const consent = normalizeConsent(await store.getConsent(userId));
+      if (!consent.collecting) return { ok: false, reason: 'stopped' };
+      const scope = writableScope(consent, guildId);
+      for (const entry of await store.listPreferences(userId, [scope])) {
+        if (entry.category === 'nickname') await store.deletePreference(userId, entry.id);
+      }
+      await store.addPreference(userId, scope, 'nickname', value, now);
+      return { ok: true, name: value, scope };
+    });
+  } catch (error) {
+    reportStoreFailure(error);
+    return { ok: false, reason: 'unavailable' };
+  }
+}
+
+// Removes the names of the scope the member's sharing choice reads, so 小吉 goes back to the Discord display name.
+// The number removed, or null when the memory could not be reached.
+async function clearPreferredName({ userId, guildId = null } = {}) {
+  const store = getMemoryStore();
+  if (!store || !userId) return null;
+  try {
+    return await withStoreTimeout(async () => {
+      const consent = normalizeConsent(await store.getConsent(userId));
+      let removed = 0;
+      for (const entry of await store.listPreferences(userId, readableScopes(consent, guildId))) {
+        if (entry.category === 'nickname' && await store.deletePreference(userId, entry.id)) removed += 1;
+      }
+      return removed;
+    });
+  } catch (error) {
+    reportStoreFailure(error);
+    return null;
+  }
+}
+
+// { name, scope, consent } for the scope the member's sharing choice reads; name is null when none is set. null when
+// the memory is not configured or could not be reached.
+async function getPreferredName({ userId, guildId = null } = {}) {
+  const store = getMemoryStore();
+  if (!store || !userId) return null;
+  try {
+    return await withStoreTimeout(async () => {
+      const consent = normalizeConsent(await store.getConsent(userId));
+      const scope = writableScope(consent, guildId);
+      const name = latestPreferredName(await store.listPreferences(userId, readableScopes(consent, guildId)));
+      return { name, scope, consent };
+    });
+  } catch (error) {
+    reportStoreFailure(error);
+    return null;
   }
 }
 
@@ -680,10 +764,13 @@ module.exports = {
   writableScope,
   GLOBAL_SCOPE,
   MAX_PREFERENCES_PER_SCOPE,
+  MAX_PREFERRED_NAME_LENGTH,
   MEMORY_REPORT_ROW_LIMIT,
   PREFERENCE_CATEGORIES,
   RETENTION_MS,
   acceptPreference,
+  acceptPreferredName,
+  clearPreferredName,
   configureMemoryStoreForTests,
   createInMemoryMemoryStore,
   createTursoMemoryStore,
@@ -691,6 +778,7 @@ module.exports = {
   forgetAllOwnPreferences,
   forgetOwnPreference,
   getConsent,
+  getPreferredName,
   getPromptRevision,
   isMemoryConfigured,
   listOwnPreferences,
@@ -699,6 +787,7 @@ module.exports = {
   loadMemoryContext,
   rememberPreferences,
   savePromptRevision,
+  setPreferredName,
   scopeForGuild,
   updateConsent,
 };

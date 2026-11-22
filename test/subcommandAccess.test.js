@@ -314,7 +314,8 @@ test('ordinary members get past the permission check on the public paths of work
     { name: 'work', subcommand: 'list', services: ['listJobs'], takesGuild: false, reply: /小吉職業清單/u, ephemeral: true },
     { name: 'bank', subcommand: 'interest', services: ['getBankRates'], reply: /目前銀行利率/u, ephemeral: true },
     { name: 'shop', subcommand: 'list', services: ['listShopItems'], reply: /目前商店沒有可購買的商品/u, ephemeral: true },
-    { name: 'leaderboard', subcommand: null, services: ['getLeaderboard'], reply: /吉幣排行榜/u, ephemeral: undefined },
+    // The coin board reads its page, then acknowledges the command before it looks up the users on it.
+    { name: 'leaderboard', subcommand: null, services: ['getLeaderboard'], methods: ['deferReply', 'editReply'], reply: /吉幣排行榜/u, ephemeral: undefined },
     // The assets board checks that the guild's coin system is on before it reads any rows. It then
     // acknowledges the command before it looks up as many as 25 users, and edits that reply with the board.
     {
@@ -377,7 +378,7 @@ test('the merged leaderboard keeps the visibility of the two boards it replaced'
 
   // Coin balances (the old /leaderboard): public with data, private notice without, ten to a page.
   const coins = await board();
-  assert.deepEqual(lastCalls.map(({ method }) => method), ['reply'], 'the coin board is one plain reply');
+  assert.deepEqual(lastCalls.map(({ method }) => method), ['deferReply', 'editReply'], 'the coin board is acknowledged, then edited');
   assert.equal(coins.ephemeral, undefined);
   assert.equal(coins.content, '**Synthetic Guild 吉幣排行榜**\n1. <@player-1> - 1,200 吉幣（連續 3 天）');
   assert.deepEqual(downstreamCalls, [{ name: 'getLeaderboard', args: [GUILD_ID, { page: 1, limit: 10 }] }]);
@@ -512,7 +513,7 @@ test('the coin board pages ten rows at a time and ranks follow where each row re
     downstreamCalls.length = 0;
     const calls = await run(commands, target, { userId: MEMBER_ID, integers: { page }, botIds });
     assert.deepEqual(downstreamCalls, [{ name: 'getLeaderboard', args: [GUILD_ID, { page, limit: 10 }] }], `page ${page} asks for ten rows`);
-    return calls[0].payload;
+    return answerOf(calls, `/leaderboard page ${page}`).payload;
   };
 
   const shown = [];
@@ -546,7 +547,7 @@ test('ranks come from the page and size the service reports, not from what was a
   // A service that capped the page size at 4 would put page 3 at offset 8.
   stubResults.set('getLeaderboard', (guildId, { page }) => ({ page, limit: 4, players: rankedPlayers(30).slice((page - 1) * 4, page * 4) }));
   const calls = await run(commands, target, { userId: MEMBER_ID, integers: { page: 3 } });
-  assert.deepEqual(boardLines(calls[0].payload).map(rankOf), [9, 10, 11, 12]);
+  assert.deepEqual(boardLines(answerOf(calls, '/leaderboard page 3').payload).map(rankOf), [9, 10, 11, 12]);
 });
 
 test('an old client that still sends /economy leaderboard gets a private pointer, and members are still refused', async (t) => {

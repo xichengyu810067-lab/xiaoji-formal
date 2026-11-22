@@ -3,7 +3,8 @@ const { EmbedBuilder } = require('discord.js');
 const { withCoinDatabase, withCoinTransaction } = require('../../economy/storage/coinDatabase');
 const { ensureGuildEconomyRowWithApi, readGuildEconomyEnabledWithApi } = require('../../economy/coinService');
 const { grantRewardOnce, setFeatureHealth } = require('../../../services/featurePlatformService');
-const { corpusVersion, selectDiscussionForDate, topics } = require('./dailyDiscussionCorpus');
+const { corpusVersion, selectDiscussionForDate } = require('./dailyDiscussionCorpus');
+const { getDailyContentGenerator } = require('./dailyContentGenerator');
 const {
   HISTORY_PAGE_SIZE,
   MAX_HISTORY_PAGES,
@@ -44,9 +45,10 @@ const { findMarkedMessage, requireId, requireNow } = createDailyEventKit({
   makeError: (code, message) => new DailyDiscussionError(code, message),
 });
 
+// The topic an event was claimed with: a corpus topic, or one Claude wrote for that day (dailyContentGenerator.js).
 function topicForId(topicId) {
-  const topic = topics.find((entry) => entry.id === topicId);
-  if (!topic) throw new DailyDiscussionError('TOPIC_NOT_FOUND', 'The persisted topic id is not in the curated corpus.');
+  const topic = getDailyContentGenerator().contentForId('discussion', topicId);
+  if (!topic) throw new DailyDiscussionError('TOPIC_NOT_FOUND', 'The persisted topic id is neither in the corpus nor written.');
   return topic;
 }
 
@@ -127,7 +129,8 @@ async function claimDailyDiscussionEvent({ guildId, parentChannelId, localDate, 
   const normalizedGuildId = requireId(guildId, 'guildId');
   const normalizedChannelId = requireId(parentChannelId, 'parentChannelId');
   const date = requireNow(now);
-  const topic = selectDiscussionForDate(localDate);
+  // A day that is only recorded as missed asks nothing of Claude: its topic is never posted.
+  const topic = missed ? selectDiscussionForDate(localDate) : await getDailyContentGenerator().contentForDate('discussion', localDate);
   const window = getDiscussionWindow(localDate);
   const timestamp = date.toISOString();
   const leaseOwner = missed ? null : randomUUID();

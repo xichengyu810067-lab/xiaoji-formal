@@ -2,8 +2,8 @@
 // The status page shows it only when it has no live command statuses at all. null: no health check was recorded.
 (function exposeStatusHealthCheck(root) {
   const data = {
-    "checkedAt": "2026-11-18T15:32:08.254Z",
-    "version": "1.3.3",
+    "checkedAt": "2026-11-22T03:18:43.151Z",
+    "version": "1.3.4",
     "commands": {
       "ping": {
         "subcommands": {},
@@ -93,6 +93,7 @@
           "view": "pass",
           "export": "pass",
           "add": "pass",
+          "nickname": "pass",
           "forget": "pass",
           "off": "pass",
           "on": "pass",

@@ -3,7 +3,8 @@ const { EmbedBuilder } = require('discord.js');
 const { withCoinDatabase, withCoinTransaction } = require('../../economy/storage/coinDatabase');
 const { ensureGuildEconomyRowWithApi, readGuildEconomyEnabledWithApi } = require('../../economy/coinService');
 const { getGuildFeatureSetting, grantRewardOnce, setFeatureHealth } = require('../../../services/featurePlatformService');
-const { corpusVersion, riddles, selectRiddleForDate } = require('./dailyRiddleCorpus');
+const { corpusVersion, selectRiddleForDate } = require('./dailyRiddleCorpus');
+const { getDailyContentGenerator } = require('./dailyContentGenerator');
 const {
   HISTORY_PAGE_SIZE,
   MAX_HISTORY_PAGES,
@@ -48,9 +49,10 @@ const { findMarkedMessage, requireId, requireNow } = createDailyEventKit({
   makeError: (code, message) => new DailyRiddleError(code, message),
 });
 
+// The riddle an event was claimed with: a corpus riddle, or one Claude wrote for that day (dailyContentGenerator.js).
 function riddleForId(riddleId) {
-  const riddle = riddles.find((entry) => entry.id === riddleId);
-  if (!riddle) throw new DailyRiddleError('RIDDLE_NOT_FOUND', 'The persisted riddle id is not in the curated corpus.');
+  const riddle = getDailyContentGenerator().contentForId('riddle', riddleId);
+  if (!riddle) throw new DailyRiddleError('RIDDLE_NOT_FOUND', 'The persisted riddle id is neither in the corpus nor written.');
   return riddle;
 }
 
@@ -161,7 +163,8 @@ async function claimDailyRiddleEvent({ guildId, parentChannelId, localDate, now 
   const normalizedGuildId = requireId(guildId, 'guildId');
   const normalizedChannelId = requireId(parentChannelId, 'parentChannelId');
   const date = requireNow(now);
-  const riddle = selectRiddleForDate(localDate);
+  // A day that is only recorded as missed asks nothing of Claude: its riddle is never posted.
+  const riddle = missed ? selectRiddleForDate(localDate) : await getDailyContentGenerator().contentForDate('riddle', localDate);
   const window = getRiddleWindow(localDate);
   const timestamp = date.toISOString();
   const leaseOwner = missed ? null : randomUUID();

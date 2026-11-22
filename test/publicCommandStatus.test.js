@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const catalog = require('../src/platform/catalogs/commandCatalog');
 const {
   FAILURES_TO_BREAK,
+  SUSTAINED_FAILURE_MS,
   SERVICES,
   recordServiceOutcome,
   registerServiceConfiguration,
@@ -131,7 +132,10 @@ test('a command that is not loaded is broken; an offline bot puts everything und
 
 test('commands follow the services and features behind them', async (t) => {
   useHealth(t, { claude: false, memory_store: true, weather: true });
-  for (let index = 0; index < FAILURES_TO_BREAK; index += 1) recordServiceOutcome('market_data', false, NOW);
+  // A service is broken once its calls have kept failing for SUSTAINED_FAILURE_MS (serviceHealth.js).
+  for (let index = 0; index < FAILURES_TO_BREAK; index += 1) {
+    recordServiceOutcome('market_data', false, NOW - SUSTAINED_FAILURE_MS + Math.round((SUSTAINED_FAILURE_MS * index) / (FAILURES_TO_BREAK - 1)));
+  }
   const result = await snapshot({
     healthRows: [{ featureKey: 'number_chain', status: 'broken', updatedAt: new Date(NOW).toISOString() }],
   });
