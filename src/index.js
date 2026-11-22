@@ -1,3 +1,7 @@
+// Where the JSON stores are kept, before any of them resolves its path: the folder the host launcher names on the
+// command line, otherwise this program folder's src/data (src/platform/retainedDataSource.js).
+require('./platform/retainedDataSource').configureRetainedDataSourceRootFromArgs(process.argv.slice(2));
+
 const testControlRuntimeController = require('./platform/testControlRuntimeBootstrap');
 
 if (process.env.XIAOJI_RUNTIME_MODE !== 'test-control') require('dotenv').config({ quiet: true });
@@ -135,11 +139,16 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent,
+    // Direct messages, so an extension can answer the owner there (src/events/messageCreate.js hands a direct message
+    // to the extensions only; chat and the server features never see one).
+    GatewayIntentBits.DirectMessages,
   ],
-  // Without this, discord.js emits no guildMemberRemove for a member that is not in its cache (most
+  // GuildMember: without it, discord.js emits no guildMemberRemove for a member that is not in its cache (most
   // members of a larger server, who joined before this process started). The member arrives partial:
   // no join time, and a nickname only when it was cached (src/events/guildMemberRemove.js).
-  partials: [Partials.GuildMember],
+  // Channel: a direct message channel is never cached at start, and without this partial discord.js drops every
+  // direct message instead of emitting messageCreate for it.
+  partials: [Partials.GuildMember, Partials.Channel],
 });
 client.testControlPolicy = testControlPolicy;
 if (testControlPolicy) {

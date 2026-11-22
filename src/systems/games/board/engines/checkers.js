@@ -6,6 +6,7 @@ const {
   CAMP_ASSIGNMENTS,
   CAMP_BY_ID,
   CAMPS,
+  LABEL_BY_POINT_ID,
   OPPOSITE_CAMP,
   POINT_BY_ID,
   pointId,
@@ -267,7 +268,7 @@ function getPublicView(state) {
       kind: 'graph',
       width: 12,
       height: 14,
-      points: BOARD_POINTS.map(({ id, x, y }) => ({ id, x, y })),
+      points: BOARD_POINTS.map(({ id, x, y }) => ({ id, x, y, label: LABEL_BY_POINT_ID.get(id) })),
       pieces: state.pieces.map((piece) => ({
         id: piece.id,
         ownerId: piece.ownerId,
@@ -276,7 +277,8 @@ function getPublicView(state) {
       })),
       coordinateSystem: {
         format: 'q{q}r{r}',
-        description: 'Point IDs use axial hex coordinates: q increases right and r increases down-right in the rendered star.',
+        description: 'Point IDs use axial hex coordinates: q increases right and r increases down-right in the rendered star. ' +
+          'Each point also has a label players read and type: a row letter from the top (A-Q) and its place in the row from the left.',
       },
       camps: CAMPS.map((camp) => ({ id: camp.id, label: camp.label, pointIds: [...camp.pointIds] })),
     },
@@ -286,7 +288,7 @@ function getPublicView(state) {
       ? [{ type: 'game-over', text: '本局跳棋已結束。' }]
       : [
         { type: 'turn', text: `輪到 ${state.turn.playerId} 行棋。` },
-        { type: 'move-format', text: '移動請提交 pointId 路徑；一步為兩點，連跳必須逐段列出。' },
+        { type: 'move-format', text: '移動請依序輸入點位（例如 E5 F5）；一步為兩點，連跳必須逐段列出。' },
       ],
     outcome,
   };

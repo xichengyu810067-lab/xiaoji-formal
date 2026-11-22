@@ -53,6 +53,11 @@ module.exports = {
       logger.error('private message hook failed', error);
     }
 
+    // A direct message goes to the extensions above and nowhere else: the client receives them (the DirectMessages
+    // intent and Channel partials in src/index.js) only so an extension can answer the owner there. Chat, /student,
+    // the server features and channel memory stay server-only, so a stranger's direct message never reaches the model.
+    if (!message.guildId) return;
+
     // An answer in a running /student round (student.js); every other message goes on.
     try {
       if ((!message.client.testControlPolicy || message.client.testControlPolicy.allowsMessageFeature('conversation')) &&

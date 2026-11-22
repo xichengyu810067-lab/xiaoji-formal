@@ -38,7 +38,7 @@ const REQUIRED_BOT_PERMISSIONS = Object.freeze([
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 const RULES_TEXT = [
-  `小吉會把報名的人隨機分組（每組 4～6 人），每組開一個討論串。`,
+  `小吉會把報名的人隨機分組（大多是每組 4～6 人；只有 2～3 人報名時就分成一組，多出 1 人時那位這輪不分組），每組開一個討論串。`,
   `分組隔天起，每天輪一位成員：輪到的人用 \`/spark-relay tasks\` 領 ${rules.MIN_TASKS}～${rules.MAX_TASKS} 件小任務（用自己報名時填的主題出題），`,
   `再用 \`/spark-relay submit\` 交文字或圖片給小吉驗收（每件每天最多送驗 ${rules.CHECKS_PER_TASK_PER_DAY} 次）。`,
   `當天太忙的話，輪值日之後還有 ${rules.GRACE_DAYS} 天可以補做。`,

@@ -249,3 +249,29 @@ test('指令的 autocomplete 已經回應過才失敗時，不再補空清單', 
   assert.equal(respondCalls, 0);
   assert.equal(logs.errors.length, 1);
 });
+
+test('指令失敗後補送的失敗通知遇到互動已過期（10062）時被吞掉，只記錄代碼，不變成未捕捉的例外', async () => {
+  const interaction = {
+    client: { commands: new Map([['leaderboard', { execute: async () => { throw new Error('board failed'); } }]]) },
+    guildId: APPROVED_GUILD,
+    channelId: 'room',
+    user: { id: 'stranger' },
+    commandName: 'leaderboard',
+    options: { getSubcommand: () => null },
+    replied: false,
+    deferred: false,
+    isAutocomplete: () => false,
+    isButton: () => false,
+    isModalSubmit: () => false,
+    isStringSelectMenu: () => false,
+    isChatInputCommand: () => true,
+    reply: async () => { throw expiredInteraction(); },
+  };
+
+  const logs = await captureLogs(() => assert.doesNotReject(() => interactionCreate.execute(interaction)));
+
+  assert.ok(logs.errors.some(({ message }) => message === '/leaderboard failed'), JSON.stringify(logs.errors));
+  assert.ok(logs.warnings.some((message) => message.includes('/leaderboard 失敗通知無法送出') && message.includes('code=10062')),
+    JSON.stringify(logs.warnings));
+  assert.equal(logs.warnings.some((message) => message.includes('token detail')), false, 'only the code is logged');
+});

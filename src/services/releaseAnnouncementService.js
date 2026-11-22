@@ -7,6 +7,8 @@ const {
   parseStableSemverTag,
 } = require('../platform/linkPolicy');
 const { cachedBotMember, resolveBotMember } = require('../utils/botMember');
+const logger = require('../utils/logger');
+const { isBotOwner } = require('../utils/ownerOnly');
 const { withCoinDatabase, withCoinTransaction } = require('../systems/economy/storage/coinDatabase');
 const {
   getGuildFeatureSetting,
@@ -382,6 +384,126 @@ async function markDeliveryInterrupted(delivery, now = new Date()) {
   ]));
 }
 
+// A delivery that keeps the feature unhealthy: a dead letter, or one still queued after a failed attempt. Only
+// deliveries of releases from the baseline on count; what an earlier version left behind does not. A delivered
+// row is never one, whatever note it carries (a dead letter the Owner confirmed keeps one, see below).
+function countUnhealthyBacklog(api) {
+  return Number(api.get(`SELECT COUNT(*) AS count
+    FROM release_announcement_deliveries AS delivery
+    JOIN github_releases AS release ON release.release_id = delivery.release_id
+    JOIN release_announcement_state AS state ON state.repository = release.repository
+    WHERE (release.published_at > state.baseline_published_at OR
+      (release.published_at = state.baseline_published_at AND
+        (length(release.release_id) > length(state.baseline_release_id) OR
+          (length(release.release_id) = length(state.baseline_release_id) AND release.release_id >= state.baseline_release_id))))
+      AND (delivery.status = 'dead_letter' OR
+        (delivery.status IN ('pending', 'processing') AND delivery.last_error IS NOT NULL))`).count);
+}
+
+// A dead letter is a delivery the bot cannot settle by itself: Discord may or may not have shown the message
+// (SEND_RESULT_UNKNOWN, IN_FLIGHT_RESULT_UNKNOWN), or it failed MAX_DELIVERY_ATTEMPTS times. It is never sent
+// again on its own, because a second send could post the announcement twice. Only the Owner settles it, after
+// looking at the guild's channel, in one of two ways:
+//   - delivered: the announcement is there. The row becomes delivered. delivered_at stays NULL, because when it
+//     really arrived is not known, and last_error keeps OWNER_CONFIRMED_DELIVERED, so the row still shows it was
+//     settled by hand.
+//   - abandoned: it is not there and is not to be sent late. The row becomes suppressed with OWNER_ABANDONED,
+//     which persistReleasesAndDeliveries never queues again (it only requeues GUILD_UNAVAILABLE and
+//     DESTINATION_NOT_CONFIGURED).
+// Nothing is deleted, only a row that is still a dead letter changes, and the feature's health is worked out
+// again at once instead of at the next poll.
+const DEAD_LETTER_RESOLUTIONS = Object.freeze({
+  delivered: Object.freeze({ status: 'delivered', note: 'OWNER_CONFIRMED_DELIVERED' }),
+  abandoned: Object.freeze({ status: 'suppressed', note: 'OWNER_ABANDONED' }),
+});
+const MAX_DEAD_LETTER_LIST = 25;
+const RELEASE_ID_PATTERN = /^\d{1,30}$/;
+const GUILD_ID_PATTERN = /^\d{17,20}$/;
+
+async function listDeadLetterDeliveries({ limit = MAX_DEAD_LETTER_LIST } = {}) {
+  const bounded = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, MAX_DEAD_LETTER_LIST) : MAX_DEAD_LETTER_LIST;
+  return withCoinDatabase((api) => {
+    const total = Number(api.get(`SELECT COUNT(*) AS count FROM release_announcement_deliveries
+      WHERE status = 'dead_letter'`).count);
+    const rows = api.all(`SELECT delivery.release_id, delivery.guild_id, delivery.last_error, delivery.attempt_count,
+        delivery.updated_at, release.tag_name, release.published_at
+      FROM release_announcement_deliveries AS delivery
+      JOIN github_releases AS release ON release.release_id = delivery.release_id
+      WHERE delivery.status = 'dead_letter'
+      ORDER BY release.published_at, length(release.release_id), release.release_id, delivery.guild_id
+      LIMIT ?`, [bounded]);
+    return {
+      total,
+      deliveries: rows.map((row) => ({
+        releaseId: String(row.release_id),
+        guildId: String(row.guild_id),
+        tagName: row.tag_name,
+        publishedAt: row.published_at,
+        reason: row.last_error || null,
+        attempts: Number(row.attempt_count),
+        updatedAt: row.updated_at,
+      })),
+    };
+  });
+}
+
+async function refreshReleaseAnnouncementHealth({ healthReporter = setFeatureHealth, now = new Date() } = {}) {
+  const backlog = await withCoinDatabase((api) => countUnhealthyBacklog(api));
+  await healthReporter(FEATURE_KEY, backlog > 0 ? 'broken' : 'normal', {
+    detail: backlog > 0 ? 'delivery_backlog' : null,
+    now,
+  });
+  return { backlog };
+}
+
+async function resolveDeadLetterDelivery({
+  releaseId, guildId, resolution, actorUserId, now = new Date(), healthReporter = setFeatureHealth,
+} = {}) {
+  if (!isBotOwner(actorUserId)) {
+    throw new ReleaseAnnouncementError('OWNER_ONLY', 'Only the bot owner can settle a release delivery.');
+  }
+  const normalizedReleaseId = String(releaseId ?? '').trim();
+  const normalizedGuildId = String(guildId ?? '').trim();
+  if (!RELEASE_ID_PATTERN.test(normalizedReleaseId) || !GUILD_ID_PATTERN.test(normalizedGuildId)) {
+    throw new ReleaseAnnouncementError('INVALID_ARGUMENT', 'Release ID or guild ID is invalid.');
+  }
+  const target = DEAD_LETTER_RESOLUTIONS[resolution];
+  if (!target) throw new ReleaseAnnouncementError('INVALID_ARGUMENT', 'Resolution is invalid.');
+  const timestamp = new Date(now).toISOString();
+  const settled = await withCoinTransaction((api) => {
+    const row = api.get(`SELECT delivery.status, delivery.last_error, release.tag_name
+      FROM release_announcement_deliveries AS delivery
+      JOIN github_releases AS release ON release.release_id = delivery.release_id
+      WHERE delivery.release_id = ? AND delivery.guild_id = ?`, [normalizedReleaseId, normalizedGuildId]);
+    if (!row) throw new ReleaseAnnouncementError('NOT_FOUND', 'Release delivery was not found.');
+    if (row.status !== 'dead_letter') {
+      const error = new ReleaseAnnouncementError('NOT_DEAD_LETTER', 'Release delivery is not a dead letter.');
+      error.status = row.status;
+      throw error;
+    }
+    api.run(`UPDATE release_announcement_deliveries
+      SET status = ?, last_error = ?, lease_owner = NULL, lease_until = NULL, updated_at = ?
+      WHERE release_id = ? AND guild_id = ? AND status = 'dead_letter'`,
+    [target.status, target.note, timestamp, normalizedReleaseId, normalizedGuildId]);
+    if (Number(api.get('SELECT changes() AS count').count) !== 1) {
+      throw new ReleaseAnnouncementError('NOT_DEAD_LETTER', 'Release delivery is not a dead letter.');
+    }
+    return {
+      releaseId: normalizedReleaseId,
+      guildId: normalizedGuildId,
+      tagName: row.tag_name,
+      previousReason: row.last_error || null,
+      status: target.status,
+      note: target.note,
+    };
+  });
+  logger.info(`[RELEASE_DELIVERY] Owner settled release ${settled.releaseId} for guild ${settled.guildId}: ${settled.note}`);
+  let backlog = null;
+  try { ({ backlog } = await refreshReleaseAnnouncementHealth({ healthReporter, now })); }
+  catch (_error) { /* The settlement is recorded; the next poll works the health out again. */ }
+  return { ...settled, backlog };
+}
+
 function assertTickActive(options) {
   if (typeof options.shouldContinue === 'function' && !options.shouldContinue()) {
     throw new ReleaseAnnouncementError('SCHEDULER_STOPPED', 'Release announcement scheduler stopped.');
@@ -518,15 +640,7 @@ async function processReleaseAnnouncementTick(client, options = {}) {
         }
       }
     }
-    const unhealthyBacklog = await withCoinDatabase((api) => Number(api.get(`SELECT COUNT(*) AS count
-      FROM release_announcement_deliveries AS delivery
-      JOIN github_releases AS release ON release.release_id = delivery.release_id
-      JOIN release_announcement_state AS state ON state.repository = release.repository
-      WHERE (release.published_at > state.baseline_published_at OR
-        (release.published_at = state.baseline_published_at AND
-          (length(release.release_id) > length(state.baseline_release_id) OR
-            (length(release.release_id) = length(state.baseline_release_id) AND release.release_id >= state.baseline_release_id))))
-        AND (delivery.status = 'dead_letter' OR (delivery.status <> 'suppressed' AND delivery.last_error IS NOT NULL))`).count));
+    const unhealthyBacklog = await withCoinDatabase((api) => countUnhealthyBacklog(api));
     const unhealthy = failed > 0 || unhealthyBacklog > 0;
     await healthReporter(FEATURE_KEY, unhealthy ? 'broken' : 'normal', {
       detail: failed > 0 ? 'delivery_failed' : unhealthyBacklog > 0 ? 'delivery_backlog' : null,
@@ -584,8 +698,10 @@ async function stopReleaseAnnouncementScheduler() {
 
 module.exports = {
   DEFAULT_POLL_INTERVAL_MS,
+  DEAD_LETTER_RESOLUTIONS,
   DEFAULT_REPOSITORY,
   FEATURE_KEY,
+  MAX_DEAD_LETTER_LIST,
   MAX_DELIVERIES_PER_POLL,
   MAX_PAGES,
   RELEASES_PER_PAGE,
@@ -593,6 +709,7 @@ module.exports = {
   buildReleaseMessage,
   claimNextDelivery,
   fetchGithubReleases,
+  listDeadLetterDeliveries,
   normalizeRelease,
   parsePollInterval,
   parseRepository,
@@ -600,6 +717,8 @@ module.exports = {
   persistReleasesAndDeliveries,
   processReleaseAnnouncementTick,
   readReleaseAnnouncementConfig,
+  refreshReleaseAnnouncementHealth,
+  resolveDeadLetterDelivery,
   selectReleaseChannel,
   startReleaseAnnouncementScheduler,
   stopReleaseAnnouncementScheduler,

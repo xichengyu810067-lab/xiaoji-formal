@@ -117,10 +117,10 @@ test('/daily answers in public, names the member, and does not ping them', async
 test('/leaderboard coins and assets boards name members and ping nobody', async () => {
   const coins = interactionFor('leaderboard', { type: 'coins' });
   await leaderboardCommand.execute(coins.interaction);
-  const coinReply = coins.calls.find(({ name }) => name === 'reply').payload;
-  assert.ok(coinReply.content.includes(`<@${MEMBER_ID}>`) && coinReply.content.includes(`<@${OTHER_MEMBER_ID}>`));
-  assert.deepEqual(coinReply.allowedMentions, NO_PINGS);
-  assertNobodyPinged(await delivered(coinReply), [MEMBER_ID, OTHER_MEMBER_ID]);
+  const coinEdit = coins.calls.find(({ name }) => name === 'editReply').payload;
+  assert.ok(coinEdit.content.includes(`<@${MEMBER_ID}>`) && coinEdit.content.includes(`<@${OTHER_MEMBER_ID}>`));
+  assert.deepEqual(coinEdit.allowedMentions, NO_PINGS);
+  assertNobodyPinged(await delivered(coinEdit, { asEdit: true }), [MEMBER_ID, OTHER_MEMBER_ID]);
 
   const assets = interactionFor('leaderboard', { type: 'assets' });
   await leaderboardCommand.execute(assets.interaction);

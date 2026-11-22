@@ -938,6 +938,8 @@ async function handleMentionMessage(message, {
           ingressDecision,
           message,
           rememberedPreferences: memory.preferences,
+          // The name the member set for 小吉 to call them by; without one the display name is used.
+          preferredName: memory.enabled ? memory.preferredName || null : null,
           memoryEnabled: memory.enabled,
           channelMemory,
         });

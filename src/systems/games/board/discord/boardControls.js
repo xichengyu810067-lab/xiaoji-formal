@@ -1,6 +1,7 @@
 const { BoardCoreError, cloneJson } = require('../core/contracts');
 const { createGridMoveParser, getModalValue, parseGridCoordinate } = require('./boardInteractionAdapter');
 const { MAX_INPUT_LENGTH: MAX_JUDGE_INPUT_LENGTH } = require('../turtleSoup/retriever');
+const { POINT_ID_BY_LABEL } = require('../engines/checkers/board');
 const { buildActiveControls, buildActiveEmbedText, buildLobbyView } = require('../werewolf/werewolfPresentation');
 
 const GAME_CHOICES = Object.freeze([
@@ -74,7 +75,7 @@ const MODAL_DEFINITIONS = Object.freeze({
     'propose-dead': Object.freeze({ title: '標記完整死子集合', fields: [Object.freeze({ id: 'positions', label: '座標以空白或逗號分隔', placeholder: 'A1 B2 C3', style: 'paragraph', maxLength: 500 })] }),
   }),
   checkers: Object.freeze({
-    move: Object.freeze({ title: '六角星跳棋移動', fields: [Object.freeze({ id: 'path', label: '點位路徑（依序以空白分隔）', placeholder: 'q0r0 q1r0 q3r0', style: 'paragraph', maxLength: 500 })] }),
+    move: Object.freeze({ title: '六角星跳棋移動', fields: [Object.freeze({ id: 'path', label: '點位路徑（起點到終點，連跳依序列出）', placeholder: 'E5 F5', style: 'paragraph', maxLength: 500 })] }),
   }),
   xiangqi: Object.freeze({
     move: Object.freeze({ title: '象棋走棋', fields: [
@@ -114,11 +115,21 @@ function splitCoordinates(value) {
   return String(value || '').trim().split(/[\s,，;；]+/u).filter(Boolean);
 }
 
+// A path is typed with the point names printed on the board image (E5, case does not matter); the engine's axial
+// q…r… IDs are accepted too. Either way the engine receives its own point IDs.
+function parseCheckersPoint(value) {
+  if (/^q-?\d+r-?\d+$/u.test(value)) return value;
+  const label = value.toUpperCase();
+  if (/^[A-Q]\d{1,2}$/u.test(label) && POINT_ID_BY_LABEL.has(label)) return POINT_ID_BY_LABEL.get(label);
+  throw new BoardCoreError('INVALID_COORDINATE', `棋盤上沒有 ${value.slice(0, 12)} 這個點位，請照棋盤圖上的名稱輸入，例如 E5。`);
+}
+
 function parseCheckersPath(value) {
-  const points = splitCoordinates(value);
-  if (points.length < 2 || points.some((point) => !/^q-?\d+r-?\d+$/u.test(point))) {
-    throw new BoardCoreError('INVALID_COORDINATE', '跳棋路徑請輸入至少兩個 q…r… 點位，並依序以空白分隔。');
+  const entries = splitCoordinates(value);
+  if (entries.length < 2) {
+    throw new BoardCoreError('INVALID_COORDINATE', '跳棋路徑請輸入至少兩個點位（例如 E5 F5），並依序以空白分隔。');
   }
+  const points = entries.map(parseCheckersPoint);
   if (new Set(points).size !== points.length) {
     throw new BoardCoreError('INVALID_COORDINATE', '跳棋路徑不可重複經過同一點位。');
   }

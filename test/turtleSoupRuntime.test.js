@@ -588,9 +588,14 @@ test('caller-supplied readiness never claims ready without a provider or carries
 });
 
 test('judge readiness is recorded at startup and the startup line holds codes and counts only', (t) => {
-  const saved = { GROQ_API_KEY: process.env.GROQ_API_KEY, OPENAI_API_KEY: process.env.OPENAI_API_KEY };
+  const saved = {
+    GROQ_API_KEY: process.env.GROQ_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+  };
   delete process.env.GROQ_API_KEY;
   delete process.env.OPENAI_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
   t.after(() => {
     for (const [name, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[name];

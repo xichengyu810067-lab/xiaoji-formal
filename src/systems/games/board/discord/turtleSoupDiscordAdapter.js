@@ -48,7 +48,8 @@ function safeJudgeFailure(error) {
 function judgmentReply(committed) {
   const event = committed?.events?.find((entry) => entry?.type === 'turtle-soup-judged');
   const verdict = event?.verdict;
-  if (verdict === '答對') return '答對了！可以使用私密揭曉查看湯底。';
+  if (verdict === '答對') return '答對了！按「查看湯底」可以私下看完整湯底。';
+  if (verdict === '未答對') return '未答對，再想想看！';
   if (['是', '否', '無關'].includes(verdict)) return verdict;
   return '目前無法判定，棋局已保留。';
 }

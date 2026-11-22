@@ -236,8 +236,12 @@ async function buildPublicStatusSnapshot(client, { now = new Date(), healthReade
 
 // Watches the public feature statuses and reports a change (a feature that became broken or under maintenance, or
 // recovered) to onChange([{ key, name, from, to }]). The first check only records the starting point, so a restart
-// does not report every feature. A new status must be seen on two checks in a row before it is reported, so a single
-// slow call does not send a notice and its recovery a minute later.
+// does not report every feature. A new status must hold on several checks in a row before it is reported: a feature
+// that gets worse on 3 (about 3 minutes, one check a minute), a recovery on 2. A status that goes back before then is
+// never reported, so a short trouble that is over before anyone is told sends neither a notice nor its recovery.
+const CHECKS_TO_REPORT_WORSE = 3;
+const CHECKS_TO_REPORT_RECOVERY = 2;
+
 function createFeatureStatusWatcher({ client, onChange, build = buildPublicStatusSnapshot } = {}) {
   let reported = null;
   const pending = new Map();
@@ -255,8 +259,10 @@ function createFeatureStatusWatcher({ client, onChange, build = buildPublicStatu
         pending.delete(key);
         continue;
       }
-      if (pending.get(key) !== feature.status) {
-        pending.set(key, feature.status);
+      const seen = pending.get(key)?.status === feature.status ? pending.get(key).checks + 1 : 1;
+      const needed = feature.status === 'normal' ? CHECKS_TO_REPORT_RECOVERY : CHECKS_TO_REPORT_WORSE;
+      if (seen < needed) {
+        pending.set(key, { status: feature.status, checks: seen });
         continue;
       }
       pending.delete(key);
@@ -298,6 +304,8 @@ async function recordPublicInteraction(now = new Date(), { recorder = recordFeat
 }
 
 module.exports = {
+  CHECKS_TO_REPORT_RECOVERY,
+  CHECKS_TO_REPORT_WORSE,
   createFeatureStatusWatcher,
   PUBLIC_FEATURES,
   PUBLIC_STATUS_SCHEMA_VERSION,

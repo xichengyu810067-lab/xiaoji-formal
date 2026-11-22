@@ -295,6 +295,6 @@ test('state is JSON-restartable, action application does not mutate input, and p
   assert.equal(view.turn.playerId, 'player-2');
   assert.equal(view.board.pieces.length, 20);
   assert.equal(view.board.pieces.find((piece) => piece.id === 's0-0').position.pointId, 'q2r0');
-  assert.match(view.prompts[1].text, /pointId/);
+  assert.match(view.prompts[1].text, /例如 E5 F5/u);
   assert.equal(view.outcome, null);
 });

@@ -643,7 +643,8 @@ test('src/index.js keeps GuildMember partials on the client', () => {
   assert.match(INDEX_SOURCE, /^\s+Partials,$/mu, 'Partials is taken from discord.js');
   const client = INDEX_SOURCE.slice(INDEX_SOURCE.indexOf('new Client({'),
     INDEX_SOURCE.indexOf('client.testControlPolicy = testControlPolicy;'));
-  assert.match(client, /partials: \[Partials\.GuildMember\],/u);
+  // Other partials may sit beside it (Channel, for direct messages: test/directMessageRouting.test.js).
+  assert.match(client, /partials: \[[^\]]*\bPartials\.GuildMember\b[^\]]*\],/u);
   assert.match(client, /GatewayIntentBits\.GuildMembers/u);
 });
 

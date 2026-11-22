@@ -148,7 +148,9 @@ test('the coin board pages ten rows at a time and every rank is the row\'s real 
     [3, [21, 22, 23, 24, 25]],
   ]) {
     const { reply, calls } = await runBoard({ page });
-    assert.deepEqual(interactionCalls(calls), ['reply'], `page ${page} is one plain reply, never deferred`);
+    assert.deepEqual(interactionCalls(calls), ['deferReply', 'editReply'], `page ${page} is acknowledged, then edited`);
+    assert.equal(calls[0].name, 'deferReply', `page ${page}: nothing is looked up before the command is acknowledged`);
+    assert.equal(calls[0].options, undefined, `page ${page}: the acknowledgement is public, like the board`);
     assert.equal(reply.ephemeral, undefined, `page ${page} is public`);
     assert.deepEqual(reply.allowedMentions, NO_PINGS, `page ${page} cannot ping`);
     const lines = boardLines(reply);
@@ -171,7 +173,14 @@ test('the board without a type is the coin board, and the coin board looks up on
   const explicit = await runBoard({ type: 'coins' });
   assert.deepEqual(implicit.reply, explicit.reply);
   assert.deepEqual(implicit.lookedUp, Array.from({ length: 10 }, (_, index) => userIdOf(index + 1)));
-  assert.deepEqual(interactionCalls(implicit.calls), ['reply'], 'the coin board is still one plain reply');
+  assert.deepEqual(interactionCalls(implicit.calls), ['deferReply', 'editReply'],
+    'the coin board is acknowledged before its ten lookups, which can outlast three seconds on a cold cache');
+});
+
+test('a coin page of only bots is acknowledged publicly, so its notice is public too', async () => {
+  const { reply, calls } = await runBoard({ botIds: Array.from({ length: 10 }, (_, index) => userIdOf(index + 1)) });
+  assert.deepEqual(reply, { content: '目前還沒有吉幣排行榜資料。', allowedMentions: NO_PINGS });
+  assert.deepEqual(interactionCalls(calls), ['deferReply', 'editReply']);
 });
 
 test('the assets board lists the top 25 people, leaves bots out and cannot ping', async () => {
